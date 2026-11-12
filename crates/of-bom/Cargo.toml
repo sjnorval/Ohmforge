@@ -1,0 +1,16 @@
+[package]
+name = "of-bom"
+description = "Bill of materials: aggregation, costing and CSV export."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+of-parts.workspace = true

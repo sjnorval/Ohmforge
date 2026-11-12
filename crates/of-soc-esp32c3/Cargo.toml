@@ -1,0 +1,17 @@
+[package]
+name = "of-soc-esp32c3"
+description = "ESP32-C3 SoC: memory map, peripherals, ROM hooks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+of-core.workspace = true
+of-cpu-riscv.workspace = true

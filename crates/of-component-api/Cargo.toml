@@ -1,0 +1,16 @@
+[package]
+name = "of-component-api"
+description = "Stable component and plugin API: stamps, pins, events, faults."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+of-core.workspace = true

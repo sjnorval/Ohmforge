@@ -1,0 +1,16 @@
+[package]
+name = "of-cpu-xtensa"
+description = "Xtensa LX6/LX7 CPU core for ESP32 and ESP32-S3 (phase 4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+of-core.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "of-cli"
+description = "Headless command-line runner for scripting and CI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+of-core.workspace = true
+of-analog.workspace = true
+of-parts.workspace = true
+of-bom.workspace = true
+
+[[bin]]
+name = "ohmforge"
+path = "src/main.rs"

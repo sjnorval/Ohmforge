@@ -1,0 +1,58 @@
+# Ohmforge workspace. "Ohmforge" and the "of-" crate prefix are placeholder
+# names; see README.md ("Renaming the project") before the first release.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://example.invalid/ohmforge" # placeholder, no remote yet
+authors = ["Stefan Norval and Ohmforge contributors"]
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+of-core = { path = "crates/of-core" }
+of-netlist = { path = "crates/of-netlist" }
+of-analog = { path = "crates/of-analog" }
+of-digital = { path = "crates/of-digital" }
+of-component-api = { path = "crates/of-component-api" }
+of-components = { path = "crates/of-components" }
+of-parts = { path = "crates/of-parts" }
+of-cpu-riscv = { path = "crates/of-cpu-riscv" }
+of-cpu-xtensa = { path = "crates/of-cpu-xtensa" }
+of-cpu-qemu-ipc = { path = "crates/of-cpu-qemu-ipc" }
+of-soc-esp32c3 = { path = "crates/of-soc-esp32c3" }
+of-soc-esp32 = { path = "crates/of-soc-esp32" }
+of-firmware = { path = "crates/of-firmware" }
+of-plugin-wasm = { path = "crates/of-plugin-wasm" }
+of-instruments = { path = "crates/of-instruments" }
+of-bom = { path = "crates/of-bom" }
+of-kicad = { path = "crates/of-kicad" }
+of-gdb = { path = "crates/of-gdb" }
+of-ui = { path = "crates/of-ui" }
+
+# Third-party (all MIT and/or Apache-2.0; checked by deny.toml)
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+thiserror = "2"
+# Heavy GUI stack: only pulled in by of-app with `--features gui`.
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev.package."*"]
+opt-level = 2   # keep dependencies fast in debug builds
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

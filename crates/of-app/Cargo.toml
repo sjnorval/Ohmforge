@@ -1,0 +1,23 @@
+[package]
+name = "of-app"
+description = "Desktop application (eframe/egui behind the gui feature)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+of-core.workspace = true
+of-ui.workspace = true
+eframe = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enables the real desktop window. Off by default to keep builds light.
+gui = ["dep:eframe"]
