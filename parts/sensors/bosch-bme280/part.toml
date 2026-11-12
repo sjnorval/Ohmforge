@@ -1,0 +1,27 @@
+# Example part. Schema: crates/of-parts/src/lib.rs
+[part]
+id = "bosch.bme280"
+name = "BME280 temperature, humidity, pressure sensor"
+category = "sensor/environmental"
+datasheet = "https://www.bosch-sensortec.com/products/environmental-sensors/humidity-sensors-bme280/"
+model = "rust:bme280"          # or "wasm:bme280.wasm" or "spice:model.lib"
+verification = "datasheet"      # datasheet | bench-measured | community
+
+[electrical]
+vdd = { min = 1.71, typ = 3.3, max = 3.6, unit = "V" }
+idd_active = { typ = 3.6e-6, unit = "A", note = "1 Hz humidity + temperature" }
+i2c_addresses = [0x76, 0x77]
+
+[[variant]]                     # what you actually buy
+label = "GY-BME280 breakout, 3.3 V"
+mpn = "BME280"
+manufacturer = "Bosch Sensortec"
+footprint = "Module:GY-BME280"
+offers = [
+  { supplier = "lcsc", sku = "C92489" },
+  { supplier = "mouser", sku = "262-BME280" },
+]
+
+[license]
+data = "CC-BY-4.0"
+artwork = "CC-BY-4.0"
