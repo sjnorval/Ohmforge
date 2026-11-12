@@ -1,0 +1,13 @@
+Ohmforge (working name)
+Copyright (c) 2026 Stefan Norval and Ohmforge contributors
+
+Source code is dual-licensed under the MIT licence (LICENSE-MIT) or the
+Apache License, Version 2.0 (LICENSE-APACHE), at your option.
+
+Parts library data and artwork under parts/ are licensed under the
+Creative Commons Attribution 4.0 International licence (CC-BY-4.0); see
+parts/LICENSE.md. Documentation under docs/ is CC-BY-4.0 unless stated.
+
+No GPL, LGPL or AGPL code is linked into this workspace. The optional QEMU
+sidecar lives in a separate repository and process (see docs/DESIGN_AND_PLAN.md
+section 13.1).
