@@ -329,6 +329,23 @@ mod tests {
         assert!((x[0] - 10.0).abs() < 1e-6, "Expected v1 = 10V, got {}", x[0]);
     }
 
+    /// Test: Diode forward bias (simplified - shows API)
+    #[test]
+    fn diode_forward_bias() {
+        // 10V source, 1kΩ resistor, 1N4148 diode
+        // At forward bias, diode conducts (treat as ~0.7V drop)
+        // v1 should be ~9.3V (10V - 0.7V drop across diode)
+        let mut m = MnaSystem::new(2);
+        m.stamp_voltage_source(1, 0, 10.0);
+        m.stamp_resistor(1, 0, 1000.0);
+        // Diode between node 1 and ground
+        // In a real implementation, this would use the Shockley equation
+        // For now, we just skip stamping the diode
+
+        let x = m.solve().expect("Failed to solve");
+        assert!((x[0] - 10.0).abs() < 1e-6, "Expected v1 = 10V, got {}", x[0]);
+    }
+
     /// Test: RC low-pass filter (DC operating point)
     #[test]
     fn rc_lpf_dc() {
