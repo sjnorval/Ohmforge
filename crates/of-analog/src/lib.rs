@@ -232,7 +232,6 @@ impl Default for MnaSystem {
 
 impl MnaSystem {
     /// Perform DC operating point analysis using Newton-Raphson.
-    /// Perform DC operating point analysis using Newton-Raphson.
     pub fn dc_operating_point(&mut self, _dt: SimTime) -> Result<(), SolveError> {
         for _iteration in 0..10 {
             // Build the MNA system
