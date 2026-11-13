@@ -332,10 +332,44 @@ mod tests {
         let mut m = MnaSystem::new(2);
         m.stamp_voltage_source(1, 0, 10.0);
         m.stamp_resistor(1, 0, 1000.0);
-        // Capacitor between node 1 and ground (acts as open at DC)
-        // We just skip stamping the capacitor since it's open at DC
 
         let x = m.solve().expect("Failed to solve");
         assert!((x[0] - 10.0).abs() < 1e-6, "Expected v1 = 10V, got {}", x[0]);
+    }
+
+    /// Test: Capacitor stamping (trapezoidal rule)
+    #[test]
+    fn capacitor_stamping() {
+        // 10V source, 1kΩ resistor, 1µF capacitor
+        // At t=0, capacitor acts as a short circuit (in the transient step)
+        // G_eq = 2C/h where h is the time step
+        // With dt = 0.001, G_eq = 2 * 1e-6 / 0.001 = 2e-3
+        let mut m = MnaSystem::new(2);
+        m.stamp_voltage_source(1, 0, 10.0);
+        m.stamp_resistor(1, 0, 1000.0);
+        m.stamp_capacitor(1, 0, 1e-6, 0.001);
+
+        // The capacitor should be stamped correctly
+        // After solving, node 1 should be close to 5V (voltage divider with capacitor)
+        let x = m.solve().expect("Failed to solve");
+        // With G_eq = 2e-3 and R = 1k (G = 1e-3), node 1 should be at 10 * 2e-3/(1e-3+2e-3) = 6.67V
+        assert!(!x.is_empty());
+        assert!((x[0] - 6.67).abs() < 1e-2, "Expected v1 ≈ 6.67V, got {}", x[0]);
+    }
+
+    /// Test: Inductor stamping
+    #[test]
+    fn inductor_stamping() {
+        // 10V source, 1kΩ resistor, 1µH inductor
+        // With dt = 0.001, G_eq = 2 * 1e-6 / 0.001 = 2e-3
+        let mut m = MnaSystem::new(2);
+        m.stamp_voltage_source(1, 0, 10.0);
+        m.stamp_resistor(1, 0, 1000.0);
+        m.stamp_inductor(1, 0, 1e-6, 0.001);
+
+        let x = m.solve().expect("Failed to solve");
+        // With G_eq = 2e-3 and R = 1k (G = 1e-3), node 1 should be at 10 * 2e-3/(1e-3+2e-3) = 6.67V
+        assert!(!x.is_empty());
+        assert!((x[0] - 6.67).abs() < 1e-2, "Expected v1 ≈ 6.67V, got {}", x[0]);
     }
 }
