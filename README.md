@@ -79,3 +79,8 @@ See `docs/DESIGN_AND_PLAN.md` for the full phased development plan.
 Code: MIT OR Apache-2.0, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)). Parts data and artwork: CC-BY-4.0 ([parts/LICENSE.md](parts/LICENSE.md)). See [NOTICE](NOTICE).
 
 Contributions are accepted under the Developer Certificate of Origin; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+
+## Development Status
+
+- **Phase 0 (Pre-alpha)**: MNA solver with dense matrix fallback, capacitor/inductor state tracking, transient analysis in progress
