@@ -1,6 +1,6 @@
 # Ohmforge
 
-> **Working name.** An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
+> An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
 
 **Status:** pre-alpha scaffold. Nothing simulates yet; the crates are compiling stubs that follow the plan in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md).
 
@@ -47,10 +47,6 @@ cargo test --workspace
 cargo run -p of-cli -- --version
 cargo run -p of-app --features gui   # desktop window (pulls in egui)
 ```
-
-## Renaming the project
-
-"Ohmforge" and the `of-` crate prefix are placeholders. To rename, replace the strings `ohmforge`, `Ohmforge`, `of-` and `of_` across the repo and rename the `crates/of-*` folders. `scripts/rename.ps1` does this in one go (review the diff before committing).
 
 ## Licence
 
