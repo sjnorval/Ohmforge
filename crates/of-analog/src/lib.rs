@@ -59,6 +59,10 @@ pub struct MnaSystem {
     b: Vec<f64>,
     /// The solution vector x (length n).
     x: Vec<f64>,
+    /// Capacitor state voltages (one per unknown node).
+    pub capacitor_voltages: Vec<f64>,
+    /// Inductor state currents (one per unknown node).
+    pub inductor_currents: Vec<f64>,
 }
 
 impl MnaSystem {
@@ -69,6 +73,8 @@ impl MnaSystem {
             a: vec![0.0; n * n],
             b: vec![0.0; n],
             x: vec![0.0; n],
+            capacitor_voltages: vec![0.0; n],
+            inductor_currents: vec![0.0; n],
         }
     }
 
