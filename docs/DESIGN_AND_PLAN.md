@@ -575,6 +575,33 @@ All checked on crates.io on 12 Nov 2026. Rust SPICE crates such as sindr, theven
 
 ---
 
+
+## Known Issues
+
+### Phase 0 (Pre-alpha) — Known limitations
+
+| Issue | Severity | Status |
+|---|---|---|
+| Analog solver is a dense stub (not sparse LU) | High | In progress |
+| No transient analysis yet (only DC operating point) | High | Starting P1 |
+| CPU cores are placeholders (no real ISA implementation) | High | Planned for P2 |
+| No firmware loading (ELF/DWARF) | High | Planned for P2 |
+| QEMU IPC bridge not connected | High | Planned for P3 |
+| No GUI instruments (scope, logic analyser) | High | Planned for P2 |
+| No BOM export (CSV/XLSX/KiCad/JLCPCB) | Medium | Planned for P3 |
+| No KiCad netlist export | Medium | Planned for P3 |
+| No web app (WASM) | Medium | Planned for P4 |
+
+### Technical debt
+
+- `of-analog` uses a dense matrix solver with partial pivoting. Replaces with sparse LU (faer) once Windows toolchain is fixed.
+- `of-netlist` is a stub; circuit graph is not fully implemented.
+- `of-components` only has a `Resistor` stub; other components are planned.
+- No part library beyond BME280; will add more sensors and components.
+
+### Items for next phases
+
+See the [Roadmap and MVP](#14-roadmap-and-mvp) section for the phased plan.
 ## 17. Sources
 
 - [Wokwi ESP32 simulation and peripheral table](https://docs.wokwi.com/guides/esp32) (docs.wokwi.com)

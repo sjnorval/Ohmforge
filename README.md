@@ -48,6 +48,32 @@ cargo run -p of-cli -- --version
 cargo run -p of-app --features gui   # desktop window (pulls in egui)
 ```
 
+
+
+## Known Issues
+
+### Phase 0 (Pre-alpha) — Known limitations
+
+| Issue | Severity | Status |
+|---|---|---|
+| Analog solver is a dense stub (not sparse LU) | High | In progress |
+| No transient analysis yet (only DC operating point) | High | Planned for P1 |
+| CPU cores are placeholders (no real ISA implementation) | High | Planned for P2 |
+| No firmware loading (ELF/DWARF) | High | Planned for P2 |
+| QEMU IPC bridge not connected | High | Planned for P3 |
+| No GUI instruments (scope, logic analyser) | High | Planned for P2 |
+| No BOM export (CSV/XLSX/KiCad/JLCPCB) | Medium | Planned for P3 |
+| No KiCad netlist export | Medium | Planned for P3 |
+| No web app (WASM) | Medium | Planned for P4 |
+
+### Technical debt
+
+- `of-analog` currently uses a dense matrix solver with partial pivoting. Replaces with sparse LU (faer) once Windows toolchain is fixed.
+- `of-netlist` is a stub; circuit graph is not fully implemented.
+- `of-components` only has a `Resistor` stub; other components are planned.
+- No part library beyond BME280; will add more sensors and components.
+
+See `docs/DESIGN_AND_PLAN.md` for the full phased development plan.
 ## Licence
 
 Code: MIT OR Apache-2.0, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)). Parts data and artwork: CC-BY-4.0 ([parts/LICENSE.md](parts/LICENSE.md)). See [NOTICE](NOTICE).
