@@ -288,7 +288,7 @@ mod tests {
     /// Test: Floating node is singular
     #[test]
     fn floating_node_is_singular() {
-        let m = MnaSystem::new(1);
+        let mut m = MnaSystem::new(1);
         m.stamp_resistor(1, 1, 1000.0);
         assert!(m.solve().is_err());
     }
