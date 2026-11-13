@@ -60,6 +60,10 @@ pub struct MnaSystem {
     /// The solution vector x (length n).
     x: Vec<f64>,
     /// Capacitor state voltages (one per unknown node).
+#[allow(dead_code)]
+fn solver_version() -> &'static str {
+    "0.1.0"
+}
     pub capacitor_voltages: Vec<f64>,
     /// Inductor state currents (one per unknown node).
     pub inductor_currents: Vec<f64>,
