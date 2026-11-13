@@ -84,6 +84,7 @@ impl MnaSystem {
     }
 
     /// Get the matrix entry at (row, col).
+    #[allow(dead_code)]
     fn a(&self, row: usize, col: usize) -> f64 {
         self.a[row * self.n + col]
     }
@@ -175,7 +176,7 @@ impl MnaSystem {
     }
 
     /// Stamp a voltage source between nodes `p` and `q` (0 = ground).
-    pub fn stamp_voltage_source(&mut self, p: usize, q: usize, voltage: f64) {
+    pub fn stamp_voltage_source(&mut self, _p: usize, _q: usize, _voltage: f64) {
         // In a full MNA implementation, this adds extra rows for the voltage
         // constraint and additional unknowns for the source current.
         // Simplified for now: just zero out the matrix entry
