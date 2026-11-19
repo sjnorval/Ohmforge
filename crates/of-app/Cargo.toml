@@ -13,11 +13,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-of-core.workspace = true
-of-ui.workspace = true
+of-ui = { workspace = true, optional = true }
 eframe = { workspace = true, optional = true }
 
 [features]
 default = []
 # Enables the real desktop window. Off by default to keep builds light.
-gui = ["dep:eframe"]
+gui = ["dep:eframe", "dep:of-ui", "of-ui/gui"]

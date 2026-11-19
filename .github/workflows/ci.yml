@@ -37,6 +37,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check -p of-app --features gui
+      - run: cargo clippy -p of-ui -p of-app --features of-ui/gui,of-app/gui --all-targets -- -D warnings
+      - run: cargo test -p of-ui --features gui
   riscv-tests:
     runs-on: ubuntu-latest
     steps:

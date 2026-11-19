@@ -42,8 +42,8 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |
-| `of-ui` | egui views (no GUI deps yet) | Empty |
-| `of-app` | Desktop binary; egui/eframe only with `--features gui` | Hello window |
+| `of-ui` | egui views and instrument panels; egui only with `--features gui` | ESP32-C3 blink demo (schematic, LED current trace, UART0) |
+| `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui blink demo |
 | `of-web` | WASM entry point | Empty |
 | `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD) |
 
@@ -122,7 +122,7 @@ bash firmware/esp32c3-timer-irq/build.sh
 cargo run -p of-cli -- --version
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv
-cargo run -p of-app --features gui      # opens the desktop window
+cargo run -p of-app --features gui      # desktop app with the ESP32-C3 LED blink demo (click Play)
 ```
 
 Run all of these before proposing a commit; they mirror `.github/workflows/ci.yml`. **Load the MSVC Build Tools environment first** (see section 9), otherwise linking fails.

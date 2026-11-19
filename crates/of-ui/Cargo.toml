@@ -1,6 +1,6 @@
 [package]
 name = "of-ui"
-description = "egui views: schematic, breadboard, instrument panels (no GUI deps yet)."
+description = "egui views and instrument panels."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,23 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-of-core.workspace = true
+of-core = { workspace = true, optional = true }
 of-instruments.workspace = true
 of-bom.workspace = true
+egui = { workspace = true, optional = true }
+of-analog = { workspace = true, optional = true }
+of-components = { workspace = true, optional = true }
+of-firmware = { workspace = true, optional = true }
+of-parts = { workspace = true, optional = true }
+of-soc-esp32c3 = { workspace = true, optional = true }
+
+[features]
+gui = [
+    "dep:egui",
+    "dep:of-analog",
+    "dep:of-components",
+    "dep:of-core",
+    "dep:of-firmware",
+    "dep:of-parts",
+    "dep:of-soc-esp32c3",
+]
