@@ -12,6 +12,11 @@
 //!   `roff` (open), by the placement parameter `closed` (default open);
 //!   [`BuiltBoard::switch_param`] gives the run-time change that presses
 //!   or releases it;
+//! * a `potentiometer` becomes two resistors split at the wiper, `<name>_a`
+//!   (first pin to wiper, `position · resistance`) and `<name>_b` (wiper
+//!   to last pin, the rest), by the placement parameter `position` (0 to
+//!   1, default 0.5; each leg at least 1 mΩ); [`BuiltBoard::pot_params`]
+//!   gives the run-time changes that turn it;
 //! * `subckt` parts parse their SPICE library and are flattened as instance
 //!   `x<refdes>` (`U1` -> `xu1`, internal nodes `xu1.*`).
 //!
@@ -208,6 +213,40 @@ pub struct BuiltBoard {
     pub warnings: Vec<String>,
     /// Switches by refdes.
     pub switches: BTreeMap<String, Switch>,
+    /// Potentiometers by refdes.
+    pub pots: BTreeMap<String, Pot>,
+}
+
+/// A placed `potentiometer`: the two resistors that stand for its track
+/// and the track's resistance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pot {
+    /// Device name of the first-pin-to-wiper resistor.
+    pub a: String,
+    /// Device name of the wiper-to-last-pin resistor.
+    pub b: String,
+    /// End-to-end resistance (Ω).
+    pub resistance: f64,
+}
+
+/// Smallest leg of a potentiometer (Ω), so a wiper at an end stays a
+/// finite conductance.
+pub const POT_MIN_LEG: f64 = 1e-3;
+
+impl Pot {
+    /// The two leg resistances with the wiper at `position` (clamped to
+    /// 0..=1).
+    pub fn legs(&self, position: f64) -> (f64, f64) {
+        let x = if position.is_nan() {
+            0.5
+        } else {
+            position.clamp(0.0, 1.0)
+        };
+        (
+            (x * self.resistance).max(POT_MIN_LEG),
+            ((1.0 - x) * self.resistance).max(POT_MIN_LEG),
+        )
+    }
 }
 
 /// A placed `switch` part: the resistor that stands for it and its two
@@ -233,6 +272,21 @@ impl BuiltBoard {
             param: "r".into(),
             value: if closed { s.ron } else { s.roff },
         })
+    }
+
+    /// The run-time changes that put potentiometer `refdes`'s wiper at
+    /// `position` (0 = at its first pin, 1 = at its last), for
+    /// [`of_analog::AnalogEngine::on_code`]; `None` if it is not a
+    /// potentiometer.
+    pub fn pot_params(&self, refdes: &str, position: f64) -> Option<Vec<SetParam>> {
+        let p = self.pots.get(refdes)?;
+        let (a, b) = p.legs(position);
+        let set = |device: &str, value| SetParam {
+            device: device.to_owned(),
+            param: "r".into(),
+            value,
+        };
+        Some(vec![set(&p.a, a), set(&p.b, b)])
     }
 }
 
@@ -317,6 +371,7 @@ pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
     let mut instances = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut switches = BTreeMap::new();
+    let mut pots = BTreeMap::new();
     let env = BuildEnv {
         temp_c: board.env.temp_c,
         tnom_c: board.env.tnom_c,
@@ -394,6 +449,19 @@ pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
                 switches.insert(pl.refdes.clone(), s);
                 name
             }
+            "potentiometer" => {
+                let p = Pot {
+                    a: format!("{name}_a"),
+                    b: format!("{name}_b"),
+                    resistance: positive("resistance")? * tc,
+                };
+                let (ra, rb) = p.legs(pot_position(&pl.params));
+                let tol = r.tolerance("resistance");
+                c.add(Resistor::new(&p.a, nodes[0], nodes[1], ra).with_tolerance(tol))?;
+                c.add(Resistor::new(&p.b, nodes[1], nodes[2], rb).with_tolerance(tol))?;
+                pots.insert(pl.refdes.clone(), p);
+                name
+            }
             "capacitor" => {
                 let cap = positive("capacitance")? * tc;
                 c.add(
@@ -467,7 +535,13 @@ pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
         instances,
         warnings,
         switches,
+        pots,
     })
+}
+
+/// A potentiometer placement's wiper `position` (default 0.5).
+fn pot_position(params: &BTreeMap<String, f64>) -> f64 {
+    params.get("position").copied().unwrap_or(0.5)
 }
 
 /// A switch placement's `closed` parameter (non-zero is closed).
@@ -518,6 +592,21 @@ pub fn to_spice(lib: &Library, board: &Board) -> Result<String, BridgeError> {
             "switch" => {
                 let ohms = r.need(if switch_closed(&pl.params) { "ron" } else { "roff" })?;
                 writeln!(cards, "R{name} {nets} {ohms:e}")
+            }
+            "potentiometer" => {
+                let mut parts = nets.split(' ');
+                let (n1, nw, n3) = (
+                    parts.next().unwrap_or_default(),
+                    parts.next().unwrap_or_default(),
+                    parts.next().unwrap_or_default(),
+                );
+                let p = Pot {
+                    a: String::new(),
+                    b: String::new(),
+                    resistance: r.need("resistance")?,
+                };
+                let (ra, rb) = p.legs(pot_position(&pl.params));
+                writeln!(cards, "R{name}_a {n1} {nw} {ra:e}\nR{name}_b {nw} {n3} {rb:e}")
             }
             "capacitor" => {
                 let extra = kv(["esr", "esl"]

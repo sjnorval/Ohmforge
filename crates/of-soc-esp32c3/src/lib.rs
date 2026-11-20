@@ -6,7 +6,10 @@
 //! and RTC fast memory) and its peripherals: GPIO with a minimal IO MUX and
 //! GPIO matrix, UART0 transmit, SYSTIMER (counters and alarms), timer groups
 //! TIMG0/1 (timer and MWDT), the RTC and super watchdogs, and the interrupt
-//! matrix with the CPU interrupt controller. Timer and watchdog events stop
+//! matrix with the CPU interrupt controller, the LED PWM controller
+//! ([`ledc`], exact switching edges on the pins) and the SAR ADC's one-time
+//! sampling ([`saradc`], pad voltages sampled from the analog engine,
+//! eFuse-calibrated transfer). Timer, watchdog, PWM and ADC events stop
 //! the hart at their exact time, so interrupts and resets land where they
 //! would on hardware (to within one instruction).
 //! [`Esp32c3Engine`] runs it under the [`of_core::Kernel`] and turns pin
@@ -48,10 +51,12 @@ pub mod engine;
 pub mod flash;
 pub mod gpio;
 pub mod intmatrix;
+pub mod ledc;
 pub mod map;
 pub mod rng;
 pub mod rom;
 pub mod rtc_cntl;
+pub mod saradc;
 pub mod sha;
 pub mod soc;
 pub mod spi_mem;
@@ -65,8 +70,8 @@ pub mod watchdog;
 pub use boot::{FlashBoot, FlashBootError};
 pub use bus::SocBus;
 pub use engine::{
-    Esp32c3Engine, InputWatch, PinLink, all_pin_codes, decode_input_code, decode_pin_code, initial_input_level,
-    input_code, input_watches, pin_code,
+    Esp32c3Engine, InputWatch, PinLink, adc_request_code, adc_value_code, all_pin_codes, decode_adc_request,
+    decode_input_code, decode_pin_code, initial_input_level, input_code, input_watches, pin_code,
 };
 pub use gpio::{GPIO_COUNT, PinOut};
 pub use intmatrix::IntMatrix;

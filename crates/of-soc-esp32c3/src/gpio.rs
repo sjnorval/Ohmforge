@@ -4,9 +4,15 @@
 //! `GPIO_FUNCn_OUT_SEL_CFG` (`OUT_SEL` 128 = "GPIO_OUT bit n" and
 //! `INV_SEL`), the IO MUX `MCU_SEL` and `FUN_DRV` fields and `GPIO_PINn`
 //! `PAD_DRIVER` (open drain). A pin drives only when its IO MUX function is
-//! 1 (GPIO matrix), its `OUT_SEL` is 128 and its `GPIO_ENABLE` bit is set;
-//! other selections leave it high-impedance for now. An open-drain pin
-//! drives low and releases (high-impedance) for high.
+//! 1 (GPIO matrix) and its output is enabled: with `OUT_SEL` 128 it drives
+//! `GPIO_OUT` when its `GPIO_ENABLE` bit is set; with `OUT_SEL` naming a
+//! modelled peripheral output signal (the LEDC's `LEDC_LS_SIG_OUT0..5`,
+//! 45 to 50, see [`Gpio::set_output_signal`]) it drives that signal, enabled
+//! by `GPIO_ENABLE` when `OEN_SEL` is set and otherwise by the
+//! peripheral's own enable (always 1 for the LEDC, TRM table 5.11-1),
+//! inverted by `OEN_INV_SEL`. `INV_SEL` inverts the level. Other signals
+//! leave the pin high-impedance. An open-drain pin drives low and releases
+//! (high-impedance) for high.
 //!
 //! Pads: the IO MUX `FUN_WPU`/`FUN_WPD` weak pull-up and pull-down (about
 //! 45 kΩ, the datasheet's typical value) are part of the pin's analog
@@ -191,7 +197,17 @@ pub struct Gpio {
     /// `GPIO_IN` as last evaluated (pad levels gated by `FUN_IE`).
     input: u32,
     status: u32,
+    /// Levels of the peripheral output signals (bit = signal number).
+    signals: u128,
 }
+
+/// Peripheral output signals a modelled peripheral drives: the LEDC
+/// channels (45 to 50).
+const DRIVEN_SIGNALS: u128 = 0x3f << 45;
+/// `GPIO_FUNCn_OUT_SEL_CFG` bits.
+const INV_SEL: u32 = 1 << 8;
+const OEN_SEL: u32 = 1 << 9;
+const OEN_INV_SEL: u32 = 1 << 10;
 
 /// Peripheral input signals routed by `GPIO_FUNCn_IN_SEL_CFG`.
 const IN_SIGNALS: usize = 128;
@@ -238,6 +254,7 @@ impl Gpio {
             external: 0,
             input: 0,
             status: 0,
+            signals: 0,
         };
         g.input = g.input_levels();
         g
@@ -421,6 +438,16 @@ impl Gpio {
         Some(level != (cfg & (1 << 5) != 0))
     }
 
+    /// Set peripheral output signal `signal` (the GPIO matrix's numbering)
+    /// to `level`. Pins routed to it follow, and so do their input
+    /// loopbacks and pin interrupts.
+    pub fn set_output_signal(&mut self, signal: usize, level: bool) {
+        if signal < 128 {
+            self.signals = (self.signals & !(1 << signal)) | (u128::from(level) << signal);
+            self.update_inputs();
+        }
+    }
+
     /// What pin `pin`'s pad is doing: output stage and pulls.
     pub fn pin_out(&self, pin: usize) -> PinOut {
         let mux = self.io_mux[pin];
@@ -435,11 +462,24 @@ impl Gpio {
         };
         let sel = self.out_sel[pin];
         let gpio_fn = (mux >> io_mux::MCU_SEL_SHIFT) & 7 == 1;
-        if !gpio_fn || sel & 0xff != SIG_GPIO_OUT || self.enable & (1 << pin) == 0 {
+        let sig = sel & 0xff;
+        let enabled = self.enable & (1 << pin) != 0;
+        let level = if sig == SIG_GPIO_OUT {
+            enabled.then_some(self.out >> pin & 1 != 0)
+        } else if DRIVEN_SIGNALS >> sig & 1 != 0 {
+            let oe = if sel & OEN_SEL != 0 {
+                enabled
+            } else {
+                sel & OEN_INV_SEL == 0
+            };
+            oe.then_some(self.signals >> sig & 1 != 0)
+        } else {
+            None
+        };
+        let Some(level) = level.filter(|_| gpio_fn) else {
             return hiz;
-        }
-        let inv = sel & (1 << 8) != 0;
-        let high = (self.out >> pin & 1 != 0) != inv;
+        };
+        let high = level != (sel & INV_SEL != 0);
         let open_drain = self.pin_cfg[pin] & pin_reg::PAD_DRIVER != 0;
         PinOut {
             level: if high && open_drain { None } else { Some(high) },
@@ -478,6 +518,33 @@ mod tests {
         assert_eq!(g.pin_out(2).level, None);
         g.write(reg::OUT, u32::MAX).unwrap();
         assert_eq!(g.read(reg::OUT), Some(PIN_MASK), "only 22 pins");
+    }
+
+    #[test]
+    fn peripheral_signals_drive_routed_pins() {
+        let mut g = Gpio::new();
+        // esp-hal's LEDC hookup: OUT_SEL 45 (LEDC channel 0), OEN_SEL so
+        // GPIO_ENABLE decides, output enabled.
+        g.write(reg::FUNC_OUT_SEL + 4 * 8, 45 | OEN_SEL).unwrap();
+        g.write(reg::OUT_W1TS, 1 << 8).unwrap();
+        assert_eq!(g.pin_out(8).level, None, "GPIO_ENABLE clear");
+        g.write(reg::ENABLE_W1TS, 1 << 8).unwrap();
+        assert_eq!(g.pin_out(8).level, Some(false), "follows the signal, not GPIO_OUT");
+        g.set_output_signal(45, true);
+        assert_eq!(g.pin_out(8).level, Some(true));
+        assert_eq!(g.read(reg::IN).map(|v| v >> 8 & 1), Some(1), "input loopback");
+        g.write(reg::FUNC_OUT_SEL + 4 * 8, 45 | OEN_SEL | INV_SEL).unwrap();
+        assert_eq!(g.pin_out(8).level, Some(false), "INV_SEL");
+        // The LEDC's own output enable is 1, unless inverted.
+        g.write(reg::ENABLE_W1TC, 1 << 8).unwrap();
+        g.write(reg::FUNC_OUT_SEL + 4 * 8, 45).unwrap();
+        assert_eq!(g.pin_out(8).level, Some(true));
+        g.write(reg::FUNC_OUT_SEL + 4 * 8, 45 | OEN_INV_SEL).unwrap();
+        assert_eq!(g.pin_out(8).level, None);
+        // Signals no modelled peripheral drives stay high-impedance.
+        g.set_output_signal(51, true);
+        g.write(reg::FUNC_OUT_SEL + 4 * 8, 51).unwrap();
+        assert_eq!(g.pin_out(8).level, None);
     }
 
     #[test]

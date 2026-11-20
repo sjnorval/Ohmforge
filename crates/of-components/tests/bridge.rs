@@ -245,3 +245,86 @@ fn push_button_with_pull_up_is_a_switched_resistor() {
     let deck = to_spice(&lib, &button_board(Some(1.0))).unwrap();
     assert!(deck.contains("Rsw1 btn gnd 1e-1"), "{deck}");
 }
+
+fn pot_board(corner: Corner, position: Option<f64>) -> Board {
+    let mut pot = Placement::new("RV1", "bourns.ptv09a-b103", &[("1", "0"), ("W", "w"), ("3", "vdd")]);
+    if let Some(x) = position {
+        pot = pot.with("position", x);
+    }
+    Board {
+        placements: vec![
+            pot,
+            Placement::new("R1", "generic.resistor", &[("1", "w"), ("2", "0")]).with("resistance", 10e3),
+        ],
+        corner,
+        ..Board::default()
+    }
+}
+
+/// Wiper voltage and supply current of [`pot_board`] at 3.3 V.
+fn pot_op(board: &Board) -> (f64, f64) {
+    let lib = common::library();
+    let mut b = build(&lib, board).unwrap();
+    let vdd = b.circuit.node("vdd");
+    b.circuit
+        .add(VoltageSource::new("v1", vdd, 0, SourceValue::dc(3.3)))
+        .unwrap();
+    let op = analysis::operating_point(&mut b.circuit, &Options::default()).unwrap();
+    (op.get("v(w)").unwrap(), -op.get("i(v1)").unwrap())
+}
+
+#[test]
+fn potentiometer_is_a_loaded_divider_from_its_datasheet() {
+    // Analytic: the wiper splits the track into x·R (to pin 1, ground) and
+    // (1 - x)·R (to pin 3, 3.3 V), loaded by 10 kΩ.
+    let divider = |r: f64, x: f64| {
+        let low = 1.0 / (1.0 / (x * r).max(1e-3) + 1.0 / 10e3);
+        3.3 * low / (low + ((1.0 - x) * r).max(1e-3))
+    };
+    for x in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+        let (v, _) = pot_op(&pot_board(Corner::Typical, Some(x)));
+        let want = divider(10e3, x);
+        assert!((v - want).abs() <= 1e-6 + 0.01 * want, "x={x}: {v} V, want {want} V");
+    }
+    // Default position 0.5; ends reach the rails.
+    assert_eq!(
+        pot_op(&pot_board(Corner::Typical, None)).0,
+        pot_op(&pot_board(Corner::Typical, Some(0.5))).0
+    );
+    assert!(pot_op(&pot_board(Corner::Typical, Some(0.0))).0 < 1e-6);
+    assert!((pot_op(&pot_board(Corner::Typical, Some(1.0))).0 - 3.3).abs() < 1e-6);
+    // Out-of-range positions clamp.
+    assert_eq!(
+        pot_op(&pot_board(Corner::Typical, Some(1.5))).0,
+        pot_op(&pot_board(Corner::Typical, Some(1.0))).0
+    );
+
+    // Datasheet (Bourns PTV09): 10 kΩ ± 20 % end to end. With the wiper at
+    // the ground end the supply sees the whole track.
+    for (corner, ohms) in [(Corner::Min, 8e3), (Corner::Typical, 10e3), (Corner::Max, 12e3)] {
+        let (_, i) = pot_op(&pot_board(corner, Some(0.0)));
+        assert!((3.3 / i - ohms).abs() < 0.01, "{corner:?}: {} Ω", 3.3 / i);
+    }
+
+    let lib = common::library();
+    let b = build(&lib, &pot_board(Corner::Typical, Some(0.25))).unwrap();
+    assert_eq!(b.instances["RV1"], "rv1");
+    assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+    let turn = b.pot_params("RV1", 0.75).unwrap();
+    let got: Vec<_> = turn
+        .iter()
+        .map(|p| (p.device.as_str(), p.param.as_str(), p.value))
+        .collect();
+    assert_eq!(got, [("rv1_a", "r", 7500.0), ("rv1_b", "r", 2500.0)]);
+    assert_eq!(b.pot_params("RV1", 0.0).unwrap()[0].value, 1e-3, "legs floor at 1 mΩ");
+    assert_eq!(b.pot_params("R1", 0.5), None, "not a potentiometer");
+
+    // The SPICE export gives the same divider.
+    let deck = to_spice(&lib, &pot_board(Corner::Typical, Some(0.25))).unwrap();
+    assert!(deck.contains("Rrv1_a 0 w 2.5e3\nRrv1_b w vdd 7.5e3"), "{deck}");
+    let parsed = of_netlist::spice::parse_str(&format!("pot\n{deck}V1 vdd 0 3.3\n.op\n.end\n")).unwrap();
+    let mut from_deck = of_analog::netlist::build(&parsed).unwrap();
+    let op = analysis::operating_point(&mut from_deck.circuit, &from_deck.options).unwrap();
+    let v = op.get("v(w)").unwrap();
+    assert!((v - divider(10e3, 0.25)).abs() < 1e-9, "{v}");
+}

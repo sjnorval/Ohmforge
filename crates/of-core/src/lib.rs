@@ -8,6 +8,9 @@
 //! * [`Engine`]: the trait every engine implements (`advance_to(t)`), and
 //!   [`Kernel`], which advances a set of engines in time slices under one
 //!   scheduler, delivering events and stopping at breakpoints.
+//! * [`ValueCode`]: a real value (such as a sampled voltage) carried in an
+//!   event code, so engines can exchange measurements without depending
+//!   on each other.
 
 mod engine;
 
@@ -54,6 +57,45 @@ impl SimTime {
     /// `self + d`, saturating at the end of the range.
     pub const fn saturating_add(self, d: SimTime) -> Self {
         Self(self.0.saturating_add(d.0))
+    }
+}
+
+/// A family of event codes that carry a real value: `base` plus the value
+/// in units of `lsb`, rounded and clamped to `0..=mask`. Codes with other
+/// bits outside `mask` than `base` belong to someone else.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ValueCode {
+    /// The fixed bits (must not overlap `mask`).
+    pub base: u32,
+    /// The value field (contiguous low bits).
+    pub mask: u32,
+    /// Value of one count.
+    pub lsb: f64,
+}
+
+impl ValueCode {
+    /// The code for `value` (negative and NaN give 0, large values
+    /// saturate at `mask`).
+    pub fn encode(&self, value: f64) -> u32 {
+        let n = (value / self.lsb).round();
+        let n = if n.is_nan() || n <= 0.0 {
+            0
+        } else if n >= f64::from(self.mask) {
+            self.mask
+        } else {
+            n as u32
+        };
+        self.base | n
+    }
+
+    /// The value in `code`, if it belongs to this family.
+    pub fn decode(&self, code: u32) -> Option<f64> {
+        (code & !self.mask == self.base).then(|| f64::from(code & self.mask) * self.lsb)
+    }
+
+    /// The largest value that can be carried.
+    pub fn max(&self) -> f64 {
+        f64::from(self.mask) * self.lsb
     }
 }
 
@@ -142,6 +184,22 @@ mod tests {
         let order: Vec<u32> = std::iter::from_fn(|| s.next_event()).map(|e| e.target).collect();
         assert_eq!(order, vec![2, 1, 3]);
         assert_eq!(s.now(), SimTime::from_ns(5));
+    }
+
+    #[test]
+    fn value_codes_round_trip_with_rounding_and_clamping() {
+        let vc = ValueCode {
+            base: 0x8500_0000,
+            mask: 0x00ff_ffff,
+            lsb: 1e-6,
+        };
+        assert_eq!(vc.encode(1.2345674), 0x8500_0000 | 1_234_567);
+        assert_eq!(vc.decode(vc.encode(1.5)), Some(1.5));
+        assert_eq!(vc.encode(-0.2), 0x8500_0000);
+        assert_eq!(vc.encode(f64::NAN), 0x8500_0000);
+        assert_eq!(vc.encode(100.0), 0x85ff_ffff);
+        assert!((vc.max() - 16.777215).abs() < 1e-9);
+        assert_eq!(vc.decode(0x8600_0001), None, "another family");
     }
 
     #[test]

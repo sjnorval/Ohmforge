@@ -3,7 +3,7 @@
 
 use of_analog::devices::{Capacitor, PinDriver, Resistor};
 use of_analog::{AnalogEngine, Circuit, Edge, EngineConfig, Options, SetParam, analysis, netlist};
-use of_core::{Engine, EngineError, Event, HOST, Kernel, SimTime, Stop, SyncCtx};
+use of_core::{Engine, EngineError, Event, HOST, Kernel, SimTime, Stop, SyncCtx, ValueCode};
 
 fn rc_deck() -> of_analog::netlist::Built {
     let deck = of_netlist::spice::parse_str(
@@ -190,4 +190,91 @@ fn breakpoints_and_host_events_pause_the_analog_run() {
         k.run_until(SimTime::from_ms(5)).unwrap(),
         Stop::Reached(SimTime::from_ms(5))
     );
+}
+
+/// A stand-in for an ADC: asks the analog engine for a voltage at set
+/// times and records the replies.
+struct FakeAdc {
+    t: SimTime,
+    analog: u32,
+    requests: Vec<SimTime>,
+    replies: Vec<(SimTime, u32)>,
+}
+
+impl Engine for FakeAdc {
+    fn name(&self) -> &str {
+        "adc"
+    }
+    fn local_time(&self) -> SimTime {
+        self.t
+    }
+    fn advance_to(&mut self, limit: SimTime, cx: &mut SyncCtx<'_>) -> Result<SimTime, EngineError> {
+        if let Some(&at) = self.requests.first()
+            && at <= limit
+        {
+            self.requests.remove(0);
+            cx.schedule(at, self.analog, SAMPLE);
+            self.t = at;
+            return Ok(at);
+        }
+        self.t = limit;
+        Ok(limit)
+    }
+    fn on_event(&mut self, ev: &Event, _cx: &mut SyncCtx<'_>) -> Result<(), EngineError> {
+        self.replies.push((ev.at, ev.code));
+        Ok(())
+    }
+}
+
+const SAMPLE: u32 = 0x2_0200;
+const VOLTS: ValueCode = ValueCode {
+    base: 0x8200_0000,
+    mask: 0x00ff_ffff,
+    lsb: 1e-6,
+};
+
+#[test]
+fn sample_requests_are_answered_at_once_with_the_node_voltage() {
+    let cfg = EngineConfig {
+        max_step: 20e-6,
+        ..EngineConfig::default()
+    };
+    let mut eng = AnalogEngine::new("analog", gpio_rc(), Options::default(), cfg).unwrap();
+    eng.on_code(
+        GPIO_HIGH,
+        vec![SetParam {
+            device: "gpio".into(),
+            param: "v".into(),
+            value: 3.3,
+        }],
+    );
+    assert!(eng.sample_on(SAMPLE, "v(nope)", 0, VOLTS).is_err());
+    eng.sample_on(SAMPLE, "v(out)", 0, VOLTS).unwrap();
+    let mut k = Kernel::new(SimTime::from_us(50));
+    let times: Vec<SimTime> = [500, 1500, 2000, 4000].map(SimTime::from_us).to_vec();
+    let adc = k.add_engine(Box::new(FakeAdc {
+        t: SimTime::ZERO,
+        analog: 1,
+        requests: times.clone(),
+        replies: Vec::new(),
+    }));
+    k.add_engine(Box::new(eng));
+    k.schedule(SimTime::from_us(1000), 1, GPIO_HIGH);
+    k.run_until(SimTime::from_ms(5)).unwrap();
+
+    let replies = k.engine_as::<FakeAdc>(adc).unwrap().replies.clone();
+    assert_eq!(replies.len(), times.len(), "{replies:?}");
+    let tau = 1e-3;
+    for (&(at, code), &t) in replies.iter().zip(&times) {
+        assert_eq!(at, t, "answered at the request time");
+        let v = VOLTS.decode(code).unwrap();
+        // v(out) = 3.3 (1 - exp(-(t - 1 ms)/tau)) after the pin goes high.
+        let dt = t.as_secs_f64() - 1e-3;
+        let expect = if dt <= 0.0 {
+            0.0
+        } else {
+            3.3 * (1.0 - (-dt / tau).exp())
+        };
+        assert!((v - expect).abs() < 0.01 * 3.3, "at {t:?}: {v} V, expected {expect} V");
+    }
 }
