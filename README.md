@@ -54,8 +54,8 @@ cargo test --workspace
 cargo run -p of-cli -- --version
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv   # SPICE netlist to CSV
 cargo test -p of-soc-esp32c3          # blinky, timer-interrupt, XIP and button firmware on the ESP32-C3 model, LED and button co-simulated
-scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests (never committed)
-cargo run -p of-app --features gui   # desktop app with the ESP32-C3 LED blink demo
+scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests and the pot dimmer / LED fade demos (never committed)
+cargo run -p of-app --features gui   # desktop app: LED blink, pot dimmer and LED fade
 ```
 
 On Windows, build from a shell with the MSVC Build Tools environment loaded (see `AGENTS.md` section 9).
@@ -84,7 +84,7 @@ The full checklist is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **P0 Foundations**: mostly done (workspace, licences, CI, parts loader, kernel `Engine` trait). Leftovers such as the project file format and the mdBook skeleton continue alongside later phases.
 - **Phase one, RISC-V core**: done (RV32IMC core, 75 of 77 riscv-tests passing, 2 expected-unsupported).
 - **P1 Analog core**: done (sparse MNA with DC, AC and transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
-- **P2 ESP32-C3 MVP**: in progress. Landed: ELF boot, GPIO output, interrupts, timers, watchdogs, the flash image parser, the desktop blink demo, SPI flash, cache MMU, real-ROM boot and an esp-hal blinky through the ROM and the ESP-IDF bootloader. In review: GPIO inputs with a push button (esp-hal, polled and interrupt). Next: ESP-IDF and Arduino firmware, ADC and PWM, the schematic editor, and BOM v1.
+- **P2 ESP32-C3 MVP**: in progress. Landed: ELF boot, GPIO output, interrupts, timers, watchdogs, the flash image parser, SPI flash, cache MMU, real-ROM boot, an esp-hal blinky through the ROM and the ESP-IDF bootloader, GPIO inputs with a push button, the SAR ADC and LEDC PWM, a potentiometer part, and a desktop demo picker (blink, pot dimmer, LED fade; the last two need the fetched ROM). Next: ESP-IDF and Arduino firmware, the schematic editor, and BOM v1.
 - **P3 Breadth**: planned (classic ESP32 through a QEMU sidecar, I2C/SPI/RMT/DAC, breadboard view, about 50 parts, electromechanical models, KiCad export; exit 0.2).
 - **P4 Own Xtensa core and web**: planned (own Xtensa core, browser web app, Wi-Fi virtual radio, power profiler, energy parts; exit 0.3).
 - **P5 Realism**: planned (Monte Carlo, thermal model, fault injection, hardware-in-the-loop lab, published validation report; exit 0.4).
