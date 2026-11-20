@@ -39,6 +39,7 @@
 //! written and are counted in [`SocBus::unmodelled`].
 
 pub mod boot;
+pub mod bootloader;
 pub mod bus;
 pub mod cache;
 pub mod csr;
