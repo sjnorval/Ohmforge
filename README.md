@@ -67,6 +67,15 @@ Parts data, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md)
 
 Contributions are accepted under the Developer Certificate of Origin; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Contributing and community
+
+- **Start here:** [CONTRIBUTING.md](CONTRIBUTING.md) covers the ground rules, licence hygiene, the checks to run and how to add a part. Issues labelled [`good first issue`](https://github.com/sjnorval/Ohmforge/labels/good%20first%20issue) are small, well-scoped starting points.
+- **Questions and ideas:** [Discussions](https://github.com/sjnorval/Ohmforge/discussions). See [SUPPORT.md](SUPPORT.md) for where to ask what.
+- **Bugs, features and part requests:** [open an issue](https://github.com/sjnorval/Ohmforge/issues/new/choose) using one of the forms.
+- **Security:** report privately; see [SECURITY.md](SECURITY.md).
+- **Conduct:** everyone follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+- **What has changed:** [CHANGELOG.md](CHANGELOG.md).
+
 ## Roadmap
 
 The full checklist is in [`docs/ROADMAP.md`](docs/ROADMAP.md).

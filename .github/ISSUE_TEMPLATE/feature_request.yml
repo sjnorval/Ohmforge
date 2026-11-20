@@ -1,0 +1,65 @@
+name: Feature request
+description: Suggest a new feature or an improvement to an existing one.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please check the [roadmap](https://github.com/sjnorval/Ohmforge/blob/main/docs/ROADMAP.md) and the [design plan](https://github.com/sjnorval/Ohmforge/blob/main/docs/DESIGN_AND_PLAN.md) first; the feature may already be planned for a later phase.
+        Open-ended ideas and questions fit better in [Discussions](https://github.com/sjnorval/Ohmforge/discussions/categories/ideas). Big changes (the component API, file formats, the QEMU sync protocol) need an RFC in `rfcs/`.
+        To request a new part or model, use the "New part or model" form instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to simulate or build, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Ohmforge do? Include example netlists, firmware or UI sketches if you have them.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Analog solver
+        - CPU cores
+        - SoC and peripherals
+        - Firmware loading
+        - Desktop or web UI
+        - Instruments (scope, logic analyser, multimeter)
+        - Parts library
+        - BOM and costing
+        - CLI
+        - Build, CI or docs
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap phase, if you know it
+      options:
+        - Not sure
+        - P2 ESP32-C3 MVP (0.1)
+        - P3 Breadth (0.2)
+        - P4 Xtensa and web (0.3)
+        - P5 Realism (0.4)
+        - P6 1.0
+        - Not on the roadmap yet
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to work on this myself (see CONTRIBUTING.md; contributions are AGPL-3.0-or-later with DCO sign-off).

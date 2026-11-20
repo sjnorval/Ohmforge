@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in Ohmforge is broken or behaves differently from the docs.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Ohmforge is pre-alpha, so please check the [roadmap](https://github.com/sjnorval/Ohmforge/blob/main/docs/ROADMAP.md) first: unchecked items are known gaps, not bugs.
+        If the simulation is running but gives the wrong numbers compared with ngspice, a datasheet or real hardware, please still use this form and tick "Simulation accuracy" below.
+        **Security problems:** do not open a public issue; see [SECURITY.md](https://github.com/sjnorval/Ohmforge/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands, netlist, firmware or part files needed to reproduce it. Attach small files or paste them inline.
+      placeholder: |
+        1. cargo run -p of-cli -- run my_circuit.cir --out out.csv
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Analog solver (of-analog, SPICE netlists)
+        - CPU core (of-cpu-riscv)
+        - ESP32-C3 SoC and peripherals (of-soc-esp32c3)
+        - Firmware loading (of-firmware, ELF, flash images)
+        - Desktop app or UI (of-app, of-ui)
+        - Parts library (parts/, of-parts, of-components)
+        - BOM (of-bom)
+        - CLI (ohmforge)
+        - Build, CI or docs
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: kind
+    attributes:
+      label: Kind of problem
+      options:
+        - label: Simulation accuracy (results differ from ngspice, a datasheet or hardware)
+        - label: Crash, panic or error message
+        - label: Build or install problem
+  - type: input
+    id: version
+    attributes:
+      label: Ohmforge version or commit
+      description: Output of `cargo run -p of-cli -- --version` and `git rev-parse --short HEAD`.
+      placeholder: ohmforge 0.0.1, commit abc1234
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and Rust version
+      placeholder: Windows 11, rustc 1.95.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: Error messages, panic backtraces (`RUST_BACKTRACE=1`) or CSV snippets. This is rendered as code.
+      render: shell
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, scope captures from real hardware, links to datasheets.

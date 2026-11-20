@@ -8,6 +8,11 @@ Thank you for helping. This project is pre-alpha, so the best contributions righ
 - Sign off every commit (Developer Certificate of Origin, https://developercertificate.org): `git commit -s`.
 - Big changes (component API, file formats, the QEMU sync protocol) start as an RFC in `rfcs/`.
 - Use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`).
+- Questions and open-ended ideas go to [Discussions](https://github.com/sjnorval/Ohmforge/discussions) ([SUPPORT.md](SUPPORT.md)); security problems are reported privately ([SECURITY.md](SECURITY.md)).
+
+## Issues
+
+Open issues with the [forms](https://github.com/sjnorval/Ohmforge/issues/new/choose): **Bug report**, **Feature request** or **New part or model** (MPN, datasheet, model type, suppliers). Blank issues are turned off. Looking for something to work on? Try an issue labelled [`good first issue`](https://github.com/sjnorval/Ohmforge/labels/good%20first%20issue) or [`help wanted`](https://github.com/sjnorval/Ohmforge/labels/help%20wanted), and say in the issue that you are taking it.
 
 ## Licence hygiene (important)
 
@@ -25,6 +30,15 @@ cargo test --workspace
 cargo deny check        # if cargo-deny is installed
 ```
 
+UI changes also need `cargo clippy -p of-ui -p of-app --features of-ui/gui,of-app/gui --all-targets -- -D warnings` and `cargo test -p of-ui --features gui`. If you change firmware under `firmware/`, rebuild its ELF with its `build.sh` (zig 0.17.1, see [`firmware/README.md`](firmware/README.md)); CI checks the committed ELFs rebuild byte for byte.
+
+The [pull request template](.github/pull_request_template.md) has the full checklist. In short:
+
+- Sign off every commit and add tests for the change.
+- Keep the docs current: README, `AGENTS.md`, `.grok/rules/ohmforge.md` and `docs/ROADMAP.md` where your change affects them.
+- Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) for any user-visible change (Keep a Changelog sections: Added, Changed, Deprecated, Removed, Fixed, Security).
+- Every pull request needs the maintainer's review before it merges (`.github/CODEOWNERS`). CI on a first-time contributor's pull request starts once the maintainer approves the workflow run.
+
 ## Adding a part
 
 1. Create `parts/<category>/<manufacturer>-<part>/part.toml` (or `parts/<category>/<part>/` for generic parts such as `parts/passives/resistor`), copying `parts/sensors/bosch-bme280/part.toml`. Parts that the analog solver should simulate also need an `[analog]` section; see `parts/passives/resistor/part.toml` and `AGENTS.md` section 3b.
@@ -35,4 +49,11 @@ cargo deny check        # if cargo-deny is installed
 
 ## Labels
 
-`bug`, `feature`, `docs`, `accuracy`, `performance`, `rfc`; `area:*` (analog, cpu-riscv, cpu-xtensa, peripherals, ui, bom, library, web); `good first issue`, `help wanted`; `part-request`; `phase:P0` to `phase:P6`.
+Labels come in four groups; the maintainer sets them during triage.
+
+- **Type:** `bug`, `enhancement`, `documentation`, `question`, `part-request`, `accuracy` (differs from ngspice, a datasheet or hardware), `performance`, `rfc`, `dependencies`.
+- **Status:** `good first issue`, `help wanted`, `needs design`, `blocked`.
+- **Phase:** `phase:P0` to `phase:P6`, matching [`docs/ROADMAP.md`](docs/ROADMAP.md), plus `future idea` for parked ideas. Each unfinished phase also has a [milestone](https://github.com/sjnorval/Ohmforge/milestones).
+- **Area:** `area:analog`, `area:cpu`, `area:soc`, `area:firmware`, `area:ui`, `area:parts`, `area:bom`, `area:ci`, `area:docs`.
+
+Pull request labels also sort GitHub's generated release notes (`.github/release.yml`).

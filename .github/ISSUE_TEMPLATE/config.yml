@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/sjnorval/Ohmforge/discussions/categories/q-a
+    about: Ask how to use or build Ohmforge in Discussions (Q&A).
+  - name: Ideas and design discussion
+    url: https://github.com/sjnorval/Ohmforge/discussions/categories/ideas
+    about: Open-ended ideas and early design talk go in Discussions before they become issues.
+  - name: Report a security vulnerability
+    url: https://github.com/sjnorval/Ohmforge/security/advisories/new
+    about: Please report security problems privately, not in a public issue. See SECURITY.md.

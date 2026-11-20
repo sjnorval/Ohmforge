@@ -130,10 +130,13 @@ Run all of these before proposing a commit; they mirror `.github/workflows/ci.ym
 ## 7. Git rules
 
 - **Do not commit without Stefan's approval.** Leave changes in the working tree, report what changed, and propose a commit breakdown with messages; commit only what he approves.
-- The remote is `origin` = <https://github.com/sjnorval/Ohmforge>. `main` holds the merged P1 work (PR #7) and the blinky milestone (PR #8); new work goes on a feature branch (currently `p2-interrupts-timers`) and reaches `main` only through a pull request that Stefan merges. Never push to `main`. **Push only when Stefan explicitly asks**, never force-push, and never handle tokens (use the machine's existing git credentials). Before a push, check that no secrets or build artefacts are tracked.
+- The remote is `origin` = <https://github.com/sjnorval/Ohmforge>. `main` holds everything merged so far (PRs #7 to #12: P1, the blinky milestone, interrupts and timers, the desktop blink demo, the roadmap summary); new work goes on a feature branch off `main` and reaches `main` only through a pull request that Stefan merges. Never push to `main`. **Push only when Stefan explicitly asks**, never force-push, and never handle tokens (use the machine's existing git credentials). Before a push, check that no secrets or build artefacts are tracked.
 - Every commit is signed off: `git commit -s`.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`; small, logical commits.
 - Never rewrite or force-change existing history.
+- **Changelog:** every user-visible change adds a line under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog: Added, Changed, Deprecated, Removed, Fixed, Security), with the PR number once known.
+- **Pull requests** follow `.github/pull_request_template.md`; go through its checklist (DCO sign-off, tests, fmt/clippy/test, the GUI clippy and tests for UI changes, cargo-deny, AGPL-compatible dependencies, ngspice never linked, committed firmware ELFs rebuilt, docs, `AGENTS.md`, `.grok/rules/` and the roadmap updated, changelog entry) before proposing one. Label PRs and issues with the type, `phase:*` and `area:*` labels listed in `CONTRIBUTING.md`; release notes are grouped by label (`.github/release.yml`).
+- Community files: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md` (private vulnerability reporting), `SUPPORT.md` (Discussions for questions), issue forms in `.github/ISSUE_TEMPLATE/`, and `.github/dependabot.yml` (weekly Cargo and Actions updates; each still has to pass cargo-deny). Keep them in step with these rules.
 
 ## 8. Project name
 

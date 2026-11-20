@@ -1,8 +1,8 @@
 # Roadmap and task list
 
-Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 18 November 2026 (`main` has P1 and the blinky milestone; interrupts, timers and watchdogs are on branch `p2-interrupts-timers`).
+Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress).
 
-**Current phase: P2 ESP32-C3 MVP, in progress** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). P1 Analog core and phase one (the RISC-V CPU core, pulled forward from P2) are done; the first P2 slice (blinky end to end) is on `main`, and the interrupt matrix, SYSTIMER alarms, timer groups, watchdogs and the ESP image parser follow. P0 leftovers continue alongside.
+**Current phase: P2 ESP32-C3 MVP, in progress** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). P1 Analog core and phase one (the RISC-V CPU core, pulled forward from P2) are done; the first P2 slice (blinky end to end), the interrupt matrix, SYSTIMER alarms, timer groups, watchdogs, the ESP image parser and the desktop blink demo are on `main`. P0 leftovers continue alongside.
 
 ## Phase one: RISC-V CPU core (`of-cpu-riscv`)
 
