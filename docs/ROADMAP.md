@@ -1,6 +1,6 @@
 # Roadmap and task list
 
-Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress). The ROM boot work (branch `p2-rom-boot`) is on `main` (#20), and the esp-hal blinky (branch `p2-esp-hal-blinky`) too (#21). Items marked "branch `p2-gpio-inputs`" are verified there but not yet merged.
+Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress). The ROM boot work (branch `p2-rom-boot`) is on `main` (#20), and the esp-hal blinky (branch `p2-esp-hal-blinky`) too (#21). Items marked "branch `p2-gpio-inputs`" are verified there but not yet merged. The parts the library should grow to, and what each one needs from the simulator, are in the [common components checklist](COMPONENTS.md).
 
 **Current phase: P2 ESP32-C3 MVP, in progress** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). P1 Analog core and phase one (the RISC-V CPU core, pulled forward from P2) are done; the first P2 slice (blinky end to end), the interrupt matrix, SYSTIMER alarms, timer groups, watchdogs, the ESP image parser and the desktop blink demo are on `main`. P0 leftovers continue alongside.
 
@@ -133,7 +133,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Classic ESP32 (Xtensa LX6) through a QEMU sidecar process (`of-cpu-qemu-ipc`), kept out of process for licence and stability reasons
 - [ ] Peripherals: I2C, SPI, RMT, DAC (C3 and classic ESP32)
 - [ ] Breadboard view alongside the schematic editor
-- [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour and tests
+- [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour and tests (checklist with priorities and simulator dependencies: [`COMPONENTS.md`](COMPONENTS.md))
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
 - [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export
