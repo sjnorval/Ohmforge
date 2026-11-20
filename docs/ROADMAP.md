@@ -159,3 +159,28 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Complete documentation (mdBook user guide, part-authoring guide, API docs)
 - [ ] BLE (stretch goal)
 - [ ] Release 1.0
+
+## Future ideas (parked)
+
+These are untracked ideas, not scheduled phases. They need design discussion first and are not on the P0 to P6 plan.
+
+### Cloud accounts
+
+An optional account for syncing projects and files across devices. That needs server infrastructure, which costs money, so a proper billing model has to be worked out first. Using the app and creating files locally stays free. Any of this work must stay compatible with AGPL-3.0-or-later; the server code would be AGPL too.
+
+- [ ] Optional account and cross-device sync, with local use remaining free
+- [ ] Billing model for the server infrastructure
+- [ ] AGPL-3.0-or-later compatibility for any server code
+
+### Physics interaction layers
+
+Beyond the electrical simulation, model thermal and electromagnetic interactions between components, added over time as needed. Each layer can be turned on or off, with tiered interaction levels (for example beginner, intermediate, advanced, expert, engineer) depending on what the user is testing. The models should follow established physics and electrical theory.
+
+Related work already on the P5 checklist, and not replaced by this thread: the thermal model (self-heating, ambient, tempco; MOSFET Rds(on) against temperature), the hardware-in-the-loop lab, and the published validation report.
+
+Open questions, all needing design discussion first:
+
+- [ ] How Ohmforge detects and calculates the interactions
+- [ ] How the interactions are shown on screen
+- [ ] A telemetry report for the engineer working on the schematic
+- [ ] Toggleable layers and the tiered interaction levels

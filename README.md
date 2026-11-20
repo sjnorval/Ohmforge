@@ -67,9 +67,16 @@ Parts data, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md)
 
 Contributions are accepted under the Developer Certificate of Origin; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Roadmap
 
-## Development status
+The full checklist is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-- **P1 Analog core**: done (sparse MNA with DC/AC/transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
-- **Phase one, RISC-V core**: done (RV32IMC(+A), 75 of 77 riscv-tests).
-- **P2 ESP32-C3 MVP**: in progress. Done so far: ELF and ESP flash image loading, the C3 memory map, GPIO/IO MUX output, UART0 transmit, SYSTIMER alarms, the interrupt matrix, timer groups and watchdogs, and the chip running under the kernel next to the analog solver. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **P0 Foundations**: mostly done (workspace, licences, CI, parts loader, kernel `Engine` trait). Leftovers such as the project file format and the mdBook skeleton continue alongside later phases.
+- **Phase one, RISC-V core**: done (RV32IMC core, 75 of 77 riscv-tests passing, 2 expected-unsupported).
+- **P1 Analog core**: done (sparse MNA with DC, AC and transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
+- **P2 ESP32-C3 MVP**: in progress. Landed: ELF boot, GPIO output, interrupts, timers, watchdogs, the flash image parser, and the desktop blink demo. Next: ROM boot, GPIO inputs, ADC and PWM, the schematic editor, and BOM v1.
+- **P3 Breadth**: planned (classic ESP32 through a QEMU sidecar, I2C/SPI/RMT/DAC, breadboard view, about 50 parts, electromechanical models, KiCad export; exit 0.2).
+- **P4 Own Xtensa core and web**: planned (own Xtensa core, browser web app, Wi-Fi virtual radio, power profiler, energy parts; exit 0.3).
+- **P5 Realism**: planned (Monte Carlo, thermal model, fault injection, hardware-in-the-loop lab, published validation report; exit 0.4).
+- **P6 1.0**: planned (stable component API and WASM SDK, ESP32-S3 and ESP32-C6, complete documentation, BLE as a stretch goal).
+- **Future ideas (parked)**: optional cloud accounts for sync, and toggleable thermal and electromagnetic interaction layers. These are untracked and need design discussion first.
