@@ -38,7 +38,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-soc-esp32` | Classic ESP32 SoC (phase 4) | Empty |
 | `of-firmware` | ELF, flash images, UF2, DWARF | ELF32 RISC-V reader (segments, sections, symbols), ESP image parser/writer (checksum, SHA-256, 64 KiB flash alignment), partition tables (MD5 row) + tests |
 | `of-plugin-wasm` | Sandboxed WASM component host | Empty |
-| `of-instruments` | Scope, logic analyser, decoders, DMM, PSU | Empty |
+| `of-instruments` | Scope, logic analyser, decoders, DMM, PSU; serial monitor model (`serial::SerialMonitor`, lean console) | Serial monitor v1; scope/LA/DMM/PSU still to do |
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |

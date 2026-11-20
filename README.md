@@ -33,7 +33,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-soc-esp32c3`, `of-soc-esp32` | SoC memory maps and peripherals (ESP32-C3 first) |
 | `of-firmware` | ELF loading, ESP flash images and partition tables (DWARF later) |
 | `of-plugin-wasm` | Sandboxed WASM component host |
-| `of-instruments` | Scope, logic analyser, decoders, multimeter, PSU |
+| `of-instruments` | Scope, logic analyser, decoders, multimeter, PSU; serial monitor model (`SerialMonitor`, lean console; scope/LA/DMM/PSU to do) |
 | `of-bom` | Bill of materials, costing, CSV export |
 | `of-kicad` | KiCad netlist and schematic export |
 | `of-gdb` | GDB remote protocol |
