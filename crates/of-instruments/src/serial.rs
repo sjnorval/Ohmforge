@@ -22,11 +22,14 @@ pub struct Entry {
     pub data: Vec<u8>,
 }
 
-/// How host transmits reach the device in v1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How host transmits reach the device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Delivery {
-    /// Bytes are queued for the integration layer to drain; not injected in v1.
+    /// Bytes stay in [`SerialMonitor::pending_tx`] until a consumer drains them.
+    #[default]
     QueuedOnly,
+    /// A consumer drains [`SerialMonitor::pending_tx`] into the SoC UART RX FIFO.
+    Attached,
 }
 
 /// Host send rejected because the payload was empty.
@@ -43,6 +46,7 @@ pub struct SerialMonitor {
     entries: Vec<Entry>,
     pending_tx: Vec<u8>,
     baud: Option<f64>,
+    delivery: Delivery,
 }
 
 impl SerialMonitor {
@@ -95,7 +99,7 @@ impl SerialMonitor {
         self.pending_tx.clear();
     }
 
-    /// Sets the displayed baud rate (informational only in v1).
+    /// Sets the displayed baud rate (informational only).
     pub fn set_baud(&mut self, baud: Option<f64>) {
         self.baud = baud;
     }
@@ -105,9 +109,14 @@ impl SerialMonitor {
         self.baud
     }
 
-    /// Returns how host sends are delivered in this version.
+    /// Sets whether a consumer drains host TX into the SoC UART RX FIFO.
+    pub fn set_delivery(&mut self, delivery: Delivery) {
+        self.delivery = delivery;
+    }
+
+    /// Returns how host sends are delivered.
     pub fn delivery(&self) -> Delivery {
-        Delivery::QueuedOnly
+        self.delivery
     }
 
     /// Returns the chronological byte log.
@@ -266,5 +275,15 @@ mod tests {
         let lines = m.display_lines();
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].2, "é");
+    }
+
+    #[test]
+    fn delivery_attached_is_sticky_across_clear() {
+        let mut m = SerialMonitor::new();
+        m.set_delivery(Delivery::Attached);
+        m.try_send(SimTime::ZERO, b"a\n").unwrap();
+        m.clear();
+        assert_eq!(m.delivery(), Delivery::Attached);
+        assert!(m.pending_tx().is_empty());
     }
 }

@@ -465,6 +465,7 @@ impl SocBus {
             map::SPI1_BASE => self.spi[1].read(off),
             map::EXTMEM_BASE => self.cache.read(off),
             map::MMU_TABLE_BASE => self.cache.mmu_read(off),
+            map::UART0_BASE if off == uart::reg::FIFO => Some(u32::from(self.uart0.pop_rx())),
             map::UART0_BASE => self.uart0.read(off),
             _ => None,
         };
@@ -721,6 +722,19 @@ mod tests {
             .unwrap();
         assert_eq!(b.read(0x6000_8000, Size::Word, AccessKind::Load), Ok(0x1c00_a000));
         assert_eq!(b.unmodelled().get(&0x6000_8000), Some(&2));
+    }
+
+    #[test]
+    fn uart_rx_fifo_readable_from_bus() {
+        let mut b = SocBus::new();
+        b.uart0.push_rx(b"x");
+        let status = b.read(0x6000_001c, Size::Word, AccessKind::Load).unwrap();
+        assert_eq!(status & 0x3ff, 1);
+        assert_eq!(
+            b.read(0x6000_0000, Size::Word, AccessKind::Load).unwrap() & 0xff,
+            u32::from(b'x')
+        );
+        assert_eq!(b.read(0x6000_001c, Size::Word, AccessKind::Load).unwrap() & 0x3ff, 0);
     }
 
     #[test]

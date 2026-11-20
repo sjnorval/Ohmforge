@@ -30,4 +30,4 @@ Ship a reusable lean serial monitor (text log, sim-time stamps, clear/copy, baud
 
 ## Status / next
 
-Hook `drain_tx_queue` to SoC UART RX; then hex/find; then host the panel in the d5 shell.
+RX FIFO delivery is in: blink attaches `Delivery::Attached` and drains Send into `Esp32c3::push_uart_rx`. Next: baud-timed RX and RX interrupts; hex/find; host the panel in the d5 shell.
