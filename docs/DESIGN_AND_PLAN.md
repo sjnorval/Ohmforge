@@ -173,6 +173,7 @@ sequenceDiagram
 ```
 
 - **Pins are electrical, not boolean:** an output is a voltage source with drive-strength-dependent resistance; an input has leakage, capacitance, pull-ups and Schmitt thresholds from the datasheet (for example VIH = 0.75 × VDD). The ESP32-C3 model has the thresholds (V_IH and V_IL as the switching points) and the 45 kΩ pulls; leakage and pin capacitance are not modelled yet.
+- **ADC and PWM on the ESP32-C3 model:** a one-shot ADC conversion samples the node voltage at the instant the firmware starts it (the start bit write), and each LEDC PWM edge reaches the analog solver at its exact counter tick (no duty-cycle averaging).
 - Nets with only digital endpoints are solved by a fast event-driven logic kernel; any net touching an analog part is promoted to the MNA solver automatically.
 - Bus traffic (I2C, SPI, UART) is driven as real edges, so missing pull-ups, slow rise times and contention appear in the scope as they would on the bench.
 - **Accuracy tiers** the user can choose: *Functional* (fast, transaction-level buses), *Timed* (default) and *Electrical* (every edge analog).
