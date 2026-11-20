@@ -204,6 +204,7 @@ pub const ANALOG_KINDS: &[&str] = &[
     "npn",
     "pnp",
     "load",
+    "switch",
     "subckt",
 ];
 
@@ -219,8 +220,10 @@ pub struct AnalogModel {
     /// Model parameters. Primitive kinds use `resistance`, `capacitance`
     /// (with `esr`, `esl`), `inductance` (with `rser`), SPICE diode/BJT model
     /// names (`is`, `n`, `rs`, `bf`, ...), LED extras (`vf`, `if`,
-    /// `wavelength`, `eqe`), `tc1`/`tc2`, or `voltage` and `current` for a
-    /// `load`. For `subckt` they are passed as subcircuit parameters.
+    /// `wavelength`, `eqe`), `tc1`/`tc2`, `voltage` and `current` for a
+    /// `load`, or `ron` and `roff` for a `switch` (state from the placement
+    /// parameter `closed`). For `subckt` they are passed as subcircuit
+    /// parameters.
     #[serde(default)]
     pub params: BTreeMap<String, ModelParam>,
     /// SPICE library file, relative to the directory of `part.toml`.

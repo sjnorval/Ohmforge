@@ -8,6 +8,10 @@
 //! * primitive kinds (`resistor`, `capacitor`, `inductor`, `diode`, `led`,
 //!   `npn`, `pnp`, `load`) become one device named after the reference
 //!   designator (`R1` -> `r1`), with the part's `[analog]` pin order;
+//! * a `switch` (push button) becomes a resistor of `ron` (closed) or
+//!   `roff` (open), by the placement parameter `closed` (default open);
+//!   [`BuiltBoard::switch_param`] gives the run-time change that presses
+//!   or releases it;
 //! * `subckt` parts parse their SPICE library and are flattened as instance
 //!   `x<refdes>` (`U1` -> `xu1`, internal nodes `xu1.*`).
 //!
@@ -28,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 use of_analog::devices::{Bjt, BjtModel, Capacitor, Diode, DiodeModel, Inductor, Resistor};
 use of_analog::netlist::{BuildEnv, BuildError, add_deck};
-use of_analog::{Circuit, CircuitError};
+use of_analog::{Circuit, CircuitError, SetParam};
 use of_parts::{AnalogModel, Corner, PartFile};
 
 /// A part plus the text of its SPICE library (for `subckt` parts).
@@ -202,6 +206,34 @@ pub struct BuiltBoard {
     pub instances: BTreeMap<String, String>,
     /// Ignored parameters and similar notes.
     pub warnings: Vec<String>,
+    /// Switches by refdes.
+    pub switches: BTreeMap<String, Switch>,
+}
+
+/// A placed `switch` part: the resistor that stands for it and its two
+/// resistances.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Switch {
+    /// Device name of the resistor.
+    pub device: String,
+    /// Closed resistance (Ω).
+    pub ron: f64,
+    /// Open resistance (Ω).
+    pub roff: f64,
+}
+
+impl BuiltBoard {
+    /// The run-time change that closes (`true`) or opens switch `refdes`,
+    /// for [`of_analog::AnalogEngine::on_code`]; `None` if it is not a
+    /// switch.
+    pub fn switch_param(&self, refdes: &str, closed: bool) -> Option<SetParam> {
+        let s = self.switches.get(refdes)?;
+        Some(SetParam {
+            device: s.device.clone(),
+            param: "r".into(),
+            value: if closed { s.ron } else { s.roff },
+        })
+    }
 }
 
 /// Parameters of one placement, resolved at the board's corner.
@@ -284,6 +316,7 @@ pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
     let mut c = Circuit::new();
     let mut instances = BTreeMap::new();
     let mut warnings = Vec::new();
+    let mut switches = BTreeMap::new();
     let env = BuildEnv {
         temp_c: board.env.temp_c,
         tnom_c: board.env.tnom_c,
@@ -348,6 +381,17 @@ pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
                     None => positive("voltage")? / positive("current")?,
                 };
                 c.add(Resistor::new(&name, nodes[0], nodes[1], ohms))?;
+                name
+            }
+            "switch" => {
+                let s = Switch {
+                    device: name.clone(),
+                    ron: positive("ron")?,
+                    roff: positive("roff")?,
+                };
+                let ohms = if switch_closed(&pl.params) { s.ron } else { s.roff };
+                c.add(Resistor::new(&name, nodes[0], nodes[1], ohms))?;
+                switches.insert(pl.refdes.clone(), s);
                 name
             }
             "capacitor" => {
@@ -422,7 +466,13 @@ pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
         circuit: c,
         instances,
         warnings,
+        switches,
     })
+}
+
+/// A switch placement's `closed` parameter (non-zero is closed).
+fn switch_closed(params: &BTreeMap<String, f64>) -> bool {
+    params.get("closed").is_some_and(|&v| v != 0.0)
 }
 
 /// The board as SPICE cards (for inspection or an external reference
@@ -463,6 +513,10 @@ pub fn to_spice(lib: &Library, board: &Board) -> Result<String, BridgeError> {
                     Some(v) => v,
                     None => r.need("voltage")? / r.need("current")?,
                 };
+                writeln!(cards, "R{name} {nets} {ohms:e}")
+            }
+            "switch" => {
+                let ohms = r.need(if switch_closed(&pl.params) { "ron" } else { "roff" })?;
                 writeln!(cards, "R{name} {nets} {ohms:e}")
             }
             "capacitor" => {

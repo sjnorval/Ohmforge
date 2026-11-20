@@ -1,0 +1,42 @@
+# Generic 6 mm tactile push button (SPST, normally open). The two legs on
+# each side are joined inside the part, so it is modelled as two pins.
+# Simulated as an ideal switch: `ron` closed, `roff` open; set the state per
+# placement (`closed = 1.0`) or at run time through the resistor's `r`
+# parameter (see `BuiltBoard::switch_param`). Contact bounce is not part of
+# the model: drive it as a sequence of closes and opens.
+[part]
+id = "generic.pushbutton"
+name = "Tactile push button, 6 mm, SPST-NO"
+category = "electromechanical/switch"
+model = "rust:switch"
+verification = "datasheet"
+
+[[pin]]
+number = "1"
+name = "1"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "2"
+kind = "passive"
+
+[electrical]
+contact_resistance = { max = 0.1, unit = "ohm" }
+insulation_resistance = { min = 100e6, unit = "ohm", note = "at 100 V DC" }
+rating = { max = 50e-3, unit = "A", note = "at 12 V DC" }
+bounce = { max = 5e-3, unit = "s", note = "typical datasheet limit; real buttons often settle in under 1 ms" }
+
+[analog]
+kind = "switch"
+pins = ["1", "2"]
+params = { ron = { typ = 0.1, unit = "ohm" }, roff = { typ = 100e6, unit = "ohm" } }
+
+[[variant]]
+label = "6 x 6 mm through-hole tactile switch"
+mpn = "PTS645SM43SMTR92"
+manufacturer = "C&K"
+footprint = "Button_Switch_THT:SW_PUSH_6mm"
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"
