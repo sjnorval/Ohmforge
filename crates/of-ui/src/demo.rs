@@ -9,6 +9,7 @@ use of_instruments::{Delivery, SerialMonitor};
 use crate::SerialMonitorPanel;
 use crate::adc_pwm;
 use crate::blink;
+use crate::button;
 use crate::kind::DemoKind;
 use crate::live::{Command, LiveSession, Snapshot};
 use crate::supply::{self, SupplySettings};
@@ -26,6 +27,7 @@ pub struct OhmforgeDemo {
     serial_panel: SerialMonitorPanel,
     uart_cursor: usize,
     pot: f64,
+    button: bool,
     speed: f64,
     supply: SupplySettings,
     generation: u64,
@@ -49,6 +51,7 @@ impl OhmforgeDemo {
             serial_panel: SerialMonitorPanel::default(),
             uart_cursor: 0,
             pot: 0.5,
+            button: false,
             speed: 1.0,
             supply: SupplySettings::default(),
             generation: 0,
@@ -75,6 +78,7 @@ impl OhmforgeDemo {
         if !kind.has_pot() {
             self.pot = 0.5;
         }
+        self.button = false;
         self.reset_monitor();
         self.session.send(Command::SetKind(kind));
     }
@@ -114,7 +118,13 @@ impl OhmforgeDemo {
                 ComboBox::from_id_salt("demo_kind")
                     .selected_text(kind.label())
                     .show_ui(ui, |ui| {
-                        for k in [DemoKind::Blink, DemoKind::Dimmer, DemoKind::Fade] {
+                        for k in [
+                            DemoKind::Blink,
+                            DemoKind::Dimmer,
+                            DemoKind::Fade,
+                            DemoKind::ButtonPoll,
+                            DemoKind::ButtonIrq,
+                        ] {
                             ui.selectable_value(&mut kind, k, k.label());
                         }
                     });
@@ -245,7 +255,11 @@ impl OhmforgeDemo {
             } else if let Some(error) = &snap.error {
                 ui.colored_label(LED_RED, error);
             } else {
-                instruments(ui, &snap, self.kind);
+                let pressed = instruments(ui, &snap, self.kind);
+                if self.kind.has_button() && pressed != self.button {
+                    self.button = pressed;
+                    self.session.send(Command::SetButton(pressed));
+                }
                 ui.add_space(12.0);
                 let now = SimTime::from_secs_f64(snap.time);
                 self.serial_panel.show(ui, &mut self.monitor, "UART0", now);
@@ -277,32 +291,43 @@ fn readouts(ui: &mut Ui, snap: &Snapshot) {
             ui.separator();
             ui.monospace(format!("PWM {d:.1}%  {f:.0} Hz"));
         }
+        if let Some(v) = snap.button_v {
+            ui.separator();
+            ui.monospace(format!("GPIO9 {v:.2} V"));
+        }
     });
 }
 
-fn instruments(ui: &mut Ui, snap: &Snapshot, kind: DemoKind) {
+fn instruments(ui: &mut Ui, snap: &Snapshot, kind: DemoKind) -> bool {
     let current = snap.led_ma;
     let glow = brightness(current);
     let pos = kind.has_pot().then_some(snap.pot);
+    let mut pressed = snap.button;
     if ui.available_width() >= 820.0 {
         ui.columns(2, |columns| {
-            schematic(&mut columns[0], kind, current, glow, pos);
+            pressed = schematic(&mut columns[0], kind, current, glow, pos, snap);
             scope_panel(&mut columns[1], snap, kind);
         });
     } else {
-        schematic(ui, kind, current, glow, pos);
+        pressed = schematic(ui, kind, current, glow, pos, snap);
         ui.add_space(12.0);
         scope_panel(ui, snap, kind);
     }
+    pressed
 }
 
-fn schematic(ui: &mut Ui, kind: DemoKind, current: f64, glow: f32, pos: Option<f64>) {
+fn schematic(ui: &mut Ui, kind: DemoKind, current: f64, glow: f32, pos: Option<f64>, snap: &Snapshot) -> bool {
     match kind {
         DemoKind::Blink => {
-            blink::show_schematic(ui, current, glow);
+            blink::show_schematic(ui, current, glow, snap.supply_status);
+            false
         }
         DemoKind::Dimmer | DemoKind::Fade => {
-            adc_pwm::show_schematic(ui, current, glow, pos);
+            adc_pwm::show_schematic(ui, current, glow, pos, snap.supply_status);
+            false
+        }
+        DemoKind::ButtonPoll | DemoKind::ButtonIrq => {
+            button::show_schematic(ui, current, glow, snap.button, snap.supply_status)
         }
     }
 }

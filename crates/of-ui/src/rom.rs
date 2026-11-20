@@ -1,6 +1,6 @@
 //! Locate the fetched ESP32-C3 ROM and espflash bootloader.
 //!
-//! The pot dimmer and LED fade demos boot the committed esp-hal images the
+//! The pot dimmer, LED fade and push-button demos boot the committed esp-hal images the
 //! same way the integration tests do: the real mask ROM, then espflash's
 //! ESP-IDF second-stage bootloader, then the app. Those files are never
 //! bundled; `scripts/fetch-esp-rom-elfs.sh` (or `.ps1`) downloads a pinned,
@@ -23,7 +23,7 @@ use of_soc_esp32c3::rom::{C3_ROM_FILE, C3_ROM_SHA256, ROM_ELFS_RELEASE, RomImage
 use of_core::SimTime;
 
 /// Shown in the GUI when the ROM or bootloader has not been fetched.
-pub(crate) const MISSING_MESSAGE: &str = "This demo needs Espressif's ESP32-C3 ROM and espflash's second-stage bootloader, which are not bundled with Ohmforge. Run scripts/fetch-esp-rom-elfs.ps1 (or scripts/fetch-esp-rom-elfs.sh) and click Reset. Unlike the LED blink demo, these esp-hal apps cannot start from the app image alone.";
+pub(crate) const MISSING_MESSAGE: &str = "This demo needs Espressif's ESP32-C3 ROM and espflash's second-stage bootloader, which are not bundled with Ohmforge. Run scripts/fetch-esp-rom-elfs.ps1 (or scripts/fetch-esp-rom-elfs.sh) and click Reset. Unlike the LED blink demo, these esp-hal apps (dimmer, fade, and the push-button demos) cannot start from the app image alone.";
 
 fn cache_dirs() -> Vec<PathBuf> {
     let release = format!("esp-rom-elfs/{ROM_ELFS_RELEASE}");

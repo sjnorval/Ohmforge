@@ -1,12 +1,14 @@
 use egui::{Align2, FontId, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::{GPIO_LED, GPIO_POT, LED_REF, POT_REF, RESISTOR_REF};
+use crate::schematic::{draw_psu, hover_tooltip};
+use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
 
-pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32, position: Option<f64>) {
+pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32, position: Option<f64>, supply: SupplyStatus) {
     panel().show(ui, |ui| {
         ui.label(RichText::new("Schematic").strong());
-        draw(ui, brightness, position);
+        draw(ui, brightness, position, supply);
         ui.horizontal(|ui| {
             let pct = (brightness * 100.0).round() as i32;
             ui.label(RichText::new(format!("LED {pct}%")).strong());
@@ -21,7 +23,7 @@ pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32, position: Opti
     });
 }
 
-fn draw(ui: &mut Ui, brightness: f32, position: Option<f64>) {
+fn draw(ui: &mut Ui, brightness: f32, position: Option<f64>, supply: SupplyStatus) {
     let (response, painter) = ui.allocate_painter(vec2(ui.available_width(), 268.0), Sense::hover());
     let description = if position.is_some() {
         format!(
@@ -129,7 +131,7 @@ fn draw(ui: &mut Ui, brightness: f32, position: Option<f64>) {
         line(&[(62.0, 168.0), (62.0, 154.0)], wire);
         // 3.3 V rail to the top of the track (shown as a short stub and label).
         line(&[(62.0, 168.0), (62.0, 158.0), (28.0, 158.0)], wire);
-        label(26.0, 158.0, Align2::RIGHT_CENTER, "3.3 V", text);
+        label(26.0, 158.0, Align2::RIGHT_CENTER, "VDD", text);
         line(&[(62.0, 228.0), (62.0, 238.0)], wire);
         label(62.0, 258.0, Align2::CENTER_CENTER, "GND", muted);
         label(52.0, 178.0, Align2::RIGHT_CENTER, "3", muted);
@@ -145,5 +147,67 @@ fn draw(ui: &mut Ui, brightness: f32, position: Option<f64>) {
         );
         label(98.0, 238.0, Align2::CENTER_CENTER, POT_REF, text);
         label(98.0, 168.0, Align2::LEFT_CENTER, "10 kΩ", muted);
+        hover_tooltip(
+            ui,
+            Rect::from_min_max(point(52.0, 168.0), point(86.0, 228.0)),
+            "rv1",
+            "RV1 · 10 kΩ potentiometer",
+        );
     }
+
+    label(27.0, 64.0, Align2::LEFT_CENTER, "VDD", text);
+    let psu_origin = if position.is_some() {
+        point(300.0, 168.0)
+    } else {
+        point(18.0, 210.0)
+    };
+    let plus_left = position.is_some();
+    let (plus, psu) = draw_psu(
+        &painter,
+        psu_origin,
+        supply.volts,
+        supply.amps,
+        supply.mode != supply::SupplyMode::Off,
+        supply::mode_label(supply.mode),
+        plus_left,
+        muted,
+    );
+    if position.is_some() {
+        // Plus on the left of the PSU feeds the existing VDD stub at the pot.
+        painter.add(Shape::line(
+            vec![plus, point(300.0, 158.0), point(28.0, 158.0)],
+            Stroke::new(1.7, TEAL),
+        ));
+        painter.add(Shape::line(
+            vec![point(8.0, 158.0), point(8.0, 64.0), point(18.0, 64.0)],
+            Stroke::new(1.7, TEAL),
+        ));
+    } else {
+        painter.add(Shape::line(
+            vec![
+                plus,
+                point(96.0, 224.0),
+                point(8.0, 224.0),
+                point(8.0, 64.0),
+                point(18.0, 64.0),
+            ],
+            Stroke::new(1.7, TEAL),
+        ));
+        painter.line_segment([point(96.0, 252.0), point(96.0, 258.0)], wire);
+        label(96.0, 266.0, Align2::CENTER_CENTER, "GND", muted);
+    }
+    hover_tooltip(ui, chip, "u1", "U1 · ESP32-C3");
+    hover_tooltip(
+        ui,
+        Rect::from_min_max(point(157.0, 70.0), point(207.0, 94.0)),
+        "r2",
+        "R2 · 330 Ω",
+    );
+    hover_tooltip(
+        ui,
+        Rect::from_min_max(point(255.0, 60.0), point(310.0, 130.0)),
+        "d1",
+        "D1 · red LED 0603",
+    );
+    hover_tooltip(ui, psu, "psu", "Bench supply feeding the VDD rail");
 }

@@ -9,6 +9,7 @@ use of_soc_esp32c3::UartByte;
 
 use crate::adc_pwm::{PwmKind, PwmSim};
 use crate::blink::Blink;
+use crate::button::{ButtonKind, ButtonSim};
 use crate::kind::DemoKind;
 use crate::supply::{SupplySettings, SupplyStatus};
 use crate::trace;
@@ -20,6 +21,7 @@ pub(crate) enum Command {
     SetPlaying(bool),
     Reset,
     SetPot(f64),
+    SetButton(bool),
     SetSupply(SupplySettings),
     PushUart(Vec<u8>),
     Shutdown,
@@ -38,9 +40,11 @@ pub(crate) struct Snapshot {
     pub rt_factor: f64,
     pub lagging: bool,
     pub pot: f64,
+    pub button: bool,
     pub led_ma: f64,
     pub led_instant: f64,
     pub wiper_v: Option<f64>,
+    pub button_v: Option<f64>,
     pub pwm_duty: Option<f64>,
     pub pwm_freq: Option<f64>,
     pub adc: Option<(u32, u32)>,
@@ -65,9 +69,11 @@ impl Snapshot {
             rt_factor: 0.0,
             lagging: false,
             pot: 0.5,
+            button: false,
             led_ma: 0.0,
             led_instant: 0.0,
             wiper_v: None,
+            button_v: None,
             pwm_duty: None,
             pwm_freq: None,
             adc: None,
@@ -119,10 +125,10 @@ impl Drop for LiveSession {
     }
 }
 
-#[allow(clippy::large_enum_variant)] // PwmSim is much larger until the button variant lands.
 enum Running {
     Blink(Blink),
     Pwm(PwmSim),
+    Button(ButtonSim),
 }
 
 struct Worker {
@@ -131,6 +137,7 @@ struct Worker {
     playing: bool,
     speed: f64,
     pot: f64,
+    button: bool,
     supply: SupplySettings,
     rt_factor: f64,
     lagging: bool,
@@ -143,6 +150,7 @@ impl Worker {
         self.kind = kind;
         self.booting = kind.needs_rom();
         self.playing = false;
+        self.button = false;
         if !kind.has_pot() {
             self.pot = 0.5;
         }
@@ -160,6 +168,12 @@ impl Worker {
             DemoKind::Fade => PwmSim::with_supply(PwmKind::Fade, self.pot, self.supply)
                 .map(Running::Pwm)
                 .map_err(|e| e.to_string()),
+            DemoKind::ButtonPoll => ButtonSim::with_supply(ButtonKind::Poll, self.supply)
+                .map(Running::Button)
+                .map_err(|e| e.to_string()),
+            DemoKind::ButtonIrq => ButtonSim::with_supply(ButtonKind::Irq, self.supply)
+                .map(Running::Button)
+                .map_err(|e| e.to_string()),
         };
         self.sim = result;
         self.booting = false;
@@ -173,6 +187,7 @@ impl Worker {
         match &self.sim {
             Ok(Running::Blink(s)) => s.time(),
             Ok(Running::Pwm(s)) => s.time(),
+            Ok(Running::Button(s)) => s.time(),
             Err(_) => 0.0,
         }
     }
@@ -181,6 +196,7 @@ impl Worker {
         match &mut self.sim {
             Ok(Running::Blink(s)) => s.advance(t).map_err(|e| e.to_string()),
             Ok(Running::Pwm(s)) => s.advance(t).map_err(|e| e.to_string()),
+            Ok(Running::Button(s)) => s.advance(t).map_err(|e| e.to_string()),
             Err(e) => Err(e.clone()),
         }
     }
@@ -194,10 +210,18 @@ impl Worker {
         Ok(())
     }
 
+    fn apply_button(&mut self) -> Result<(), String> {
+        if let Ok(Running::Button(s)) = &mut self.sim {
+            s.set_closed(self.button).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     fn apply_supply(&mut self) -> Result<(), String> {
         match &mut self.sim {
             Ok(Running::Blink(s)) => s.set_supply(self.supply).map_err(|e| e.to_string()),
             Ok(Running::Pwm(s)) => s.set_supply(self.supply).map_err(|e| e.to_string()),
+            Ok(Running::Button(s)) => s.set_supply(self.supply).map_err(|e| e.to_string()),
             Err(_) => Ok(()),
         }
     }
@@ -206,6 +230,7 @@ impl Worker {
         match &mut self.sim {
             Ok(Running::Blink(s)) => s.push_uart_rx(bytes),
             Ok(Running::Pwm(s)) => s.push_uart_rx(bytes),
+            Ok(Running::Button(s)) => s.push_uart_rx(bytes),
             Err(_) => {}
         }
     }
@@ -218,6 +243,7 @@ impl Worker {
         snap.rt_factor = self.rt_factor;
         snap.lagging = self.lagging;
         snap.pot = self.pot;
+        snap.button = self.button;
         snap.supply = self.supply;
         snap.generation = self.generation;
         match &mut self.sim {
@@ -252,6 +278,17 @@ impl Worker {
                 snap.uart = s.uart_bytes().to_vec();
                 snap.uart_baud = s.uart_baud();
             }
+            Ok(Running::Button(s)) => {
+                snap.time = s.time();
+                snap.led_instant = s.current_ma().unwrap_or(0.0);
+                snap.led_ma = s.average_ma();
+                snap.supply_status = s.supply_status();
+                snap.led_trace = s.trace();
+                snap.button = s.closed();
+                snap.button_v = s.button_volts().ok();
+                snap.uart = s.uart_bytes().to_vec();
+                snap.uart_baud = s.uart_baud();
+            }
         }
         snap
     }
@@ -264,6 +301,7 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
         playing: false,
         speed: 1.0,
         pot: 0.5,
+        button: false,
         supply: SupplySettings::default(),
         rt_factor: 0.0,
         lagging: false,
@@ -374,6 +412,14 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
             }
             publish(shared, w.snapshot());
         }
+        Command::SetButton(c) => {
+            w.button = c;
+            if let Err(e) = w.apply_button() {
+                w.sim = Err(e);
+                w.playing = false;
+            }
+            publish(shared, w.snapshot());
+        }
         Command::SetSupply(s) => {
             w.supply = s.sanitized();
             if let Err(e) = w.apply_supply() {
@@ -395,13 +441,11 @@ fn publish(shared: &Arc<Mutex<Snapshot>>, snap: Snapshot) {
 
 // Keep the compiler aware that TRACE_WINDOW is part of the live pacing story.
 #[allow(dead_code)]
-fn _trace_window() -> f64 {
-    trace::TRACE_WINDOW
-}
+const _WINDOW: f64 = trace::TRACE_WINDOW;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Instant;
 
     fn report(name: &str, sim_s: f64, run: impl FnOnce()) {
         let t0 = Instant::now();
@@ -432,6 +476,16 @@ mod tests {
                 }
                 Err(e) => panic!("{e}"),
             }
+        }
+        match crate::button::ButtonSim::new(crate::button::ButtonKind::Poll) {
+            Ok(mut sim) => report("button-poll 10 ms", 0.010, || sim.advance(0.010).unwrap()),
+            Err(e) if e.to_string().contains("fetch-esp-rom-elfs") => {
+                assert!(
+                    std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
+                    "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {e}"
+                );
+            }
+            Err(e) => panic!("{e}"),
         }
     }
 }
