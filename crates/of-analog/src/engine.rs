@@ -16,13 +16,17 @@
 //!   redone until it ends within `resolution` after the crossing; the engine
 //!   then stops early there and posts the bound event, so the kernel shrinks
 //!   the slice and the receiver sees the crossing time.
+//! * **Sampling:** [`AnalogEngine::sample_on`] answers a request event
+//!   with the present value of a signal, carried in the reply's code (a
+//!   [`ValueCode`]) and sent at the same time; for example an ADC reading
+//!   a node voltage.
 //! * **Breakpoints:** device breakpoints (source corners) land exactly, as
 //!   in `.tran`; kernel breakpoints and events end slices, which the solver
 //!   also lands on exactly.
 
 use std::collections::BTreeMap;
 
-use of_core::{Engine, EngineError, Event, SimTime, SyncCtx};
+use of_core::{Engine, EngineError, Event, SimTime, SyncCtx, ValueCode};
 
 use crate::analysis::tran::{Crossing, StepEnd, Stepper};
 use crate::analysis::{AnalysisError, Options, TranRequest};
@@ -83,6 +87,13 @@ pub struct SetParam {
 }
 
 #[derive(Debug, Clone)]
+struct Sample {
+    signal: String,
+    target: u32,
+    reply: ValueCode,
+}
+
+#[derive(Debug, Clone)]
 struct Watch {
     crossing: Crossing,
     target: u32,
@@ -115,6 +126,7 @@ pub struct AnalogEngine {
     resolution: f64,
     watches: Vec<Watch>,
     actions: BTreeMap<u32, Vec<SetParam>>,
+    samples: BTreeMap<u32, Sample>,
     rec: Option<Waveforms>,
     changed: bool,
 }
@@ -154,6 +166,7 @@ impl AnalogEngine {
             resolution: cfg.resolution,
             watches: Vec::new(),
             actions: BTreeMap::new(),
+            samples: BTreeMap::new(),
             rec,
             changed: false,
         })
@@ -194,6 +207,25 @@ impl AnalogEngine {
     /// Apply `changes` whenever an event with `code` arrives.
     pub fn on_code(&mut self, code: u32, changes: Vec<SetParam>) {
         self.actions.insert(code, changes);
+    }
+
+    /// Whenever an event with `code` arrives, send `target` the value of
+    /// `signal` (as [`Self::value`] names it) at that moment, encoded with
+    /// `reply`, at the same time. Parameter changes arriving at the same
+    /// time are not yet solved for, so the value is the one just before
+    /// them.
+    pub fn sample_on(&mut self, code: u32, signal: &str, target: u32, reply: ValueCode) -> Result<(), EngineApiError> {
+        self.value(signal)
+            .ok_or_else(|| EngineApiError::UnknownSignal(signal.to_owned()))?;
+        self.samples.insert(
+            code,
+            Sample {
+                signal: signal.to_owned(),
+                target,
+                reply,
+            },
+        );
+        Ok(())
     }
 
     /// Report crossings of `signal` through `level` as event `(target,
@@ -295,7 +327,11 @@ impl Engine for AnalogEngine {
         Ok(limit)
     }
 
-    fn on_event(&mut self, ev: &Event, _cx: &mut SyncCtx<'_>) -> Result<(), EngineError> {
+    fn on_event(&mut self, ev: &Event, cx: &mut SyncCtx<'_>) -> Result<(), EngineError> {
+        if let Some(s) = self.samples.get(&ev.code) {
+            let v = self.value(&s.signal).unwrap_or(0.0);
+            cx.schedule(ev.at, s.target, s.reply.encode(v));
+        }
         let Some(changes) = self.actions.get(&ev.code).cloned() else {
             return Ok(());
         };

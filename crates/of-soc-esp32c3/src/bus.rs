@@ -11,9 +11,11 @@ use crate::efuse::Efuse;
 use crate::flash::SpiFlash;
 use crate::gpio::Gpio;
 use crate::intmatrix::{IntMatrix, source};
+use crate::ledc::{Ledc, SignalChange};
 use crate::map::{self, within};
 use crate::rng::{self, Rng};
 use crate::rtc_cntl::{RtcCntl, RtcWatchdog};
+use crate::saradc::SarAdc;
 use crate::sha::Sha;
 use crate::spi_mem::SpiMem;
 use crate::system::System;
@@ -69,6 +71,10 @@ pub struct SocBus {
     pub rtc_cntl: RtcCntl,
     /// Interrupt matrix and CPU interrupt controller.
     pub intmatrix: IntMatrix,
+    /// LED PWM controller.
+    pub ledc: Ledc,
+    /// SAR ADC digital controller (one-time sampling).
+    pub saradc: SarAdc,
     /// UART0 configuration (the bytes it sends are in `uart_tx`).
     pub uart0: Uart,
     uart_tx: Vec<u8>,
@@ -122,6 +128,8 @@ impl SocBus {
             timg: [Timg::new(), Timg::new()],
             rtc_cntl: RtcCntl::new(),
             intmatrix: IntMatrix::new(),
+            ledc: Ledc::new(),
+            saradc: SarAdc::new(),
             uart0: Uart::new(),
             uart_tx: Vec::new(),
             deferred: Vec::new(),
@@ -261,6 +269,18 @@ impl SocBus {
         std::mem::take(&mut self.uart_tx)
     }
 
+    /// LEDC output changes since the last call, in time order (the pins
+    /// they drive are not updated yet; see [`Self::apply_signal`]).
+    pub fn take_signal_changes(&mut self) -> Vec<SignalChange> {
+        self.ledc.take_changes()
+    }
+
+    /// Put an LEDC output change on its GPIO matrix signal.
+    pub fn apply_signal(&mut self, c: SignalChange) {
+        self.gpio
+            .set_output_signal(usize::from(crate::ledc::SIGNAL_BASE + c.channel), c.level);
+    }
+
     /// Whether GPIO output state may have changed since the last call.
     pub fn take_pins_dirty(&mut self) -> bool {
         std::mem::take(&mut self.pins_dirty)
@@ -306,6 +326,9 @@ impl SocBus {
         self.systimer = Systimer::new();
         self.timg = [Timg::new(), Timg::new()];
         self.intmatrix = IntMatrix::new();
+        // With the GPIO matrix (its signal levels are cleared too).
+        self.ledc = Ledc::new();
+        self.saradc.reset();
         self.deferred.clear();
         self.pins_dirty = true;
         if kind == ResetKind::System {
@@ -320,6 +343,8 @@ impl SocBus {
             self.timg[0].next_event(),
             self.timg[1].next_event(),
             self.rtc_cntl.next_event(),
+            self.ledc.next_event(),
+            self.saradc.next_event(),
         ]
         .into_iter()
         .flatten()
@@ -328,6 +353,8 @@ impl SocBus {
 
     fn advance(&mut self, now: SimTime) -> Option<WatchdogReset> {
         self.systimer.advance(now);
+        self.ledc.advance(now);
+        self.saradc.advance(now);
         let mut resets = Vec::new();
         for (g, timg) in (0u8..).zip(&mut self.timg) {
             if let Some((at, kind)) = timg.advance(now) {
@@ -362,6 +389,8 @@ impl SocBus {
                     map::TIMG0_BASE => self.timg[0].write(off, v, now),
                     map::TIMG1_BASE => self.timg[1].write(off, v, now),
                     map::RTC_CNTL_BASE => self.rtc_cntl.write(off, v, now),
+                    map::LEDC_BASE => self.ledc.write(off, v, now),
+                    map::APB_SARADC_BASE => self.saradc.write(off, v, now),
                     _ => None,
                 };
             }
@@ -382,6 +411,8 @@ impl SocBus {
             | st(g1 & 1, source::TG1_T0)
             | st(g1 & 2, source::TG1_WDT)
             | st(u32::from(self.rtc_cntl.irq()), source::RTC_CORE)
+            | st(u32::from(self.ledc.irq()), source::LEDC)
+            | st(u32::from(self.saradc.irq()), source::APB_ADC)
             | st(u32::from(gpio_cpu), source::GPIO)
             | st(u32::from(gpio_nmi), source::GPIO_NMI);
         self.intmatrix.set_sources(levels);
@@ -404,6 +435,8 @@ impl SocBus {
             map::SYSTIMER_BASE => Systimer::is_reg(off),
             map::TIMG0_BASE | map::TIMG1_BASE => Timg::is_reg(off),
             map::RTC_CNTL_BASE => RtcCntl::is_reg(off),
+            map::LEDC_BASE => Ledc::is_reg(off),
+            map::APB_SARADC_BASE => SarAdc::is_reg(off),
             _ => false,
         }
     }
@@ -424,6 +457,8 @@ impl SocBus {
             map::TIMG0_BASE => self.timg[0].read(off),
             map::TIMG1_BASE => self.timg[1].read(off),
             map::RTC_CNTL_BASE => self.rtc_cntl.read(off),
+            map::LEDC_BASE => self.ledc.read(off),
+            map::APB_SARADC_BASE => self.saradc.read(off),
             map::INTERRUPT_BASE => self.intmatrix.read(off),
             map::SYSTEM_BASE => self.system.read(off),
             map::SPI0_BASE => self.spi[0].read(off),
@@ -449,7 +484,12 @@ impl SocBus {
             map::USB_SERIAL_JTAG_BASE => self.usb_serial.write(off, v),
             map::SHA_BASE => self.sha.write(off, v),
             map::IO_MUX_BASE => self.gpio.io_mux_write(off, v).map(|()| self.pins_dirty = true),
-            map::SYSTIMER_BASE | map::TIMG0_BASE | map::TIMG1_BASE | map::RTC_CNTL_BASE
+            map::SYSTIMER_BASE
+            | map::TIMG0_BASE
+            | map::TIMG1_BASE
+            | map::RTC_CNTL_BASE
+            | map::LEDC_BASE
+            | map::APB_SARADC_BASE
                 if Self::timed_reg(block, off) =>
             {
                 self.deferred.push((addr, v));

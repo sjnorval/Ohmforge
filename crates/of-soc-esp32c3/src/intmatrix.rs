@@ -33,6 +33,8 @@ pub mod source {
     pub const GPIO_NMI: u8 = 17;
     /// UART0.
     pub const UART0: u8 = 21;
+    /// LED PWM controller.
+    pub const LEDC: u8 = 23;
     /// RTC core (includes the RTC watchdog interrupt).
     pub const RTC_CORE: u8 = 27;
     /// Timer group 0, timer 0.
@@ -43,6 +45,8 @@ pub mod source {
     pub const TG1_T0: u8 = 34;
     /// Timer group 1, watchdog.
     pub const TG1_WDT: u8 = 35;
+    /// SAR ADC digital controller (`APB_ADC`).
+    pub const APB_ADC: u8 = 43;
     /// SYSTIMER comparator 0 (comparators 1 and 2 follow).
     pub const SYSTIMER_TARGET0: u8 = 37;
     /// SYSTIMER comparator 1.

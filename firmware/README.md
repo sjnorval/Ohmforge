@@ -11,6 +11,7 @@ Rust crates, see below); third-party binaries are never committed.
 | `esp32c3-xip-blinky` | A direct-boot flash image (`xip_blinky.bin`, written at flash offset 0; starts with the magic `0xaedb041d` twice) that runs in place from flash: the ROM maps flash into the IROM/DROM windows and jumps to `0x4200_0008`. It switches off the boot watchdogs, prints `ohmforge xip blinky` from DROM, sums a DROM table into `drom_sum`, then toggles GPIO8 every 250 µs (SYSTIMER deadlines) and counts rising edges in `toggles` | `crates/of-soc-esp32c3/tests/rom_boot.rs` (real ROM), `tests/flash_boot.rs` (ROM-lite) |
 | `esp32c3-esp-hal-blinky` | An unmodified esp-hal 1.2.2 app in Rust: `esp_hal::init` with `CpuClock::max()` (160 MHz), prints `ohmforge esp-hal blinky` on UART0, then toggles GPIO8 every 500 µs (`Instant` deadlines). Built as espflash builds it: `partitions.bin` (flash 0x8000) and `app.bin` (ESP-IDF app image with its app descriptor, flash 0x10000) are cut from `espflash save-image --merge`; the real ROM boots it through espflash's ESP-IDF bootloader | `crates/of-soc-esp32c3/tests/esp_hal_blinky.rs` (real ROM and bootloader) |
 | `esp32c3-esp-hal-button` | Two esp-hal 1.2.2 apps for a push button on GPIO9 (internal pull-up, pressed = low) and an LED on GPIO8, with no debouncing. `button_poll.bin` copies GPIO9 to the LED in a tight loop and prints `poll: <n> <level>` on each change; `button_irq.bin` toggles the LED from a GPIO9 falling-edge interrupt (esp-hal `Io` handler), sleeps in `wfi` and prints `irq: <n>`. Built like the blinky (`partitions.bin` plus one app image each, flash 0x10000) | `crates/of-soc-esp32c3/tests/esp_hal_button.rs` (real ROM and bootloader, analog push button) |
+| `esp32c3-esp-hal-adc-pwm` | Two esp-hal 1.2.2 apps for a potentiometer wiper on GPIO2 (ADC1 channel 2, 11 dB) and an LED on GPIO8 (LEDC channel 0, timer 0, APB clock). `pot_dimmer.bin` reads the pot every 5 ms with esp-hal's curve calibration (`AdcCalCurve`), sets a 1 kHz, 10-bit duty (0 to 2500 mV maps to 0 to 100 %) and prints `adc: <mV> duty: <duty>`; `led_fade.bin` fades the LED from 0 % to 100 % and back with the LEDC hardware fade (5 kHz, 8-bit, 255 steps of one period each) and prints `fade: <n> up` / `fade: <n> down`. Built like the blinky (`partitions.bin` plus one app image each, flash 0x10000) | `crates/of-soc-esp32c3/tests/esp_hal_adc_pwm.rs` (real ROM and bootloader, potentiometer and LED circuit) |
 
 The assembly folders each hold the source, a linker script, a `build.sh` and
 the built ELF (plus the flash image `xip_blinky.bin` for `esp32c3-xip-blinky`). They are
@@ -41,13 +42,16 @@ Espressif's ROM, which boots `esp32c3-xip-blinky` in the ROM tests, is not
 firmware of ours and is never committed; `scripts/fetch-esp-rom-elfs.sh`
 downloads it (see `AGENTS.md` section 3c).
 
-## esp32c3-esp-hal-blinky and esp32c3-esp-hal-button
+## esp32c3-esp-hal-blinky, esp32c3-esp-hal-button and esp32c3-esp-hal-adc-pwm
 
 `esp32c3-esp-hal-button` is built the same way (`build.sh` there; it adds
 esp-hal's `unstable` feature for the GPIO interrupt API and the
 `critical-section` crate, MIT OR Apache-2.0) and commits only
 `partitions.bin`, `button_poll.bin` and `button_irq.bin` (the ELFs stay in
-`target/`). The rest of this section applies to both.
+`target/`). `esp32c3-esp-hal-adc-pwm` is built the same way too (esp-hal's
+`unstable` feature for the ADC and LEDC drivers) and commits
+`partitions.bin`, `pot_dimmer.bin` and `led_fade.bin`. The rest of this
+section applies to all three.
 
 A Rust crate with its own Cargo workspace, `Cargo.lock` and pinned toolchain
 (Rust 1.95.0, `riscv32imc-unknown-none-elf`, from `rust-toolchain.toml`). It

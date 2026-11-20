@@ -75,7 +75,7 @@ const UNMODELLED_OK: &[(u32, u32, &str)] = &[
     (0x6001_c000, 0x1000, "NRX"),
     (0x6001_d000, 0x1000, "BB"),
     (0x6002_6000, 0x1000, "APB_CTRL"),
-    (0x6004_0000, 0x1000, "APB_SARADC"),
+    (0x6004_0000, 0x1000, "APB_SARADC"), // beyond the one-shot registers
     (0x600c_0000, 0x1000, "SYSTEM"),
     (0x600c_1000, 0x1000, "SENSITIVE"),
     (0x600c_e000, 0x1000, "ASSIST_DEBUG"),

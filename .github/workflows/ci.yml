@@ -53,7 +53,7 @@ jobs:
       # code) and espflash's ESP-IDF bootloader (Apache-2.0): pinned,
       # checksummed downloads, never committed.
       - run: scripts/fetch-esp-rom-elfs.sh
-      - run: cargo test -p of-soc-esp32c3 --test rom_boot --test esp_hal_blinky --test esp_hal_button
+      - run: cargo test -p of-soc-esp32c3 --test rom_boot --test esp_hal_blinky --test esp_hal_button --test esp_hal_adc_pwm
         env: { OF_REQUIRE_ESP_ROM: "1" }
       # The committed test firmware must be reproducible from its source.
       - run: |
@@ -61,8 +61,9 @@ jobs:
           bash firmware/esp32c3-timer-irq/build.sh
           bash firmware/esp32c3-xip-blinky/build.sh
           git diff --exit-code -- firmware/
-      # The esp-hal blinky and button apps: Rust 1.95.0 for riscv32imc (its
-      # rust-toolchain.toml) and the pinned espflash release binary.
+      # The esp-hal blinky, button and ADC/PWM apps: Rust 1.95.0 for
+      # riscv32imc (its rust-toolchain.toml) and the pinned espflash release
+      # binary.
       - run: |
           rustup toolchain install 1.95.0 --profile minimal --component rust-src --target riscv32imc-unknown-none-elf
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/espflash.zip" https://github.com/esp-rs/espflash/releases/download/v4.7.0/espflash-x86_64-unknown-linux-gnu.zip
@@ -72,4 +73,6 @@ jobs:
             bash firmware/esp32c3-esp-hal-blinky/build.sh
           ESPFLASH="$RUNNER_TEMP/espflash" OF_CHECK_BOOTLOADER="$RUNNER_TEMP/esp-rom-elfs/20260528/espflash-v4.7.0-esp32c3-bootloader.bin" \
             bash firmware/esp32c3-esp-hal-button/build.sh
+          ESPFLASH="$RUNNER_TEMP/espflash" OF_CHECK_BOOTLOADER="$RUNNER_TEMP/esp-rom-elfs/20260528/espflash-v4.7.0-esp32c3-bootloader.bin" \
+            bash firmware/esp32c3-esp-hal-adc-pwm/build.sh
           git diff --exit-code -- firmware/
