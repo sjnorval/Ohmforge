@@ -14,3 +14,4 @@ workspace = true
 
 [dependencies]
 of-core.workspace = true
+thiserror.workspace = true

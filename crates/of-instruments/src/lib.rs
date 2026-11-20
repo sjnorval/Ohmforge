@@ -1,3 +1,7 @@
 //! Oscilloscope, logic analyser, protocol decoders, multimeter, PSU.
 //!
-//! Placeholder crate; see docs/DESIGN_AND_PLAN.md.
+//! Serial monitor model lives in [`serial`]; egui panels live in `of-ui`.
+
+pub mod serial;
+
+pub use serial::{Delivery, Dir, Entry, SendError, SerialMonitor};

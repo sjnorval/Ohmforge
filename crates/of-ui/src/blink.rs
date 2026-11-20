@@ -4,7 +4,10 @@ mod simulation;
 use std::time::Duration;
 
 use egui::{Align2, Color32, FontId, Frame, Margin, Pos2, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2};
+use of_core::SimTime;
+use of_instruments::SerialMonitor;
 
+use crate::SerialMonitorPanel;
 use simulation::{Blink, END};
 
 const PLAYBACK_RATE: f64 = 1.0 / 2_000.0;
@@ -16,6 +19,9 @@ const PANEL: Color32 = Color32::from_rgb(22, 26, 32);
 pub struct BlinkDemo {
     sim: Result<Blink, Box<dyn std::error::Error>>,
     playing: Option<(f64, f64)>,
+    monitor: SerialMonitor,
+    serial_panel: SerialMonitorPanel,
+    uart_cursor: usize,
 }
 
 impl Default for BlinkDemo {
@@ -30,12 +36,31 @@ impl BlinkDemo {
         Self {
             sim: Blink::new(),
             playing: None,
+            monitor: SerialMonitor::new(),
+            serial_panel: SerialMonitorPanel::default(),
+            uart_cursor: 0,
         }
     }
 
     fn restart(&mut self) {
         self.playing = None;
         self.sim = Blink::new();
+        self.monitor.clear();
+        self.uart_cursor = 0;
+        self.serial_panel = SerialMonitorPanel::default();
+    }
+
+    fn sync_serial(&mut self) {
+        let Ok(sim) = &mut self.sim else {
+            return;
+        };
+        self.monitor.set_baud(sim.uart_baud());
+        let bytes: Vec<_> = sim.uart_bytes().to_vec();
+        while self.uart_cursor < bytes.len() {
+            let b = bytes[self.uart_cursor];
+            self.monitor.push_rx(b.at, &[b.byte]);
+            self.uart_cursor += 1;
+        }
     }
 
     fn tick(&mut self, now: f64) {
@@ -87,8 +112,14 @@ impl BlinkDemo {
             });
             ui.add_space(14.0);
 
+            self.sync_serial();
             match &mut self.sim {
-                Ok(sim) => instruments(ui, sim),
+                Ok(sim) => {
+                    instruments(ui, sim);
+                    ui.add_space(12.0);
+                    let now = SimTime::from_secs_f64(sim.time());
+                    self.serial_panel.show(ui, &mut self.monitor, "UART0", now);
+                }
                 Err(error) => {
                     ui.colored_label(LED_RED, format!("Simulation error: {error}"));
                 }
@@ -105,7 +136,6 @@ fn panel() -> Frame {
 }
 
 fn instruments(ui: &mut Ui, sim: &mut Blink) {
-    let uart = sim.uart();
     let current = match sim.current_ma() {
         Ok(current) => current,
         Err(error) => {
@@ -123,16 +153,6 @@ fn instruments(ui: &mut Ui, sim: &mut Blink) {
         ui.add_space(12.0);
         scope_panel(ui, sim);
     }
-    ui.add_space(12.0);
-    panel().show(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.label(RichText::new("UART0").strong());
-        if uart.is_empty() {
-            ui.weak("Waiting for firmware output…");
-        } else {
-            ui.monospace(uart.trim_end());
-        }
-    });
 }
 
 fn scope_panel(ui: &mut Ui, sim: &mut Blink) {

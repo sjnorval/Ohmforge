@@ -2098,6 +2098,7 @@ name = "of-instruments"
 version = "0.0.1"
 dependencies = [
  "of-core",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

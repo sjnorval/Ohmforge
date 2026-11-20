@@ -6,7 +6,7 @@ use of_components::analog::{Board, Library, Placement, build};
 use of_core::{EngineId, Kernel, SimTime, Stop};
 use of_firmware::ElfImage;
 use of_parts::parse_part;
-use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, all_pin_codes};
+use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, all_pin_codes};
 
 pub(super) const END: SimTime = SimTime::from_us(2_600);
 pub(super) const LED_ON_MA: f64 = 1.0;
@@ -108,12 +108,32 @@ impl Blink {
         self.kernel.now().as_secs_f64()
     }
 
+    #[allow(dead_code)] // unit tests; UI syncs via `uart_bytes`.
     pub(super) fn uart(&mut self) -> String {
         self.kernel
             .engine_as::<Esp32c3Engine>(self.cpu)
             .expect("registered ESP32-C3")
             .soc
             .uart_text()
+    }
+
+    pub(super) fn uart_bytes(&mut self) -> &[UartByte] {
+        self.kernel
+            .engine_as::<Esp32c3Engine>(self.cpu)
+            .expect("registered ESP32-C3")
+            .soc
+            .uart_bytes()
+    }
+
+    pub(super) fn uart_baud(&mut self) -> Option<f64> {
+        const APB_HZ: u64 = 80_000_000;
+        self.kernel
+            .engine_as::<Esp32c3Engine>(self.cpu)
+            .expect("registered ESP32-C3")
+            .soc
+            .bus
+            .uart0
+            .baud(APB_HZ)
     }
 
     fn analog(&mut self) -> Result<&AnalogEngine, Box<dyn Error>> {
@@ -172,5 +192,16 @@ mod tests {
         assert!(trace.iter().any(|&(_, ma)| ma > LED_ON_MA));
         assert!(trace.iter().any(|&(_, ma)| ma.abs() < 1e-3));
         assert!((trace.last().unwrap().0 - END.as_secs_f64()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn monitor_receives_blink_banner_when_synced() {
+        let mut demo_monitor = of_instruments::SerialMonitor::new();
+        let mut sim = Blink::new().unwrap();
+        sim.advance(125e-6).unwrap();
+        for b in sim.uart_bytes() {
+            demo_monitor.push_rx(b.at, &[b.byte]);
+        }
+        assert_eq!(demo_monitor.text_device_to_host(), "ohmforge blinky\n");
     }
 }
