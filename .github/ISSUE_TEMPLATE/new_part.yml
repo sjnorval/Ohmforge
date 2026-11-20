@@ -1,0 +1,100 @@
+name: New part or model
+description: Request a real, orderable part for the library, or a simulation model for one.
+title: "[Part]: "
+labels: ["part-request", "area:parts"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every Ohmforge part is a real, orderable part, so the BOM comes straight from the design. Please give enough detail to identify the exact part.
+        Link datasheets and vendor models; do not attach vendor SPICE models with restrictive terms. Parts data is licensed CC-BY-SA-4.0 (see [parts/LICENSE.md](https://github.com/sjnorval/Ohmforge/blob/main/parts/LICENSE.md)).
+        Want to add it yourself? See "Adding a part" in [CONTRIBUTING.md](https://github.com/sjnorval/Ohmforge/blob/main/CONTRIBUTING.md#adding-a-part).
+  - type: input
+    id: name
+    attributes:
+      label: Part name
+      placeholder: TL431 adjustable shunt regulator
+    validations:
+      required: true
+  - type: input
+    id: manufacturer
+    attributes:
+      label: Manufacturer
+      placeholder: Texas Instruments
+    validations:
+      required: true
+  - type: input
+    id: mpn
+    attributes:
+      label: Manufacturer part number (MPN)
+      description: The exact orderable MPN, including package and packaging suffix if you know it.
+      placeholder: TL431AIDBZR
+    validations:
+      required: true
+  - type: input
+    id: datasheet
+    attributes:
+      label: Datasheet link
+      placeholder: https://www.ti.com/lit/ds/symlink/tl431.pdf
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Passive (resistor, capacitor, inductor, crystal)
+        - Discrete (diode, LED, transistor, MOSFET)
+        - Regulator or power
+        - Analog IC (op-amp, comparator, reference)
+        - Sensor
+        - Display
+        - Driver (motor, LED, relay)
+        - Electromechanical (switch, relay, motor, servo)
+        - Connector or module
+        - Microcontroller or SoC
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model type needed
+      description: How should Ohmforge simulate it? Pick the simplest that would be useful.
+      options:
+        - Not sure
+        - Analog primitives only (R, C, L, diode, BJT, MOSFET)
+        - SPICE macromodel or subcircuit
+        - Digital or bus behaviour (I2C, SPI, UART, GPIO)
+        - Mixed (analog supply load plus digital behaviour)
+        - BOM-only (no simulation behaviour needed)
+    validations:
+      required: true
+  - type: input
+    id: package
+    attributes:
+      label: Package or footprint
+      placeholder: SOT-23-3
+  - type: textarea
+    id: suppliers
+    attributes:
+      label: Suppliers and prices
+      description: Where you buy it, with links and a price if you have one (ZAR preferred, any currency is fine).
+      placeholder: |
+        - LCSC C21899
+        - Communica, R4.50
+  - type: textarea
+    id: spice
+    attributes:
+      label: Existing models
+      description: Links to vendor SPICE models or reference models, and their licence terms if known.
+  - type: textarea
+    id: use
+    attributes:
+      label: What do you want to build or test with it?
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to add this part myself (part.toml, tests, CC-BY-SA-4.0 data).
