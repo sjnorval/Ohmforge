@@ -10,6 +10,7 @@ use crate::bus::SocBus;
 use crate::gpio::{GPIO_COUNT, PinOut};
 use crate::map::{self, within};
 use crate::rom::RomImage;
+use crate::system::System;
 use crate::watchdog::{ResetKind, WatchdogReset};
 
 /// A pin output change, stamped with the hart time of the instruction
@@ -86,6 +87,8 @@ pub struct Esp32c3 {
     boot: Option<Boot>,
     boot_watchdogs: bool,
     resets: Vec<WatchdogReset>,
+    /// The CPU clock the hart runs at (from [`SocBus::system`]).
+    cpu_hz: u64,
 }
 
 impl Default for Esp32c3 {
@@ -99,10 +102,14 @@ pub const CHIP_ID: u16 = 5;
 
 impl Esp32c3 {
     /// Power-on state. The PC is the ROM reset vector until firmware is
-    /// loaded. Watchdogs are idle, as if a bootloader had dealt with them;
-    /// see [`Self::arm_boot_watchdogs`].
+    /// loaded. Watchdogs are idle, as if a bootloader had dealt with them
+    /// (see [`Self::arm_boot_watchdogs`]), and the CPU runs at 160 MHz from
+    /// the PLL, as ESP-IDF and esp-hal apps set it up;
+    /// [`Self::power_on_rom`] starts from the reset clock instead.
     pub fn new() -> Self {
-        let bus = SocBus::new();
+        let mut bus = SocBus::new();
+        bus.system = System::pll_160mhz();
+        let cpu_hz = bus.system.cpu_hz();
         let pins = std::array::from_fn(|p| bus.gpio.pin_out(p));
         Self {
             hart: Hart::new(HartConfig::esp32c3()),
@@ -113,6 +120,21 @@ impl Esp32c3 {
             boot: None,
             boot_watchdogs: false,
             resets: Vec::new(),
+            cpu_hz,
+        }
+    }
+
+    /// The CPU clock frequency the hart runs at now.
+    pub fn cpu_hz(&self) -> u64 {
+        self.cpu_hz
+    }
+
+    /// Retime the hart if the SYSTEM clock configuration changed.
+    fn apply_cpu_clock(&mut self) {
+        let hz = self.bus.system.cpu_hz();
+        if hz != self.cpu_hz {
+            self.cpu_hz = hz;
+            self.hart.set_clock_hz(hz);
         }
     }
 
@@ -135,6 +157,9 @@ impl Esp32c3 {
         let _ = self.bus.load(map::IROM_INTERNAL.0, rom.bytes());
         self.boot = None;
         self.hart.reset();
+        // The ROM starts on the reset clock (XTAL / 2) and sets its own.
+        self.bus.system = System::new();
+        self.apply_cpu_clock();
         if self.bus.strapping == crate::bus::STRAP_SPI_BOOT {
             // Hardware arms the flash boot protection at reset.
             self.arm_boot_watchdogs();
@@ -146,6 +171,8 @@ impl Esp32c3 {
     /// [`crate::boot`]). Resets boot the flash again.
     pub fn boot_flash(&mut self) -> Result<FlashBoot, FlashBootError> {
         let booted = boot::boot(&mut self.bus)?;
+        self.bus.system = System::pll_160mhz();
+        self.apply_cpu_clock();
         self.hart.set_pc(booted.entry());
         self.boot = Some(Boot::Flash);
         Ok(booted)
@@ -223,6 +250,8 @@ impl Esp32c3 {
         if !used.is_empty() {
             self.bus.cache.enable();
         }
+        self.bus.system = System::pll_160mhz();
+        self.apply_cpu_clock();
         self.hart.set_pc(boot.entry);
         self.boot = Some(Boot::Image(boot));
         Ok(())
@@ -280,6 +309,7 @@ impl Esp32c3 {
         if let Some(r) = self.bus.settle(now) {
             self.watchdog_reset(r);
         }
+        self.apply_cpu_clock();
         self.hart.set_interrupt_lines(self.bus.cpu_lines());
         for byte in self.bus.take_uart_tx() {
             self.uart.push(UartByte { at: now, byte });
@@ -305,6 +335,7 @@ impl Esp32c3 {
         self.resets.push(r);
         self.hart.reset();
         self.bus.reset_peripherals(r.kind);
+        self.apply_cpu_clock();
         self.bus.rtc_cntl.set_reset_cause(r.cause_code());
         if self.boot_watchdogs && r.kind != ResetKind::Cpu {
             self.bus.arm_boot_watchdogs(self.hart.local_time());

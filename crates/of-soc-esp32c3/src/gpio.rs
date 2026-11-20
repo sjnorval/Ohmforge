@@ -3,9 +3,13 @@
 //! Modelled: `GPIO_OUT`, `GPIO_ENABLE` and their W1TS/W1TC aliases,
 //! `GPIO_IN` (pin inputs set by the SoC), `GPIO_FUNCn_OUT_SEL_CFG`
 //! (`OUT_SEL` 128 = "GPIO_OUT bit n" and `INV_SEL`), and the IO MUX
-//! `MCU_SEL` and `FUN_DRV` fields. A pin drives only when its IO MUX
-//! function is 1 (GPIO matrix), its `OUT_SEL` is 128 and its `GPIO_ENABLE`
-//! bit is set; other selections leave it high-impedance for now.
+//! `MCU_SEL` and `FUN_DRV` fields, `GPIO_PINn` (`PAD_DRIVER`: open drain)
+//! and `GPIO_FUNCn_IN_SEL_CFG` (input routing, stored only). A pin drives
+//! only when its IO MUX function is 1 (GPIO matrix), its `OUT_SEL` is 128
+//! and its `GPIO_ENABLE` bit is set; other selections leave it
+//! high-impedance for now. An open-drain pin drives low and releases
+//! (high-impedance) for high. The other `GPIO_PINn` fields (pin
+//! interrupts, wake-up) are stored without effect.
 
 /// Number of GPIO pins on the ESP32-C3 (GPIO0 to GPIO21).
 pub const GPIO_COUNT: usize = 22;
@@ -27,6 +31,11 @@ pub mod reg {
     pub const ENABLE_W1TC: u32 = 0x28;
     /// Input levels (read-only).
     pub const IN: u32 = 0x3c;
+    /// `GPIO_PIN0_REG`; pin n is at `+ 4 * n`.
+    pub const PIN: u32 = 0x74;
+    /// `GPIO_FUNC0_IN_SEL_CFG`; peripheral input signal n is at `+ 4 * n`
+    /// (128 signals).
+    pub const FUNC_IN_SEL: u32 = 0x154;
     /// `GPIO_FUNC0_OUT_SEL_CFG`; pin n is at `+ 4 * n`.
     pub const FUNC_OUT_SEL: u32 = 0x554;
 }
@@ -72,7 +81,14 @@ pub struct Gpio {
     input: u32,
     out_sel: [u32; GPIO_COUNT],
     io_mux: [u32; GPIO_COUNT],
+    pin_cfg: [u32; GPIO_COUNT],
+    in_sel: [u32; IN_SIGNALS],
 }
+
+/// Peripheral input signals routed by `GPIO_FUNCn_IN_SEL_CFG`.
+const IN_SIGNALS: usize = 128;
+/// `GPIO_PINn.PAD_DRIVER`: open drain.
+const PAD_DRIVER: u32 = 1 << 2;
 
 impl Default for Gpio {
     fn default() -> Self {
@@ -99,6 +115,8 @@ impl Gpio {
             input: 0,
             out_sel: [SIG_GPIO_OUT | (1 << 10); GPIO_COUNT],
             io_mux,
+            pin_cfg: [0; GPIO_COUNT],
+            in_sel: [0; IN_SIGNALS],
         }
     }
 
@@ -111,6 +129,12 @@ impl Gpio {
             reg::OUT_W1TS | reg::OUT_W1TC | reg::ENABLE_W1TS | reg::ENABLE_W1TC => 0,
             o if (reg::FUNC_OUT_SEL..reg::FUNC_OUT_SEL + 4 * GPIO_COUNT as u32).contains(&o) => {
                 self.out_sel[((o - reg::FUNC_OUT_SEL) / 4) as usize]
+            }
+            o if (reg::PIN..reg::PIN + 4 * GPIO_COUNT as u32).contains(&o) => {
+                self.pin_cfg[((o - reg::PIN) / 4) as usize]
+            }
+            o if (reg::FUNC_IN_SEL..reg::FUNC_IN_SEL + 4 * IN_SIGNALS as u32).contains(&o) => {
+                self.in_sel[((o - reg::FUNC_IN_SEL) / 4) as usize]
             }
             _ => return None,
         })
@@ -128,6 +152,12 @@ impl Gpio {
             reg::IN => {}
             o if (reg::FUNC_OUT_SEL..reg::FUNC_OUT_SEL + 4 * GPIO_COUNT as u32).contains(&o) => {
                 self.out_sel[((o - reg::FUNC_OUT_SEL) / 4) as usize] = v & 0x7ff;
+            }
+            o if (reg::PIN..reg::PIN + 4 * GPIO_COUNT as u32).contains(&o) => {
+                self.pin_cfg[((o - reg::PIN) / 4) as usize] = v & 0x3_ff9f;
+            }
+            o if (reg::FUNC_IN_SEL..reg::FUNC_IN_SEL + 4 * IN_SIGNALS as u32).contains(&o) => {
+                self.in_sel[((o - reg::FUNC_IN_SEL) / 4) as usize] = v & 0x7f;
             }
             _ => return None,
         }
@@ -166,8 +196,10 @@ impl Gpio {
             return PinOut { level: None, strength };
         }
         let inv = sel & (1 << 8) != 0;
+        let high = (self.out >> pin & 1 != 0) != inv;
+        let open_drain = self.pin_cfg[pin] & PAD_DRIVER != 0;
         PinOut {
-            level: Some((self.out >> pin & 1 != 0) != inv),
+            level: if high && open_drain { None } else { Some(high) },
             strength,
         }
     }
@@ -223,6 +255,23 @@ mod tests {
         // UART0 TX (GPIO21) starts on function 0.
         g.write(reg::ENABLE_W1TS, 1 << 21).unwrap();
         assert_eq!(g.pin_out(21).level, None);
+    }
+
+    #[test]
+    fn open_drain_releases_high_and_in_sel_is_stored() {
+        let mut g = Gpio::new();
+        g.write(reg::ENABLE_W1TS, 1 << 8).unwrap();
+        g.write(reg::PIN + 4 * 8, PAD_DRIVER).unwrap();
+        assert_eq!(g.read(reg::PIN + 4 * 8), Some(PAD_DRIVER));
+        assert_eq!(g.pin_out(8).level, Some(false), "drives low");
+        g.write(reg::OUT_W1TS, 1 << 8).unwrap();
+        assert_eq!(g.pin_out(8).level, None, "releases high");
+        g.write(reg::PIN + 4 * 8, 0).unwrap();
+        assert_eq!(g.pin_out(8).level, Some(true), "push-pull again");
+        // U0RXD_IN (signal 6) from GPIO20.
+        g.write(reg::FUNC_IN_SEL + 4 * 6, 20 | 1 << 6).unwrap();
+        assert_eq!(g.read(reg::FUNC_IN_SEL + 4 * 6), Some(20 | 1 << 6));
+        assert_eq!(g.read(reg::FUNC_IN_SEL + 4 * 128), None);
     }
 
     #[test]
