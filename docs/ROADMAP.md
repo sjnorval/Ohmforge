@@ -1,6 +1,6 @@
 # Roadmap and task list
 
-Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress).
+Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress). Items marked "branch `p2-rom-boot`" are verified there but not yet merged.
 
 **Current phase: P2 ESP32-C3 MVP, in progress** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). P1 Analog core and phase one (the RISC-V CPU core, pulled forward from P2) are done; the first P2 slice (blinky end to end), the interrupt matrix, SYSTIMER alarms, timer groups, watchdogs, the ESP image parser and the desktop blink demo are on `main`. P0 leftovers continue alongside.
 
@@ -17,8 +17,8 @@ Status: done; the core is implemented and tested (63 unit tests, 1 doc test, 75 
 - [x] Debugger API: `step`, `run`, breakpoints, halt/resume/reset, register/CSR access, `disassemble_at`
 - [x] riscv-tests harness (`tests/riscv_tests.rs`) and build scripts (`scripts/build-riscv-tests.sh` / `.ps1`), CI job
 - [x] Engine adapter: the `of-core` kernel drives the hart in quanta (done at SoC level as `of_soc_esp32c3::Esp32c3Engine`; register the CPU before the analog engine)
-- [x] `of-soc-esp32c3`: memory map bus (IROM/DROM flash windows, IRAM/DRAM, ROM, RTC fast, peripherals) on top of `Bus` (`SocBus`; no cache MMU yet)
-- [ ] ESP32-C3 custom CSRs (e.g. performance counters `mpcer`/`mpcmr`/`mpccr`, GPIO CSRs) through `Bus::csr_read`/`csr_write`
+- [x] `of-soc-esp32c3`: memory map bus (IROM/DROM flash windows, IRAM/DRAM, ROM, RTC fast, peripherals) on top of `Bus` (`SocBus`; cache MMU on branch `p2-rom-boot`)
+- [~] ESP32-C3 custom CSRs through `Bus::csr_read`/`csr_write`: performance counters `mpcer`/`mpcmr`/`mpccr` and `upcer`/`upcmr`/`upccr` (cycle event only) and the user trap CSRs (stored only) on branch `p2-rom-boot`; other events and the GPIO CSRs to do
 - [x] Interrupt matrix model feeding `set_interrupt_lines` (priority, threshold, edge/level; `of_soc_esp32c3::IntMatrix`)
 - [ ] Calibrate `TimingModel` against a real ESP32-C3 (cycle counts of benchmark loops, flash cache misses)
 - [ ] Decode cache (invalidated by `fence.i` and stores to code) for speed; benchmark MIPS
@@ -82,7 +82,11 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
 - [ ] ELF loading (`object`, `gimli`), flash image layout, ROM from esp-rom-elfs
   - [x] ELF32 RISC-V reader in `of-firmware` (segments, symbols; own code, no `object` dependency yet) and direct ELF boot (`Esp32c3::load_elf`)
   - [x] ESP flash image parser and writer (`of_firmware::EspImage`: header, segments, checksum, optional SHA-256, own SHA-256) and boot from a parsed image (`Esp32c3::load_flash_image`, chip ID checked)
-  - [ ] DWARF line info (`gimli`), partition table / flash layout, ROM boot from esp-rom-elfs, cache MMU
+  - [ ] DWARF line info (`gimli`)
+  - [x] Partition table / flash layout (branch `p2-rom-boot`): `of_firmware::PartitionTable` (parse and write, MD5 row, boot-app choice without OTA data) and 64 KiB-aligned app images (`EspImage::align_flash_segments`)
+  - [x] SPI flash and cache MMU (branch `p2-rom-boot`): 4 MiB `SpiFlash` behind SPI0/SPI1 (`CMD` operations and user transactions), EXTMEM and the 128-entry MMU shared by IROM and DROM (no cache lines or miss timing)
+  - [x] ROM boot from esp-rom-elfs (branch `p2-rom-boot`): the real revision 3 ROM runs (`Esp32c3::power_on_rom`; fetched by `scripts/fetch-esp-rom-elfs.*`, pinned and checksummed, never committed): banner and reset cause, blank flash, direct boot of `firmware/esp32c3-xip-blinky`, loading and SHA-256-checking an image at flash 0, watchdog resets back into the ROM, download strapping (`tests/rom_boot.rs`); ROM-lite fast boot (`Esp32c3::boot_flash`: direct boot, partition-table app, image at 0; `tests/flash_boot.rs`)
+  - [ ] ESP-IDF second-stage bootloader through the real ROM (not tried yet: needs a bootloader build and probably more clock, RTC and SPI set-up)
 - [ ] C3 memory map, interrupt matrix, systimer, timer groups, UART
   - [x] Memory map (ROM, SRAM IRAM/DRAM alias, flash cache windows, RTC fast, peripheral dispatch with read-back for unmodelled registers)
   - [x] SYSTIMER: two units (load, work enable), three comparators in target and period mode, interrupts (52-bit wrap and stall-on-CPU-halt not modelled)
@@ -111,7 +115,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 4. [x] SYSTIMER unit 0 read path, UART0 TX capture (unit tests; banner check in the blinky test)
 5. [x] Blinky firmware (`firmware/esp32c3-blinky`, RV32IMC asm, SYSTIMER-timed): edges every 250 µs without drift (`tests/blinky.rs`)
 6. [x] `Esp32c3Engine` + `PinDriver` + parts-library LED and resistor under the kernel: LED current switches with a 500 µs period, about 4 mA on (`tests/blinky_led.rs`)
-7. [ ] Same blinky from esp-hal (Rust, `riscv32imc-unknown-none-elf`) once the ROM boot path and cache MMU exist (watchdogs and the interrupt matrix are in)
+7. [ ] Same blinky from esp-hal (Rust, `riscv32imc-unknown-none-elf`); the ROM boot path and cache MMU are in on branch `p2-rom-boot`, and our own XIP blinky already boots through the real ROM
 8. [ ] Arduino-ESP32 / ESP-IDF blink through the real ROM and a flash image
 
 ### MVP definition (exit criteria for 0.1)
