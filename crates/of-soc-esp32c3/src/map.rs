@@ -33,6 +33,8 @@ pub const EFUSE_BASE: u32 = 0x6000_8800;
 pub const EFUSE_OFFSET: u32 = EFUSE_BASE - RTC_CNTL_BASE;
 /// IO MUX registers.
 pub const IO_MUX_BASE: u32 = 0x6000_9000;
+/// LED PWM controller (LEDC) registers.
+pub const LEDC_BASE: u32 = 0x6001_9000;
 /// Timer group 0 registers.
 pub const TIMG0_BASE: u32 = 0x6001_f000;
 /// Timer group 1 registers.
@@ -43,6 +45,8 @@ pub const APB_CTRL_BASE: u32 = 0x6002_6000;
 pub const SYSTIMER_BASE: u32 = 0x6002_3000;
 /// SHA accelerator registers.
 pub const SHA_BASE: u32 = 0x6003_b000;
+/// SAR ADC digital controller (APB_SARADC) registers.
+pub const APB_SARADC_BASE: u32 = 0x6004_0000;
 /// USB Serial/JTAG controller registers.
 pub const USB_SERIAL_JTAG_BASE: u32 = 0x6004_3000;
 /// SYSTEM registers (clocks, peripheral clock gates and resets).

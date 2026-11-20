@@ -14,7 +14,9 @@ use crate::system::System;
 use crate::watchdog::{ResetKind, WatchdogReset};
 
 /// A pin output change, stamped with the hart time of the instruction
-/// that caused it (the end of that instruction).
+/// that caused it (the end of that instruction), or for a pin driven by a
+/// peripheral (the LEDC), with the exact time of the peripheral's output
+/// change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PinEdge {
     /// When.
@@ -257,25 +259,35 @@ impl Esp32c3 {
         Ok(())
     }
 
-    /// Run one stretch: until `deadline`, a sync point or a stop. Timer and
-    /// watchdog events before the deadline are handled on the way (the hart
-    /// stops at each one, so interrupts are raised at the right time); sync
-    /// points are handled (writes applied, pin edges and UART bytes stamped)
-    /// before returning. [`RunExit::WaitingForInterrupt`] means the hart
-    /// sleeps in `wfi` with nothing due before `deadline`.
+    /// Run one stretch: until `deadline`, a sync point or a stop. Timer,
+    /// watchdog, PWM and ADC events up to the deadline are handled on the
+    /// way (the hart stops at each one, so interrupts are raised at the
+    /// right time); sync points are handled (writes applied, pin edges and
+    /// UART bytes stamped) before returning. An event that changes a pin
+    /// also ends the stretch, as [`RunExit::SyncRequested`].
+    /// [`RunExit::WaitingForInterrupt`] means the hart sleeps in `wfi` with
+    /// nothing due before `deadline`.
     pub fn run_slice(&mut self, deadline: SimTime) -> RunExit {
         loop {
             let now = self.hart.local_time();
-            let stop = self.bus.next_event().map_or(deadline, |t| t.max(now).min(deadline));
+            let event = self.bus.next_event().map(|t| t.max(now)).filter(|&t| t <= deadline);
+            let stop = event.unwrap_or(deadline);
             let exit = self.hart.run_until(&mut self.bus, stop);
             match exit {
                 RunExit::SyncRequested(_) => {
                     self.sync();
                     return exit;
                 }
-                RunExit::BudgetExhausted | RunExit::WaitingForInterrupt if stop < deadline => {
+                RunExit::BudgetExhausted | RunExit::WaitingForInterrupt if event.is_some() => {
                     self.hart.idle_until(stop);
+                    let edges = self.edges.len();
                     self.sync();
+                    if self.edges.len() > edges {
+                        return RunExit::SyncRequested(self.hart.pc());
+                    }
+                    if stop >= deadline {
+                        return exit;
+                    }
                 }
                 RunExit::BudgetExhausted => {
                     self.sync();
@@ -310,21 +322,35 @@ impl Esp32c3 {
             self.watchdog_reset(r);
         }
         self.apply_cpu_clock();
+        // PWM output changes, each at its own time.
+        let changes = self.bus.take_signal_changes();
+        for &c in &changes {
+            self.bus.apply_signal(c);
+            self.stamp_pins(c.at);
+        }
+        if !changes.is_empty() {
+            self.bus.inputs_changed();
+        }
         self.hart.set_interrupt_lines(self.bus.cpu_lines());
         for byte in self.bus.take_uart_tx() {
             self.uart.push(UartByte { at: now, byte });
         }
         if self.bus.take_pins_dirty() {
-            for (pin, old) in self.pins.iter_mut().enumerate() {
-                let new = self.bus.gpio.pin_out(pin);
-                if new != *old {
-                    *old = new;
-                    self.edges.push(PinEdge {
-                        at: now,
-                        pin: pin as u8,
-                        out: new,
-                    });
-                }
+            self.stamp_pins(now);
+        }
+    }
+
+    /// Record a [`PinEdge`] at `at` for every pin whose output changed.
+    fn stamp_pins(&mut self, at: SimTime) {
+        for (pin, old) in self.pins.iter_mut().enumerate() {
+            let new = self.bus.gpio.pin_out(pin);
+            if new != *old {
+                *old = new;
+                self.edges.push(PinEdge {
+                    at,
+                    pin: pin as u8,
+                    out: new,
+                });
             }
         }
     }
@@ -371,6 +397,13 @@ impl Esp32c3 {
         self.bus.gpio.set_input(pin, level);
         self.bus.inputs_changed();
         self.hart.set_interrupt_lines(self.bus.cpu_lines());
+    }
+
+    /// Set the voltage the SAR ADC sees on GPIO `pad` (0 to 5) when no
+    /// sample comes from a linked analog engine (see
+    /// [`crate::Esp32c3Engine::link_adc`]).
+    pub fn set_adc_input(&mut self, pad: u8, volts: f64) {
+        self.bus.saradc.set_input(pad, volts);
     }
 
     /// Current output state of `pin`.
