@@ -28,8 +28,8 @@ fn elf_segments_land_in_flash_and_dram() {
     assert_eq!(soc.hart.pc(), img.entry);
     assert_eq!(img.segments.len(), 3, "text, rodata, data+bss");
     let banner = img.symbol("banner").map(|s| s.value);
-    assert_eq!(banner, Some(0x3c00_0020));
-    assert_eq!(soc.bus.peek(0x3c00_0020, 16).unwrap(), b"ohmforge blinky\n");
+    assert_eq!(banner, Some(0x3c01_0020));
+    assert_eq!(soc.bus.peek(0x3c01_0020, 16).unwrap(), b"ohmforge blinky\n");
     assert_eq!(word(&soc, img.symbol("magic").unwrap().value), 0x0f0f_1234);
     assert_eq!(word(&soc, img.symbol("toggles").unwrap().value), 0, ".bss zeroed");
 }
@@ -48,6 +48,7 @@ fn segments_outside_the_map_are_rejected() {
             flags: 4,
         }],
         symbols: vec![],
+        sections: vec![],
     };
     assert_eq!(
         soc.load_elf(&img),

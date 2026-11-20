@@ -40,6 +40,24 @@ pub struct WatchdogReset {
     pub source: ResetSource,
 }
 
+impl WatchdogReset {
+    /// The reset cause code the chip reports afterwards in
+    /// `RTC_CNTL_RESET_STATE_REG` (and the ROM prints as `rst:0x..`).
+    pub fn cause_code(&self) -> u32 {
+        use crate::rtc_cntl::reset_cause as c;
+        match (self.source, self.kind) {
+            (ResetSource::Mwdt(0), ResetKind::Cpu) => c::CPU0_MWDT0,
+            (ResetSource::Mwdt(_), ResetKind::Cpu) => c::CPU0_MWDT1,
+            (ResetSource::Mwdt(0), _) => c::CORE_MWDT0,
+            (ResetSource::Mwdt(_), _) => c::CORE_MWDT1,
+            (ResetSource::Rwdt, ResetKind::Cpu) => c::CPU0_RTC_WDT,
+            (ResetSource::Rwdt, ResetKind::Core) => c::CORE_RTC_WDT,
+            (ResetSource::Rwdt, ResetKind::System) => c::SYS_RTC_WDT,
+            (ResetSource::Swd, _) => c::SYS_SUPER_WDT,
+        }
+    }
+}
+
 /// What a stage does when it expires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {

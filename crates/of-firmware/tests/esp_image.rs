@@ -109,7 +109,39 @@ fn blinky_elf_converts_and_round_trips() {
     let img = EspImage::from_elf(&elf, 5);
     assert_eq!(img.entry, 0x4200_0020);
     let addrs: Vec<u32> = img.segments.iter().map(|s| s.addr).collect();
-    assert_eq!(addrs, [0x4200_0020, 0x3c00_0020, 0x3fc8_0000]);
+    assert_eq!(addrs, [0x4200_0020, 0x3c01_0020, 0x3fc8_0000]);
     let bytes = img.to_bytes();
     assert_eq!(EspImage::parse(&bytes), Ok(img));
+}
+
+#[test]
+fn flash_mapped_segments_are_aligned_to_mmu_pages() {
+    let mut img = EspImage::new(5, 0x4200_0020);
+    img.segments = vec![
+        ImageSegment {
+            addr: 0x3c01_0020,
+            data: vec![1; 40],
+        },
+        ImageSegment {
+            addr: 0x3fc8_0000,
+            data: vec![2; 12],
+        },
+        ImageSegment {
+            addr: 0x4202_0020,
+            data: vec![3; 100],
+        },
+    ];
+    let mapped = |a: u32| (0x3c00_0000..0x3c80_0000).contains(&a) || (0x4200_0000..0x4280_0000).contains(&a);
+    img.align_flash_segments(0x1_0000, mapped).expect("fits");
+    let offsets = img.data_offsets();
+    for (seg, off) in img.segments.iter().zip(&offsets) {
+        if mapped(seg.addr) {
+            assert_eq!((0x1_0000 + off) % 0x1_0000, seg.addr % 0x1_0000, "{:#x}", seg.addr);
+        }
+    }
+    assert!(img.segments.iter().any(|s| s.addr == 0), "a padding segment was needed");
+    // Round trip keeps the padding and the layout.
+    let parsed = EspImage::parse(&img.to_bytes()).expect("valid");
+    assert_eq!(parsed.data_offsets(), offsets);
+    assert_eq!(parsed.segments.len(), img.segments.len());
 }

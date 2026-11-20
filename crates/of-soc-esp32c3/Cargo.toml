@@ -1,6 +1,6 @@
 [package]
 name = "of-soc-esp32c3"
-description = "ESP32-C3 SoC: memory map, peripherals, interrupts, timers, watchdogs, direct ELF and flash-image boot and the kernel engine."
+description = "ESP32-C3 SoC: memory map, peripherals, interrupts, timers, watchdogs, SPI flash and cache MMU, real-ROM and ROM-lite boot and the kernel engine."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

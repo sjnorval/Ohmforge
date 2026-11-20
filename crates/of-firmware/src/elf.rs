@@ -1,7 +1,8 @@
 //! Minimal ELF32 reader for RISC-V executables.
 //!
 //! Only what a simulator needs to boot firmware: the header, `PT_LOAD`
-//! program headers and the `SHT_SYMTAB` symbol table. No relocation, no
+//! program headers, the section headers (names, addresses, contents) and
+//! the `SHT_SYMTAB` symbol table. No relocation, no
 //! dynamic linking. Every offset and size is bounds-checked, so a truncated
 //! or hostile file produces an [`ElfError`], never a panic.
 
@@ -11,6 +12,12 @@ use thiserror::Error;
 pub const EM_RISCV: u16 = 243;
 const PT_LOAD: u32 = 1;
 const SHT_SYMTAB: u32 = 2;
+/// `sh_type` of a section with contents in the file.
+pub const SHT_PROGBITS: u32 = 1;
+/// `sh_type` of a section that occupies memory but no file space (`.bss`).
+pub const SHT_NOBITS: u32 = 8;
+/// `sh_flags` bit: the section occupies memory at run time.
+pub const SHF_ALLOC: u32 = 2;
 const ET_EXEC: u16 = 2;
 
 /// Why an ELF file was rejected.
@@ -60,6 +67,23 @@ pub struct Symbol {
     pub size: u32,
 }
 
+/// One section header (`.text`, `.data`, ...), with its file contents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Section {
+    /// Name from the section header string table.
+    pub name: String,
+    /// `sh_type` (for example [`SHT_PROGBITS`] or [`SHT_NOBITS`]).
+    pub kind: u32,
+    /// `sh_flags` (for example [`SHF_ALLOC`]).
+    pub flags: u32,
+    /// `sh_addr`: the run-time address, 0 for non-memory sections.
+    pub addr: u32,
+    /// `sh_size`.
+    pub size: u32,
+    /// Contents from the file; empty for [`SHT_NOBITS`] sections.
+    pub data: Vec<u8>,
+}
+
 /// A parsed ELF executable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElfImage {
@@ -71,6 +95,10 @@ pub struct ElfImage {
     pub segments: Vec<Segment>,
     /// Named symbols (sections and file symbols excluded).
     pub symbols: Vec<Symbol>,
+    /// Section headers in file order (index 0, the null section, is
+    /// skipped). Some files, such as Espressif's ROM ELFs, keep data that is
+    /// not in any `PT_LOAD` segment here.
+    pub sections: Vec<Section>,
 }
 
 struct Reader<'a>(&'a [u8]);
@@ -167,6 +195,7 @@ impl ElfImage {
             });
         }
 
+        let sections = Self::parse_sections(&r, shoff, shentsize, shnum, u64::from(r.u16(50)?))?;
         let mut symbols = Vec::new();
         if shnum > 0 && shentsize >= 40 {
             for i in 0..shnum {
@@ -216,7 +245,63 @@ impl ElfImage {
             flags,
             segments,
             symbols,
+            sections,
         })
+    }
+
+    fn parse_sections(
+        r: &Reader<'_>,
+        shoff: u64,
+        shentsize: u64,
+        shnum: u64,
+        shstrndx: u64,
+    ) -> Result<Vec<Section>, ElfError> {
+        if shnum == 0 || shentsize < 40 {
+            return Ok(Vec::new());
+        }
+        let names = if shstrndx < shnum {
+            let sh = shoff + shstrndx * shentsize;
+            r.bytes(sh, 40, "section header")?;
+            let off = u64::from(r.u32(sh + 16)?);
+            let size = u64::from(r.u32(sh + 20)?);
+            r.bytes(off, size, "section name table")?
+        } else {
+            &[]
+        };
+        let mut out = Vec::new();
+        for i in 1..shnum {
+            let sh = shoff + i * shentsize;
+            r.bytes(sh, 40, "section header")?;
+            let name_off = r.u32(sh)? as usize;
+            let kind = r.u32(sh + 4)?;
+            let flags = r.u32(sh + 8)?;
+            let addr = r.u32(sh + 12)?;
+            let off = u64::from(r.u32(sh + 16)?);
+            let size = r.u32(sh + 20)?;
+            let data = if kind == SHT_NOBITS || kind == 0 {
+                Vec::new()
+            } else {
+                r.bytes(off, u64::from(size), "section data")?.to_vec()
+            };
+            let name = names.get(name_off..).map_or_else(String::new, |rest| {
+                let end = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
+                String::from_utf8_lossy(&rest[..end]).into_owned()
+            });
+            out.push(Section {
+                name,
+                kind,
+                flags,
+                addr,
+                size,
+                data,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Look up a section by name.
+    pub fn section(&self, name: &str) -> Option<&Section> {
+        self.sections.iter().find(|s| s.name == name)
     }
 
     /// Look up a symbol by name.

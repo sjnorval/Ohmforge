@@ -128,6 +128,7 @@ fn sleeper(disable_mwdt0: bool) -> Esp32c3 {
             flags: 5,
         }],
         symbols: vec![],
+        sections: vec![],
     };
     let mut soc = Esp32c3::new();
     soc.load_elf(&img).unwrap();

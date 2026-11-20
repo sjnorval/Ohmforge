@@ -36,8 +36,40 @@ pub const SWD_WKEY: u32 = 0x8f1d_312a;
 /// Super watchdog timeout.
 pub const SWD_TIMEOUT: SimTime = SimTime(1_000_000_000_000);
 
+/// `RTC_CNTL_RESET_STATE_REG` fields.
+pub mod reset_state {
+    /// `STAT_VECTOR_SEL_PROCPU` and `_APPCPU` (reset value 1).
+    pub const STAT_VECTOR_SEL: u32 = 0b11 << 12;
+    /// Read/write bits: reset masks, OCD halt, vector select.
+    pub const RW: u32 = (0b11 << 24) | (0b11 << 18) | STAT_VECTOR_SEL;
+}
+
+/// Reset cause codes (ESP-IDF `soc/reset_reasons.h`).
+pub mod reset_cause {
+    /// Chip power-on (also brown-out and super watchdog chip resets).
+    pub const POWER_ON: u32 = 0x01;
+    /// MWDT0 reset the digital core.
+    pub const CORE_MWDT0: u32 = 0x07;
+    /// MWDT1 reset the digital core.
+    pub const CORE_MWDT1: u32 = 0x08;
+    /// RTC watchdog reset the digital core.
+    pub const CORE_RTC_WDT: u32 = 0x09;
+    /// MWDT0 reset the CPU.
+    pub const CPU0_MWDT0: u32 = 0x0b;
+    /// RTC watchdog reset the CPU.
+    pub const CPU0_RTC_WDT: u32 = 0x0d;
+    /// RTC watchdog reset the digital core and RTC.
+    pub const SYS_RTC_WDT: u32 = 0x10;
+    /// MWDT1 reset the CPU.
+    pub const CPU0_MWDT1: u32 = 0x11;
+    /// Super watchdog reset the digital core and RTC.
+    pub const SYS_SUPER_WDT: u32 = 0x12;
+}
+
 /// Register offsets from [`crate::map::RTC_CNTL_BASE`].
 pub mod reg {
+    /// Reset state: reset cause (bits 5:0) and flags.
+    pub const RESET_STATE: u32 = 0x38;
     /// RTC interrupt enable (bit 3: RWDT).
     pub const INT_ENA: u32 = 0x40;
     /// RTC raw interrupt status.
@@ -113,6 +145,7 @@ pub struct RtcCntl {
     swd_wkey: u32,
     swd_fed: SimTime,
     boot_armed: bool,
+    reset_state: u32,
 }
 
 impl Default for RtcCntl {
@@ -134,7 +167,33 @@ impl RtcCntl {
             swd_wkey: SWD_WKEY,
             swd_fed: SimTime::ZERO,
             boot_armed: false,
+            // Reset cause 1 (power-on), both STAT_VECTOR_SEL bits set.
+            reset_state: reset_state::STAT_VECTOR_SEL | reset_cause::POWER_ON,
         }
+    }
+
+    /// Record why the chip last reset (`RTC_CNTL_RESET_CAUSE_PROCPU`, one
+    /// of the [`reset_cause`] codes); the ROM prints it as `rst:0x..`.
+    pub fn set_reset_cause(&mut self, cause: u32) {
+        self.reset_state = (self.reset_state & !0x3f) | (cause & 0x3f);
+    }
+
+    /// The reset cause code.
+    pub fn reset_cause(&self) -> u32 {
+        self.reset_state & 0x3f
+    }
+
+    /// Read a register that does not depend on time (reset state).
+    pub fn read_static(&self, off: u32) -> Option<u32> {
+        (off == reg::RESET_STATE).then_some(self.reset_state)
+    }
+
+    /// Write a register that does not depend on time (reset state: only
+    /// the read/write bits change; the flag-clear bits are write-only).
+    pub fn write_static(&mut self, off: u32, v: u32) -> Option<()> {
+        (off == reg::RESET_STATE).then(|| {
+            self.reset_state = (self.reset_state & !reset_state::RW) | (v & reset_state::RW);
+        })
     }
 
     /// Arm the RWDT flash boot protection and start the SWD at `t`, as

@@ -1,6 +1,6 @@
 [package]
 name = "of-firmware"
-description = "Firmware loading: ELF32 RISC-V images and ESP flash images now; UF2 and DWARF later."
+description = "Firmware loading: ELF32 RISC-V images, ESP flash images and partition tables now; UF2 and DWARF later."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
