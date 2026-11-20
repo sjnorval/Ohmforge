@@ -6,14 +6,17 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::OnceLock;
 
-use of_analog::devices::{PinDriver, SourceValue, VoltageSource};
 use of_analog::{AnalogEngine, EngineConfig, Options};
 use of_components::analog::{Board, BuiltBoard, Library, Placement, build};
 use of_core::{EngineId, Kernel, SimTime, Stop};
 use of_parts::parse_part;
-use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, adc_request_code, adc_value_code, all_pin_codes};
+use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, adc_request_code, adc_value_code};
 
+use crate::meters::{self, CircuitReadout};
+use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
+use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
+use crate::trace;
 
 pub(super) use schematic::show as show_schematic;
 
@@ -24,6 +27,7 @@ const RESISTOR: &str = include_str!("../../../parts/passives/resistor/part.toml"
 const LED: &str = include_str!("../../../parts/leds/red-0603/part.toml");
 const POT: &str = include_str!("../../../parts/passives/bourns-ptv09a/part.toml");
 
+#[cfg_attr(not(test), allow(dead_code))]
 const VDD: f64 = 3.3;
 const R_SERIES: f64 = 330.0;
 pub(super) const GPIO_LED: u8 = 8;
@@ -31,7 +35,6 @@ pub(super) const GPIO_POT: u8 = 2;
 pub(super) const RESISTOR_REF: &str = "R2";
 pub(super) const LED_REF: &str = "D1";
 pub(super) const POT_REF: &str = "RV1";
-const DRIVER: &str = "u1_gpio8";
 const GPIO_NODE: &str = "v(gpio8)";
 const ANODE_NODE: &str = "v(led_a)";
 const WIPER_NODE: &str = "v(gpio2)";
@@ -41,17 +44,13 @@ const FADE_BANNER: &str = "ohmforge esp-hal led fade\n";
 
 /// How long a display-average window lasts (2 ms: two 1 kHz periods, ten 5 kHz periods).
 const AVG_WINDOW: f64 = 2e-3;
-/// Trace and sample history kept in memory.
-const TRACE_WINDOW: f64 = 0.16;
-/// Analog samples taken this often so the on-screen LED can be averaged.
-const SAMPLE_STEP: SimTime = SimTime::from_us(50);
 
 static DIMMER_SOC: OnceLock<Result<Esp32c3, String>> = OnceLock::new();
 static FADE_SOC: OnceLock<Result<Esp32c3, String>> = OnceLock::new();
 
 /// Which committed esp-hal app to boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PwmKind {
+pub(crate) enum PwmKind {
     Dimmer,
     Fade,
 }
@@ -80,6 +79,7 @@ impl PwmKind {
 }
 
 /// Cached boot result, if the ROM has already been tried for this app.
+#[allow(dead_code)]
 pub(super) fn cached(kind: PwmKind) -> Option<&'static Result<Esp32c3, String>> {
     kind.cache().get()
 }
@@ -91,7 +91,7 @@ pub(super) fn booted(kind: PwmKind) -> Result<Esp32c3, String> {
         .clone()
 }
 
-pub(super) struct PwmSim {
+pub(crate) struct PwmSim {
     kind: PwmKind,
     kernel: Kernel,
     cpu: EngineId,
@@ -103,15 +103,24 @@ pub(super) struct PwmSim {
     origin: SimTime,
     /// Instantaneous LED current samples (t relative to `origin`, mA).
     samples: VecDeque<(f64, f64)>,
+    supply: SupplySettings,
+    supply_mode: SupplyMode,
+    supply_status: SupplyStatus,
 }
 
 impl PwmSim {
-    pub(super) fn new(kind: PwmKind, position: f64) -> Result<Self, Box<dyn Error>> {
-        let soc = booted(kind)?;
-        Self::from_soc(kind, soc, position)
+    #[allow(dead_code)]
+    pub(crate) fn new(kind: PwmKind, position: f64) -> Result<Self, Box<dyn Error>> {
+        Self::with_supply(kind, position, SupplySettings::default())
     }
 
-    fn from_soc(kind: PwmKind, soc: Esp32c3, position: f64) -> Result<Self, Box<dyn Error>> {
+    pub(crate) fn with_supply(kind: PwmKind, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+        let soc = booted(kind)?;
+        Self::from_soc(kind, soc, position, supply)
+    }
+
+    fn from_soc(kind: PwmKind, soc: Esp32c3, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+        let supply = supply.sanitized();
         let position = position.clamp(0.0, 1.0);
         let mut lib = Library::new();
         lib.add(parse_part(RESISTOR)?, None)?;
@@ -140,15 +149,10 @@ impl PwmSim {
                 ..Board::default()
             },
         )?;
-        if kind == PwmKind::Dimmer {
-            let vdd = board.circuit.node("vdd");
-            board
-                .circuit
-                .add(VoltageSource::new("vdd", vdd, 0, SourceValue::dc(VDD)))?;
-        }
+        let vdd = board.circuit.node("vdd");
+        supply::add_supply(&mut board.circuit, vdd, &supply)?;
         let node = board.circuit.node("gpio8");
-        let (v, r) = soc.pin(usize::from(GPIO_LED)).thevenin(VDD);
-        board.circuit.add(PinDriver::new(DRIVER, node, 0, v, r))?;
+        add_pin_drivers(&mut board.circuit, GPIO_LED, node, vdd, soc.pin(usize::from(GPIO_LED)))?;
 
         let circuit = std::mem::replace(&mut board.circuit, of_analog::Circuit::new());
         let mut analog = AnalogEngine::new(
@@ -161,24 +165,7 @@ impl PwmSim {
                 ..EngineConfig::default()
             },
         )?;
-        for (code, out) in all_pin_codes(GPIO_LED) {
-            let (v, r) = out.thevenin(VDD);
-            analog.on_code(
-                code,
-                vec![
-                    of_analog::SetParam {
-                        device: DRIVER.into(),
-                        param: "v".into(),
-                        value: v,
-                    },
-                    of_analog::SetParam {
-                        device: DRIVER.into(),
-                        param: "r".into(),
-                        value: r,
-                    },
-                ],
-            );
-        }
+        hook_pin(&mut analog, GPIO_LED);
         if kind == PwmKind::Dimmer {
             analog.sample_on(adc_request_code(GPIO_POT), WIPER_NODE, 0, adc_value_code(GPIO_POT))?;
         }
@@ -214,9 +201,11 @@ impl PwmSim {
             position,
             origin,
             samples: VecDeque::new(),
+            supply,
+            supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
+            supply_status: SupplyStatus::default(),
         };
-        let ma = sim.instant_ma()?;
-        sim.samples.push_back((0.0, ma));
+        sim.record_sample()?;
         Ok(sim)
     }
 
@@ -232,25 +221,43 @@ impl PwmSim {
         SimTime(self.kernel.now().0.saturating_sub(self.origin.0)).as_secs_f64()
     }
 
-    pub(super) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = self.origin.saturating_add(SimTime::from_secs_f64(seconds.max(0.0)));
         while self.kernel.now() < until {
-            let next = self.kernel.now().saturating_add(SAMPLE_STEP).min(until);
+            let next = self
+                .kernel
+                .now()
+                .saturating_add(SimTime::from_secs_f64(trace::SAMPLE_STEP))
+                .min(until);
             let stop = self.kernel.run_until(next)?;
             if !matches!(stop, Stop::Reached(_)) {
                 return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
             }
-            let t = self.time();
-            let ma = self.instant_ma()?;
-            self.samples.push_back((t, ma));
+            self.record_sample()?;
         }
         self.trim();
         Ok(())
     }
 
+    fn record_sample(&mut self) -> Result<(), Box<dyn Error>> {
+        let t = self.time();
+        let ma = self.instant_ma()?;
+        self.samples.push_back((t, ma));
+        let status = {
+            let analog = self
+                .kernel
+                .engine_as::<AnalogEngine>(self.analog)
+                .ok_or("analog solver is not registered")?;
+            supply::regulate(analog, &self.supply, self.supply_mode)?
+        };
+        self.supply_mode = status.mode;
+        self.supply_status = status;
+        Ok(())
+    }
+
     fn trim(&mut self) {
         let t = self.time();
-        while self.samples.len() > 1 && t - self.samples[0].0 > TRACE_WINDOW {
+        while self.samples.len() > 1 && t - self.samples[0].0 > trace::TRACE_WINDOW {
             self.samples.pop_front();
         }
     }
@@ -311,6 +318,40 @@ impl PwmSim {
         self.advance(self.time() + 1e-6)
     }
 
+    #[allow(dead_code)]
+    pub(super) fn supply(&self) -> SupplySettings {
+        self.supply
+    }
+
+    pub(super) fn supply_status(&self) -> SupplyStatus {
+        self.supply_status
+    }
+
+    pub(super) fn set_supply(&mut self, settings: SupplySettings) -> Result<(), Box<dyn Error>> {
+        self.supply = settings.sanitized();
+        let analog = self
+            .kernel
+            .engine_as::<AnalogEngine>(self.analog)
+            .ok_or("analog solver is not registered")?;
+        self.supply_mode = supply::apply(analog, &self.supply, self.supply_mode)?;
+        self.advance(self.time() + 1e-6)
+    }
+
+    pub(super) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
+        let pts: Vec<_> = self.samples.iter().copied().collect();
+        // Instantaneous LED current (mA); 0.5 mA counts as on.
+        trace::pwm_duty_freq(&pts, self.time(), 0.5)
+    }
+
+    pub(super) fn last_adc_uart(&mut self) -> Option<(u32, u32)> {
+        let text = String::from_utf8_lossy(&self.uart_bytes().iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned();
+        text.lines().rev().find_map(|l| {
+            let rest = l.strip_prefix("adc: ")?;
+            let (mv, duty) = rest.split_once(" duty: ")?;
+            Some((mv.parse().ok()?, duty.parse().ok()?))
+        })
+    }
+
     pub(super) fn uart_bytes(&mut self) -> &[UartByte] {
         self.kernel
             .engine_as::<Esp32c3Engine>(self.cpu)
@@ -339,6 +380,27 @@ impl PwmSim {
             .expect("registered ESP32-C3")
             .soc
             .push_uart_rx(bytes);
+    }
+
+    pub(crate) fn circuit_readout(&mut self) -> CircuitReadout {
+        let pot = self.board.pots.get(POT_REF).cloned();
+        let position = self.position;
+        let mut out = CircuitReadout::new();
+        {
+            let analog = match self.analog() {
+                Ok(a) => a,
+                Err(_) => return out,
+            };
+            meters::take_nodes(analog, &["gpio8", "led_a", "vdd", "gpio2"], &mut out);
+        }
+        meters::add_led_series(&mut out, "R2", "D1", "gpio8", "led_a", R_SERIES);
+        if let Some(p) = pot {
+            let (ra, rb) = p.legs(position);
+            meters::add_resistor(&mut out, "RV1 (1–W)", "0", "gpio2", ra);
+            meters::add_resistor(&mut out, "RV1 (W–3)", "gpio2", "vdd", rb);
+        }
+        meters::add_psu(&mut out, self.supply_status.amps);
+        out
     }
 }
 
@@ -443,6 +505,57 @@ mod tests {
         assert!(later > early + 0.3, "early {early} mA, later {later} mA");
         let text = String::from_utf8_lossy(&sim.uart_bytes().iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned();
         assert!(text.contains("ohmforge esp-hal led fade"), "{text:?}");
+    }
+
+    #[test]
+    fn pot_divider_scales_with_supply_voltage() {
+        let Some(mut sim) = maybe_dimmer(0.5) else { return };
+        sim.set_position(0.5).unwrap();
+        // Allow one ADC print to catch up; the wiper itself updates immediately.
+        let mid = sim.wiper_volts().unwrap();
+        assert!((mid - 0.5 * VDD).abs() < 0.05, "wiper at 3.3 V: {mid}");
+
+        let hi = SupplySettings {
+            volts: 5.0,
+            ..SupplySettings::default()
+        };
+        sim.set_supply(hi).unwrap();
+        let high = sim.wiper_volts().unwrap();
+        assert!(
+            (high - 0.5 * 5.0).abs() < 0.08,
+            "wiper should scale with the rail: {high}"
+        );
+        assert!(sim.supply_status().outside_rated);
+    }
+
+    #[test]
+    fn current_limit_clamps_led_current() {
+        let settings = SupplySettings {
+            current_limit: 0.5e-3,
+            ..SupplySettings::default()
+        };
+        let mut sim = match PwmSim::with_supply(PwmKind::Dimmer, 1.0, settings) {
+            Ok(sim) => sim,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("fetch-esp-rom-elfs") {
+                    assert!(
+                        std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
+                        "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {msg}"
+                    );
+                    return;
+                }
+                panic!("{msg}");
+            }
+        };
+        sim.advance(20e-3).unwrap();
+        let status = sim.supply_status();
+        let avg = sim.average_ma();
+        assert!(
+            status.mode == SupplyMode::Cc || avg < 1.0,
+            "limit did not clamp: status={status:?} avg={avg} mA"
+        );
+        assert!(status.amps <= 0.7e-3, "{status:?}");
     }
 
     fn uart_readings(sim: &mut PwmSim) -> Vec<(u32, u32)> {
