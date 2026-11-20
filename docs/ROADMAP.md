@@ -107,6 +107,7 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
   - [x] Stop before input reads so GPIO/ADC reads see the analog value at that instant: GPIO (#22: `Bus::defer_load`, lazy `wfi` woken at the input event; a busy core may take a pin interrupt up to one slice late, bounded by `Esp32c3Engine::set_max_lead`); ADC (branch `p2-adc-pwm`: the engine stops at the conversion start and the analog engine answers with the node voltage at that instant)
 - [ ] egui schematic editor (place, wire, probe), oscilloscope, logic analyser with UART decode, serial monitor
   - [x] Read-only desktop blink demo (`of-ui` `BlinkDemo`, `cargo run -p of-app --features gui`): bundled blinky co-simulated with R1 330 Ω and a red LED, the schematic LED lit from the simulated current, an LED current trace and UART0 output. Not the editor or the real oscilloscope (GPU waveform path, decision d2)
+  - [~] Live desktop playback (worker thread, realtime speed control, live pot/button, scrolling scope, clickable SW1, tooltips, configurable bench PSU on the VDD rail, virtual voltmeter/ammeter): implemented on branch `p2-gui-live` (not yet pushed)
   - [~] Serial monitor: lean console in `of-instruments` / `of-ui` (TX log, Send delivers to UART0 RX when attached); hex/find, baud-timed RX/interrupts, and soft-front-panel hosting still to do (d7)
 - [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
 - [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer and fade; Arduino and ESP-IDF builds still to do)
@@ -130,6 +131,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Blink, button with interrupt, potentiometer into ADC, LED dimming via LEDC behave as on hardware
 - [x] RC filter, LED with series resistor, transistor switch, AMS1117 regulator within 1 % of ngspice
 - [ ] Oscilloscope, logic analyser with UART decode, multimeter probe, serial monitor
+  - [~] Virtual voltmeter/ammeter on the live schematic (click two probe points; non-disturbing ammeter on a unique branch): implemented on branch `p2-gui-live` (not yet pushed)
   - [~] Serial monitor: lean console (TX log, Send delivers to UART0 RX when attached); hex/find, baud-timed RX/interrupts, and d5 shell hosting still to do (d7)
 - [ ] BOM CSV export with MPNs, supplier links and ZAR cost, plus build checklist
 - [ ] Desktop builds on Windows, macOS, Linux; deterministic headless runs in CI
