@@ -19,10 +19,18 @@ pub const PERIPHERALS: (u32, u32) = (0x6000_0000, 0xd_1000);
 
 /// UART0 registers.
 pub const UART0_BASE: u32 = 0x6000_0000;
+/// SPI1 memory controller (software flash commands).
+pub const SPI1_BASE: u32 = 0x6000_2000;
+/// SPI0 memory controller (cache side).
+pub const SPI0_BASE: u32 = 0x6000_3000;
 /// GPIO (and GPIO matrix) registers.
 pub const GPIO_BASE: u32 = 0x6000_4000;
 /// RTC_CNTL registers (RTC watchdog, super watchdog).
 pub const RTC_CNTL_BASE: u32 = 0x6000_8000;
+/// eFuse controller registers, inside the RTC_CNTL block.
+pub const EFUSE_BASE: u32 = 0x6000_8800;
+/// Offset of the eFuse controller in the RTC_CNTL block.
+pub const EFUSE_OFFSET: u32 = EFUSE_BASE - RTC_CNTL_BASE;
 /// IO MUX registers.
 pub const IO_MUX_BASE: u32 = 0x6000_9000;
 /// Timer group 0 registers.
@@ -31,8 +39,16 @@ pub const TIMG0_BASE: u32 = 0x6001_f000;
 pub const TIMG1_BASE: u32 = 0x6002_0000;
 /// SYSTIMER registers.
 pub const SYSTIMER_BASE: u32 = 0x6002_3000;
+/// SHA accelerator registers.
+pub const SHA_BASE: u32 = 0x6003_b000;
+/// USB Serial/JTAG controller registers.
+pub const USB_SERIAL_JTAG_BASE: u32 = 0x6004_3000;
 /// Interrupt matrix and CPU interrupt controller registers.
 pub const INTERRUPT_BASE: u32 = 0x600c_2000;
+/// External memory (cache) controller registers.
+pub const EXTMEM_BASE: u32 = 0x600c_4000;
+/// Cache MMU table (128 entries).
+pub const MMU_TABLE_BASE: u32 = 0x600c_5000;
 /// Size of one peripheral's register block.
 pub const BLOCK: u32 = 0x1000;
 

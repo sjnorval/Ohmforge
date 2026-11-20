@@ -49,8 +49,14 @@ jobs:
       - run: pip install ziglang==0.17.1
       - run: scripts/build-riscv-tests.sh
       - run: cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture
+      # Espressif's ESP32-C3 ROM (esp-rom-elfs, Apache-2.0, closed-source
+      # code): a pinned, checksummed download, never committed.
+      - run: scripts/fetch-esp-rom-elfs.sh
+      - run: cargo test -p of-soc-esp32c3 --test rom_boot
+        env: { OF_REQUIRE_ESP_ROM: "1" }
       # The committed test firmware must be reproducible from its source.
       - run: |
           bash firmware/esp32c3-blinky/build.sh
           bash firmware/esp32c3-timer-irq/build.sh
+          bash firmware/esp32c3-xip-blinky/build.sh
           git diff --exit-code -- firmware/

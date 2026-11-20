@@ -5,8 +5,11 @@ use of_cpu_riscv::{BusError, Hart, HartConfig, HartState, RunExit};
 use of_firmware::{ElfImage, EspImage};
 use thiserror::Error;
 
+use crate::boot::{self, FlashBoot, FlashBootError};
 use crate::bus::SocBus;
 use crate::gpio::{GPIO_COUNT, PinOut};
+use crate::map::{self, within};
+use crate::rom::RomImage;
 use crate::watchdog::{ResetKind, WatchdogReset};
 
 /// A pin output change, stamped with the hart time of the instruction
@@ -44,6 +47,14 @@ pub enum LoadError {
     /// A flash image built for another chip.
     #[error("image is for chip id {0}, not the ESP32-C3 (5)")]
     WrongChip(u16),
+    /// Two flash-window segments need the same flash bytes. IROM and DROM
+    /// share one MMU table, so offset `x` of both windows is the same flash
+    /// byte under direct boot's identity layout.
+    #[error("segment at {addr:#010x} overlaps another flash-window segment in flash")]
+    FlashOverlap {
+        /// Segment address.
+        addr: u32,
+    },
 }
 
 /// What direct boot loaded, kept so a watchdog reset can boot it again.
@@ -51,6 +62,15 @@ pub enum LoadError {
 struct BootImage {
     entry: u32,
     chunks: Vec<(u32, Vec<u8>)>,
+}
+
+/// How the chip came up, so a reset can do it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Boot {
+    /// Direct boot of an ELF or image given by the caller.
+    Image(BootImage),
+    /// ROM-lite boot from the flash contents.
+    Flash,
 }
 
 /// An ESP32-C3: one RV32IMC hart, its memory map and peripherals.
@@ -63,7 +83,7 @@ pub struct Esp32c3 {
     pins: [PinOut; GPIO_COUNT],
     edges: Vec<PinEdge>,
     uart: Vec<UartByte>,
-    boot: Option<BootImage>,
+    boot: Option<Boot>,
     boot_watchdogs: bool,
     resets: Vec<WatchdogReset>,
 }
@@ -106,9 +126,43 @@ impl Esp32c3 {
         self.bus.arm_boot_watchdogs(self.hart.local_time());
     }
 
+    /// Put the mask ROM in place and reset into it, as at power-on: the
+    /// hart starts at the reset vector `0x4000_0000` and the ROM boots from
+    /// whatever the flash holds (see [`crate::rom`]). Resets later run the
+    /// ROM again.
+    pub fn power_on_rom(&mut self, rom: &RomImage) {
+        // The ROM region is exactly the image size, so this cannot fail.
+        let _ = self.bus.load(map::IROM_INTERNAL.0, rom.bytes());
+        self.boot = None;
+        self.hart.reset();
+        if self.bus.strapping == crate::bus::STRAP_SPI_BOOT {
+            // Hardware arms the flash boot protection at reset.
+            self.arm_boot_watchdogs();
+        }
+    }
+
+    /// Boot what the flash holds, as the ROM and the second-stage
+    /// bootloader would, without executing them ("ROM-lite", see
+    /// [`crate::boot`]). Resets boot the flash again.
+    pub fn boot_flash(&mut self) -> Result<FlashBoot, FlashBootError> {
+        let booted = boot::boot(&mut self.bus)?;
+        self.hart.set_pc(booted.entry());
+        self.boot = Some(Boot::Flash);
+        Ok(booted)
+    }
+
+    /// Write `bytes` to the flash chip at `offset` (as `esptool
+    /// write_flash` would; erased bytes are `0xFF`).
+    pub fn write_flash(&mut self, offset: u32, bytes: &[u8]) {
+        self.bus.flash.write_raw(offset, bytes);
+    }
+
     /// Direct boot from an ELF: copy every segment into its memory (`.bss`
-    /// zero-filled) and jump to the entry point, as if the ROM bootloader
-    /// had done it.
+    /// zero-filled) and jump to the entry point, as if a bootloader had
+    /// done it. Segments in the IROM/DROM cache windows are written to flash
+    /// at their window offset and the MMU maps those pages one to one
+    /// (enabling the cache), so code and data in both windows must not
+    /// share flash bytes (the two windows share one MMU table).
     pub fn load_elf(&mut self, img: &ElfImage) -> Result<(), LoadError> {
         let chunks = img
             .segments
@@ -127,9 +181,11 @@ impl Esp32c3 {
 
     /// Direct boot from an ESP flash image (an app `.bin` as written by
     /// `esptool elf2image`): load each segment at its address and jump to
-    /// the entry point. Padding segments (load address 0) are skipped. The
-    /// cache MMU is not modelled: flash-mapped segments land in the IROM and
-    /// DROM windows at their virtual addresses.
+    /// the entry point. Padding segments (load address 0) are skipped.
+    /// Flash-window segments are placed as in [`Self::load_elf`] (identity
+    /// layout), not where the image file puts them; to boot an image the
+    /// way the bootloader does, from its place in flash, use
+    /// [`Self::boot_flash`].
     pub fn load_flash_image(&mut self, img: &EspImage) -> Result<(), LoadError> {
         if img.chip_id != CHIP_ID {
             return Err(LoadError::WrongChip(img.chip_id));
@@ -147,16 +203,28 @@ impl Esp32c3 {
     }
 
     fn boot_from(&mut self, boot: BootImage) -> Result<(), LoadError> {
+        let mut used: Vec<(u32, u32)> = Vec::new();
         for (addr, bytes) in &boot.chunks {
-            self.bus
-                .load(*addr, bytes)
-                .map_err(|BusError { .. }| LoadError::Unmapped {
-                    addr: *addr,
-                    len: bytes.len() as u32,
-                })?;
+            let unmapped = |BusError { .. }| LoadError::Unmapped {
+                addr: *addr,
+                len: bytes.len() as u32,
+            };
+            if within(map::IROM_FLASH, *addr, bytes.len() as u32) || within(map::DROM_FLASH, *addr, bytes.len() as u32)
+            {
+                let (start, end) = self.bus.place_in_flash(*addr, bytes).map_err(unmapped)?;
+                if used.iter().any(|&(s, e)| start < e && s < end) {
+                    return Err(LoadError::FlashOverlap { addr: *addr });
+                }
+                used.push((start, end));
+            } else {
+                self.bus.load(*addr, bytes).map_err(unmapped)?;
+            }
+        }
+        if !used.is_empty() {
+            self.bus.cache.enable();
         }
         self.hart.set_pc(boot.entry);
-        self.boot = Some(boot);
+        self.boot = Some(Boot::Image(boot));
         Ok(())
     }
 
@@ -237,12 +305,20 @@ impl Esp32c3 {
         self.resets.push(r);
         self.hart.reset();
         self.bus.reset_peripherals(r.kind);
+        self.bus.rtc_cntl.set_reset_cause(r.cause_code());
         if self.boot_watchdogs && r.kind != ResetKind::Cpu {
             self.bus.arm_boot_watchdogs(self.hart.local_time());
         }
-        if let Some(boot) = self.boot.take() {
+        match self.boot.take() {
             // It loaded before, so it loads again.
-            let _ = self.boot_from(boot);
+            Some(Boot::Image(image)) => {
+                let _ = self.boot_from(image);
+            }
+            Some(Boot::Flash) => {
+                let _ = self.boot_flash();
+            }
+            // The ROM runs again from the reset vector.
+            None => {}
         }
     }
 

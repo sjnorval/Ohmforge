@@ -5,13 +5,20 @@ use std::collections::BTreeMap;
 use of_core::SimTime;
 use of_cpu_riscv::{AccessKind, Bus, BusError, Size};
 
+use crate::cache::{self, Cache, CacheBus, CacheFault};
+use crate::csr::C3Csrs;
+use crate::efuse::Efuse;
+use crate::flash::SpiFlash;
 use crate::gpio::Gpio;
 use crate::intmatrix::{IntMatrix, source};
 use crate::map::{self, within};
 use crate::rtc_cntl::{RtcCntl, RtcWatchdog};
+use crate::sha::Sha;
+use crate::spi_mem::SpiMem;
 use crate::systimer::Systimer;
 use crate::timg::Timg;
 use crate::uart;
+use crate::usb_serial::UsbSerialJtag;
 use crate::watchdog::{ResetKind, ResetSource, WatchdogReset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,8 +26,6 @@ enum Mem {
     RomI,
     RomD,
     Sram,
-    FlashI,
-    FlashD,
     Rtc,
 }
 
@@ -29,9 +34,25 @@ enum Mem {
 pub struct SocBus {
     rom: Vec<u8>,
     sram: Vec<u8>,
-    flash_i: Vec<u8>,
-    flash_d: Vec<u8>,
     rtc: Vec<u8>,
+    /// The external SPI flash chip, seen through the cache windows.
+    pub flash: SpiFlash,
+    /// Cache controller and MMU (maps flash into the IROM/DROM windows).
+    pub cache: Cache,
+    /// SPI memory controllers: `spi[0]` is SPI0 (cache side), `spi[1]` is
+    /// SPI1 (software flash commands).
+    pub spi: [SpiMem; 2],
+    /// C3-specific CSRs (performance counters, user trap CSRs).
+    pub csrs: C3Csrs,
+    /// Strapping pins latched at reset, as `GPIO_STRAP_REG` reports them
+    /// ([`STRAP_SPI_BOOT`] by default).
+    pub strapping: u32,
+    /// USB Serial/JTAG controller (console output only).
+    pub usb_serial: UsbSerialJtag,
+    /// SHA accelerator.
+    pub sha: Sha,
+    /// eFuse controller (all fuses blank).
+    pub efuse: Efuse,
     /// GPIO, GPIO matrix and IO MUX.
     pub gpio: Gpio,
     /// SYSTIMER.
@@ -57,18 +78,34 @@ impl Default for SocBus {
     }
 }
 
-/// Flash cache windows are backed lazily: this much is allocated up front.
-const FLASH_WINDOW_BYTES: usize = 4 << 20;
+/// `GPIO_STRAP_REG` for SPI flash boot (GPIO9 and GPIO8 high): the ROM
+/// reports `boot:0xc (SPI_FAST_FLASH_BOOT)`.
+pub const STRAP_SPI_BOOT: u32 = 0x0c;
+/// `GPIO_STRAP_REG` for download mode (GPIO9 low, GPIO8 high).
+pub const STRAP_DOWNLOAD: u32 = 0x04;
+const GPIO_STRAP: u32 = 0x38;
 
 impl SocBus {
-    /// Power-on state: zeroed memories, peripherals at reset.
+    /// Power-on state: zeroed memories, an erased 4 MiB flash, peripherals
+    /// at reset (cache disabled, MMU entries invalid).
     pub fn new() -> Self {
+        Self::with_flash(SpiFlash::default())
+    }
+
+    /// Power-on state with the given flash chip.
+    pub fn with_flash(flash: SpiFlash) -> Self {
         Self {
             rom: vec![0; map::IROM_INTERNAL.1 as usize],
             sram: vec![0; map::IRAM.1 as usize],
-            flash_i: vec![0; FLASH_WINDOW_BYTES],
-            flash_d: vec![0; FLASH_WINDOW_BYTES],
             rtc: vec![0; map::RTC_FAST.1 as usize],
+            flash,
+            cache: Cache::new(),
+            spi: [SpiMem::new(), SpiMem::new()],
+            csrs: C3Csrs::new(),
+            strapping: STRAP_SPI_BOOT,
+            usb_serial: UsbSerialJtag::new(),
+            sha: Sha::new(),
+            efuse: Efuse::new(),
             gpio: Gpio::new(),
             systimer: Systimer::new(),
             timg: [Timg::new(), Timg::new()],
@@ -90,8 +127,6 @@ impl SocBus {
             (Mem::RomD, map::DROM_INTERNAL),
             (Mem::Sram, map::IRAM),
             (Mem::Sram, map::DRAM),
-            (Mem::FlashI, map::IROM_FLASH),
-            (Mem::FlashD, map::DROM_FLASH),
             (Mem::Rtc, map::RTC_FAST),
         ];
         let (m, region) = table.into_iter().find(|&(_, r)| within(r, addr, len))?;
@@ -107,8 +142,6 @@ impl SocBus {
         match m {
             Mem::RomI | Mem::RomD => &self.rom,
             Mem::Sram => &self.sram,
-            Mem::FlashI => &self.flash_i,
-            Mem::FlashD => &self.flash_d,
             Mem::Rtc => &self.rtc,
         }
     }
@@ -117,24 +150,97 @@ impl SocBus {
         match m {
             Mem::RomI | Mem::RomD => &mut self.rom,
             Mem::Sram => &mut self.sram,
-            Mem::FlashI => &mut self.flash_i,
-            Mem::FlashD => &mut self.flash_d,
             Mem::Rtc => &mut self.rtc,
         }
     }
 
-    /// Back-door write used by loaders: also fills ROM and the flash cache
-    /// windows, which the hart cannot write.
+    /// Which flash window `addr..addr+len` lies in, if any.
+    fn window(addr: u32, len: u32) -> Option<CacheBus> {
+        if within(map::IROM_FLASH, addr, len) {
+            Some(CacheBus::IBus)
+        } else if within(map::DROM_FLASH, addr, len) {
+            Some(CacheBus::DBus)
+        } else {
+            None
+        }
+    }
+
+    /// The flash address behind a window address according to the MMU
+    /// entry alone (cache enable and bus shut-off ignored; for loaders and
+    /// debuggers).
+    pub fn mmu_lookup(&self, addr: u32) -> Option<u32> {
+        let linear = addr & (map::IROM_FLASH.1 - 1);
+        let e = self.cache.entry((linear / cache::PAGE) as usize);
+        (e & cache::MMU_INVALID == 0).then(|| (e & cache::MMU_PAGE_MASK) * cache::PAGE + linear % cache::PAGE)
+    }
+
+    /// Direct-boot placement of bytes meant for a cache window: map every
+    /// 64 KiB page they touch to the flash page with the same number (an
+    /// identity layout, flash offset = window offset), write them to flash
+    /// and return the flash range used. Fails if the range is outside the
+    /// flash chip.
+    pub fn place_in_flash(&mut self, addr: u32, bytes: &[u8]) -> Result<(u32, u32), BusError> {
+        let len = bytes.len() as u32;
+        if Self::window(addr, len).is_none() {
+            return Err(BusError { addr });
+        }
+        let start = addr & (map::IROM_FLASH.1 - 1);
+        let end = start + len;
+        if end as usize > self.flash.size() {
+            return Err(BusError { addr });
+        }
+        for n in start / cache::PAGE..end.div_ceil(cache::PAGE) {
+            self.cache.map(n as usize, n);
+        }
+        self.flash.write_raw(start, bytes);
+        Ok((start, end))
+    }
+
+    /// Back-door write used by loaders: also fills ROM, which the hart
+    /// cannot write, and the flash behind a mapped cache window.
     pub fn load(&mut self, addr: u32, bytes: &[u8]) -> Result<(), BusError> {
+        if Self::window(addr, bytes.len() as u32).is_some() {
+            for (i, b) in bytes.iter().enumerate() {
+                let a = addr + i as u32;
+                let off = self.mmu_lookup(a).ok_or(BusError { addr: a })?;
+                self.flash.write_raw(off, &[*b]);
+            }
+            return Ok(());
+        }
         let (m, off) = self.locate(addr, bytes.len() as u32).ok_or(BusError { addr })?;
         self.mem_mut(m)[off..off + bytes.len()].copy_from_slice(bytes);
         Ok(())
     }
 
-    /// Read memory without side effects (peripherals excluded).
+    /// Read memory without side effects (peripherals excluded). Flash
+    /// windows are read through the MMU entries (the range must stay
+    /// inside one 64 KiB page).
     pub fn peek(&self, addr: u32, len: usize) -> Option<&[u8]> {
+        if Self::window(addr, len as u32).is_some() {
+            let off = self.mmu_lookup(addr)? as usize;
+            let same_page = (addr % cache::PAGE) as usize + len <= cache::PAGE as usize;
+            return (same_page && off + len <= self.flash.size()).then(|| &self.flash.bytes()[off..off + len]);
+        }
         let (m, off) = self.locate(addr, len as u32)?;
         Some(&self.mem(m)[off..off + len])
+    }
+
+    /// A read through a cache window, as the hart sees it.
+    fn window_read(&self, addr: u32, size: Size, bus: CacheBus) -> Result<u32, CacheFault> {
+        let mut bytes = [0u8; 4];
+        let n = size.bytes();
+        if addr % cache::PAGE + n <= cache::PAGE {
+            // One translation for the whole access.
+            let base = self.cache.translate(addr, bus)?;
+            for (i, b) in bytes.iter_mut().enumerate().take(n as usize) {
+                *b = self.flash.byte(base + i as u32);
+            }
+        } else {
+            for (i, b) in bytes.iter_mut().enumerate().take(n as usize) {
+                *b = self.flash.byte(self.cache.translate(addr + i as u32, bus)?);
+            }
+        }
+        Ok(get(&bytes, size))
     }
 
     /// Bytes written to UART0 since the last [`Self::take_uart_tx`].
@@ -164,10 +270,15 @@ impl SocBus {
     /// a core or system reset, the RTC watchdogs too for a system reset.
     /// Memories are left alone.
     pub fn reset_peripherals(&mut self, kind: ResetKind) {
+        // The core's own CSRs reset with it.
+        self.csrs = C3Csrs::new();
         if kind == ResetKind::Cpu {
             return;
         }
+        self.sha = Sha::new();
         self.gpio = Gpio::new();
+        self.cache = Cache::new();
+        self.spi = [SpiMem::new(), SpiMem::new()];
         self.systimer = Systimer::new();
         self.timg = [Timg::new(), Timg::new()];
         self.intmatrix = IntMatrix::new();
@@ -268,13 +379,22 @@ impl SocBus {
         let block = addr & !(map::BLOCK - 1);
         let off = addr - block;
         let v = match block {
+            map::GPIO_BASE if off == GPIO_STRAP => Some(self.strapping),
             map::GPIO_BASE => self.gpio.read(off),
+            map::RTC_CNTL_BASE if off >= map::EFUSE_OFFSET => self.efuse.read(off - map::EFUSE_OFFSET),
+            map::RTC_CNTL_BASE if self.rtc_cntl.read_static(off).is_some() => self.rtc_cntl.read_static(off),
+            map::USB_SERIAL_JTAG_BASE => self.usb_serial.read(off),
+            map::SHA_BASE => self.sha.read(off),
             map::IO_MUX_BASE => self.gpio.io_mux_read(off),
             map::SYSTIMER_BASE => self.systimer.read(off),
             map::TIMG0_BASE => self.timg[0].read(off),
             map::TIMG1_BASE => self.timg[1].read(off),
             map::RTC_CNTL_BASE => self.rtc_cntl.read(off),
             map::INTERRUPT_BASE => self.intmatrix.read(off),
+            map::SPI0_BASE => self.spi[0].read(off),
+            map::SPI1_BASE => self.spi[1].read(off),
+            map::EXTMEM_BASE => self.cache.read(off),
+            map::MMU_TABLE_BASE => self.cache.mmu_read(off),
             map::UART0_BASE => match off {
                 uart::reg::FIFO | uart::reg::STATUS => Some(0),
                 _ => None,
@@ -291,7 +411,11 @@ impl SocBus {
         let block = addr & !(map::BLOCK - 1);
         let off = addr - block;
         let handled = match block {
+            map::GPIO_BASE if off == GPIO_STRAP => Some(()),
             map::GPIO_BASE => self.gpio.write(off, v).map(|()| self.pins_dirty = true),
+            map::RTC_CNTL_BASE if off >= map::EFUSE_OFFSET => self.efuse.write(off - map::EFUSE_OFFSET, v),
+            map::USB_SERIAL_JTAG_BASE => self.usb_serial.write(off, v),
+            map::SHA_BASE => self.sha.write(off, v),
             map::IO_MUX_BASE => self.gpio.io_mux_write(off, v).map(|()| self.pins_dirty = true),
             map::SYSTIMER_BASE | map::TIMG0_BASE | map::TIMG1_BASE | map::RTC_CNTL_BASE
                 if Self::timed_reg(block, off) =>
@@ -299,7 +423,12 @@ impl SocBus {
                 self.deferred.push((addr, v));
                 Some(())
             }
+            map::RTC_CNTL_BASE if self.rtc_cntl.write_static(off, v).is_some() => Some(()),
             map::INTERRUPT_BASE => self.intmatrix.write(off, v),
+            map::SPI0_BASE => self.spi[0].write(off, v, &mut self.flash),
+            map::SPI1_BASE => self.spi[1].write(off, v, &mut self.flash),
+            map::EXTMEM_BASE => self.cache.write(off, v),
+            map::MMU_TABLE_BASE => self.cache.mmu_write(off, v),
             map::UART0_BASE if off == uart::reg::FIFO => {
                 self.uart_tx.push(v as u8);
                 Some(())
@@ -337,8 +466,14 @@ impl Bus for SocBus {
                 Size::Word => word,
             });
         }
+        if let Some(bus) = Self::window(addr, n) {
+            if kind == AccessKind::Fetch && bus == CacheBus::DBus {
+                return Err(BusError { addr });
+            }
+            return self.window_read(addr, size, bus).map_err(|_| BusError { addr });
+        }
         let (m, off) = self.locate(addr, n).ok_or(BusError { addr })?;
-        if kind == AccessKind::Fetch && matches!(m, Mem::RomD | Mem::FlashD) {
+        if kind == AccessKind::Fetch && m == Mem::RomD {
             return Err(BusError { addr });
         }
         if kind == AccessKind::Fetch && m == Mem::Sram && within(map::DRAM, addr, n) {
@@ -366,6 +501,18 @@ impl Bus for SocBus {
     fn take_sync_request(&mut self) -> bool {
         std::mem::take(&mut self.sync)
     }
+
+    fn csr_cycles(&mut self, cycles: u64) {
+        self.csrs.set_cycles(cycles);
+    }
+
+    fn csr_read(&mut self, csr: u16) -> Option<u32> {
+        self.csrs.read(csr)
+    }
+
+    fn csr_write(&mut self, csr: u16, value: u32) -> bool {
+        self.csrs.write(csr, value)
+    }
 }
 
 #[cfg(test)]
@@ -392,17 +539,77 @@ mod tests {
     #[test]
     fn flash_and_rom_are_read_only_to_the_hart() {
         let mut b = SocBus::new();
-        b.load(0x4200_0020, &[0x13, 0, 0, 0]).unwrap();
-        b.load(0x3c00_0020, &[1, 2, 3, 4]).unwrap();
+        assert!(b.load(0x4200_0020, &[0x13, 0, 0, 0]).is_err(), "page not mapped yet");
+        b.place_in_flash(0x4200_0020, &[0x13, 0, 0, 0]).unwrap();
+        b.place_in_flash(0x3c01_0020, &[1, 2, 3, 4]).unwrap();
+        b.cache.enable();
         assert_eq!(b.read(0x4200_0020, Size::Word, AccessKind::Fetch), Ok(0x13));
-        assert_eq!(b.read(0x3c00_0020, Size::Word, AccessKind::Load), Ok(0x0403_0201));
+        assert_eq!(b.read(0x3c01_0020, Size::Word, AccessKind::Load), Ok(0x0403_0201));
+        b.load(0x3c01_0020, &[5]).unwrap();
+        assert_eq!(b.flash.byte(0x1_0020), 5, "loads go through the MMU to flash");
         assert!(b.write(0x4200_0020, Size::Word, 0, AccessKind::Store).is_err());
         assert!(b.write(0x4000_0000, Size::Word, 0, AccessKind::Store).is_err());
-        assert!(b.read(0x3c00_0020, Size::Word, AccessKind::Fetch).is_err());
+        assert!(b.read(0x3c01_0020, Size::Word, AccessKind::Fetch).is_err());
         // ROM1 through the data bus.
         b.load(0x4004_0000, &[9, 0, 0, 0]).unwrap();
         assert_eq!(b.read(0x3ff0_0000, Size::Word, AccessKind::Load), Ok(9));
         assert!(b.read(0x2000_0000, Size::Word, AccessKind::Load).is_err(), "unmapped");
+    }
+
+    #[test]
+    fn flash_windows_read_through_the_mmu_registers() {
+        let mut b = SocBus::new();
+        b.flash.write_raw(0x3_0000, &[0xaa, 0xbb, 0xcc, 0xdd]);
+        b.flash.write_raw(0x5_fffe, &[0x11, 0x22]);
+        b.flash.write_raw(0x7_0000, &[0x33, 0x44]);
+        assert!(
+            b.read(0x4200_0000, Size::Word, AccessKind::Fetch).is_err(),
+            "cache off at reset"
+        );
+        // What a bootloader does: map pages, enable the cache, open both buses.
+        let st = |b: &mut SocBus, a: u32, v: u32| b.write(a, Size::Word, v, AccessKind::Store).unwrap();
+        st(&mut b, 0x600c_5000, 3); // entry 0 -> flash page 3
+        st(&mut b, 0x600c_5000 + 4 * 0x22, 5); // entry 0x22 -> page 5
+        st(&mut b, 0x600c_5000 + 4 * 0x23, 7); // entry 0x23 -> page 7
+        st(&mut b, 0x600c_4000, 1);
+        st(&mut b, 0x600c_4004, 0);
+        assert_eq!(b.read(0x4200_0000, Size::Word, AccessKind::Fetch), Ok(0xddcc_bbaa));
+        assert_eq!(
+            b.read(0x3c00_0002, Size::Half, AccessKind::Load),
+            Ok(0xddcc),
+            "same entry on DBus"
+        );
+        // A fetch straddling two pages is translated byte by byte.
+        assert_eq!(b.read(0x4222_fffe, Size::Word, AccessKind::Fetch), Ok(0x4433_2211));
+        assert_eq!(b.read(0x600c_5000 + 4 * 0x22, Size::Word, AccessKind::Load), Ok(5));
+        assert_eq!(b.peek(0x3c00_0000, 2), Some(&[0xaa, 0xbb][..]));
+        // Invalidating the entry makes the page inaccessible.
+        st(&mut b, 0x600c_5000, 0x100);
+        assert!(b.read(0x3c00_0000, Size::Word, AccessKind::Load).is_err());
+        // Shut DBus only.
+        st(&mut b, 0x600c_4004, 0b10);
+        assert!(b.read(0x3c22_0000, Size::Word, AccessKind::Load).is_err());
+        assert!(b.read(0x4222_0000, Size::Word, AccessKind::Fetch).is_ok());
+        assert!(b.unmodelled().is_empty());
+    }
+
+    #[test]
+    fn spi1_reads_the_flash_chip() {
+        let mut b = SocBus::new();
+        b.flash.write_raw(0x8000, &[0xaa, 0x50, 0x00, 0x00]);
+        let st = |b: &mut SocBus, a: u32, v: u32| b.write(a, Size::Word, v, AccessKind::Store).unwrap();
+        st(&mut b, 0x6000_2004, 0x8000);
+        st(&mut b, 0x6000_2028, 31);
+        st(&mut b, 0x6000_2000, 1 << 31);
+        assert_eq!(b.read(0x6000_2000, Size::Word, AccessKind::Load), Ok(0));
+        assert_eq!(b.read(0x6000_2058, Size::Word, AccessKind::Load), Ok(0x50aa));
+        st(&mut b, 0x6000_2000, 1 << 28);
+        assert_eq!(
+            b.read(0x6000_2058, Size::Word, AccessKind::Load),
+            Ok(0x16_40c8),
+            "JEDEC ID"
+        );
+        assert!(b.unmodelled().is_empty());
     }
 
     #[test]

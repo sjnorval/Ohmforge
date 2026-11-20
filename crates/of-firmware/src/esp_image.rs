@@ -13,6 +13,13 @@
 //! [`EspImage::parse`] checks the magic, every length, the checksum and the
 //! digest; [`EspImage::to_bytes`] writes the same format and
 //! [`EspImage::from_elf`] builds an image from an ELF's segments.
+//!
+//! Segments that execute in place from flash (ESP32-C3 IROM `0x4200_0000`
+//! or DROM `0x3C00_0000`) are mapped by the cache MMU in 64 KiB pages, so
+//! their data must sit in flash at an offset congruent to their address
+//! modulo 64 KiB. [`EspImage::align_flash_segments`] inserts padding
+//! segments (load address 0, which loaders skip) to make that so, as
+//! `esptool elf2image` does.
 
 use thiserror::Error;
 
@@ -25,6 +32,9 @@ pub const MAGIC: u8 = 0xe9;
 pub const CHECKSUM_SEED: u8 = 0xef;
 const HEADER_LEN: usize = 24;
 const MAX_SEGMENTS: u8 = 16;
+/// Cache MMU page size: flash-mapped segments must keep
+/// `flash offset ≡ address (mod MMU_PAGE)`.
+pub const MMU_PAGE: u32 = 0x1_0000;
 
 /// Why an image was rejected.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -138,6 +148,50 @@ impl EspImage {
             })
             .collect();
         img
+    }
+
+    /// Offset of each segment's data from the start of the image.
+    pub fn data_offsets(&self) -> Vec<u32> {
+        let mut pos = HEADER_LEN as u32;
+        self.segments
+            .iter()
+            .map(|s| {
+                let at = pos + 8;
+                pos = at + s.data.len() as u32;
+                at
+            })
+            .collect()
+    }
+
+    /// Insert padding segments so that every segment for which
+    /// `flash_mapped(addr)` holds has its data at a flash offset congruent
+    /// to its address modulo [`MMU_PAGE`], given that the image starts at
+    /// `image_offset` in flash. Padding segments load at address 0 and
+    /// hold zeros. Fails if that needs more than 16 segments.
+    pub fn align_flash_segments(
+        &mut self,
+        image_offset: u32,
+        flash_mapped: impl Fn(u32) -> bool,
+    ) -> Result<(), ImageError> {
+        let mut out: Vec<ImageSegment> = Vec::with_capacity(self.segments.len());
+        let mut pos = image_offset.wrapping_add(HEADER_LEN as u32);
+        for seg in std::mem::take(&mut self.segments) {
+            if flash_mapped(seg.addr) && (pos + 8) % MMU_PAGE != seg.addr % MMU_PAGE {
+                let pad = seg.addr.wrapping_sub(pos + 16) % MMU_PAGE;
+                out.push(ImageSegment {
+                    addr: 0,
+                    data: vec![0; pad as usize],
+                });
+                pos += 8 + pad;
+            }
+            pos += 8 + seg.data.len() as u32;
+            out.push(seg);
+        }
+        if out.len() > usize::from(MAX_SEGMENTS) {
+            return Err(ImageError::TooManySegments(out.len() as u8));
+        }
+        self.segments = out;
+        Ok(())
     }
 
     /// The checksum over the segments' data.

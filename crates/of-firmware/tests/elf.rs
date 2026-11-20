@@ -39,7 +39,7 @@ fn tiny_elf() -> Vec<u8> {
     f.extend(2u16.to_le_bytes());
     f.extend(40u16.to_le_bytes());
     f.extend(3u16.to_le_bytes()); // null, symtab, strtab
-    f.extend(0u16.to_le_bytes());
+    f.extend(2u16.to_le_bytes()); // e_shstrndx: .strtab also names sections
     let ph = |off: u32, addr: u32, filesz: u32, memsz: u32, flags: u32| {
         let mut v = Vec::new();
         for x in [1, off, addr, addr, filesz, memsz, flags, 4] {
@@ -53,16 +53,16 @@ fn tiny_elf() -> Vec<u8> {
     f.extend(data);
     f.extend(&symtab);
     f.extend(&strtab);
-    let sh = |typ: u32, off: u32, size: u32, link: u32, entsize: u32| {
+    let sh = |name: u32, typ: u32, off: u32, size: u32, link: u32, entsize: u32| {
         let mut v = Vec::new();
-        for x in [0, typ, 0, 0, off, size, link, 0, 4, entsize] {
+        for x in [name, typ, 0, 0, off, size, link, 0, 4, entsize] {
             v.extend(u32::to_le_bytes(x));
         }
         v
     };
     f.extend(vec![0u8; 40]);
-    f.extend(sh(2, sym_off, symtab.len() as u32, 2, 16));
-    f.extend(sh(3, str_off, strtab.len() as u32, 0, 0));
+    f.extend(sh(16, 2, sym_off, symtab.len() as u32, 2, 16));
+    f.extend(sh(24, 3, str_off, strtab.len() as u32, 0, 0));
     f
 }
 
@@ -82,6 +82,11 @@ fn parses_entry_segments_and_symbols() {
     assert_eq!(img.symbol("_start").unwrap().value, 0x4200_0000);
     assert_eq!(img.symbol("counter").unwrap().size, 4);
     assert!(img.symbol("missing").is_none());
+    let names: Vec<_> = img.sections.iter().map(|s| (s.name.as_str(), s.kind)).collect();
+    assert_eq!(names, [(".symtab", 2), (".strtab", 3)]);
+    let strtab = img.section(".strtab").unwrap();
+    assert_eq!(strtab.data.len() as u32, strtab.size);
+    assert!(strtab.data.starts_with(b"\0_start\0"));
 }
 
 #[test]
