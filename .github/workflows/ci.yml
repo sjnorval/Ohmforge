@@ -68,6 +68,6 @@ jobs:
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/espflash.zip" https://github.com/esp-rs/espflash/releases/download/v4.7.0/espflash-x86_64-unknown-linux-gnu.zip
           echo "8ab3bafeb212ccb1d7a9c422936b9bc86f8b00fe2731053ed8ab875c8d2f0c4d  $RUNNER_TEMP/espflash.zip" | sha256sum -c -
           unzip -o -q "$RUNNER_TEMP/espflash.zip" -d "$RUNNER_TEMP"
-          ESPFLASH="$RUNNER_TEMP/espflash" OF_CHECK_BOOTLOADER="$PWD/.cache/esp-rom-elfs/20260528/espflash-v4.7.0-esp32c3-bootloader.bin" \
+          ESPFLASH="$RUNNER_TEMP/espflash" OF_CHECK_BOOTLOADER="$RUNNER_TEMP/esp-rom-elfs/20260528/espflash-v4.7.0-esp32c3-bootloader.bin" \
             bash firmware/esp32c3-esp-hal-blinky/build.sh
           git diff --exit-code -- firmware/
