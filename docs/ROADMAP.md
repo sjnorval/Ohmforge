@@ -1,6 +1,6 @@
 # Roadmap and task list
 
-Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress). The ROM boot work (branch `p2-rom-boot`) is on `main` (#20). Items marked "branch `p2-esp-hal-blinky`" are verified there but not yet merged.
+Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress). The ROM boot work (branch `p2-rom-boot`) is on `main` (#20), and the esp-hal blinky (branch `p2-esp-hal-blinky`) too (#21). Items marked "branch `p2-gpio-inputs`" are verified there but not yet merged.
 
 **Current phase: P2 ESP32-C3 MVP, in progress** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). P1 Analog core and phase one (the RISC-V CPU core, pulled forward from P2) are done; the first P2 slice (blinky end to end), the interrupt matrix, SYSTIMER alarms, timer groups, watchdogs, the ESP image parser and the desktop blink demo are on `main`. P0 leftovers continue alongside.
 
@@ -86,28 +86,29 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
   - [x] Partition table / flash layout: `of_firmware::PartitionTable` (parse and write, MD5 row, boot-app choice without OTA data) and 64 KiB-aligned app images (`EspImage::align_flash_segments`)
   - [x] SPI flash and cache MMU: 4 MiB `SpiFlash` behind SPI0/SPI1 (`CMD` operations and user transactions), EXTMEM and the 128-entry MMU shared by IROM and DROM (no cache lines or miss timing)
   - [x] ROM boot from esp-rom-elfs: the real revision 3 ROM runs (`Esp32c3::power_on_rom`; fetched by `scripts/fetch-esp-rom-elfs.*`, pinned and checksummed, never committed): banner and reset cause, blank flash, direct boot of `firmware/esp32c3-xip-blinky`, loading and SHA-256-checking an image at flash 0, watchdog resets back into the ROM, download strapping (`tests/rom_boot.rs`); ROM-lite fast boot (`Esp32c3::boot_flash`: direct boot, partition-table app, image at 0; `tests/flash_boot.rs`)
-  - [x] ESP-IDF second-stage bootloader through the real ROM (branch `p2-esp-hal-blinky`): espflash 4.7.0's prebuilt bootloader (ESP-IDF v6.1; fetched with the ROM, pinned and checksummed, never committed) reads the partition table, verifies and maps the app and boots it (`tests/esp_hal_blinky.rs`). Needed: misaligned loads and stores on the C3 core, the performance counter enabled at reset, the RNG, PMP CSRs, the SYSTEM CPU clock (XTAL or PLL, 20 to 160 MHz) and TIMG RTC calibration
+  - [x] ESP-IDF second-stage bootloader through the real ROM (#21): espflash 4.7.0's prebuilt bootloader (ESP-IDF v6.1; fetched with the ROM, pinned and checksummed, never committed) reads the partition table, verifies and maps the app and boots it (`tests/esp_hal_blinky.rs`). Needed: misaligned loads and stores on the C3 core, the performance counter enabled at reset, the RNG, PMP CSRs, the SYSTEM CPU clock (XTAL or PLL, 20 to 160 MHz) and TIMG RTC calibration
 - [ ] C3 memory map, interrupt matrix, systimer, timer groups, UART
   - [x] Memory map (ROM, SRAM IRAM/DRAM alias, flash cache windows, RTC fast, peripheral dispatch with read-back for unmodelled registers)
   - [x] SYSTIMER: two units (load, work enable), three comparators in target and period mode, interrupts (52-bit wrap and stall-on-CPU-halt not modelled)
-  - [~] UART0 TX capture, configuration registers with reset values and the configured baud rate (branch `p2-esp-hal-blinky`); baud timing and RX to do
+  - [~] UART0 TX capture, configuration registers with reset values and the configured baud rate (#21); baud timing and RX to do
   - [x] Interrupt matrix and CPU interrupt controller (62 sources, 31 lines, priority, threshold, edge/level, clear), traps into vectored `mtvec`
   - [x] Timer groups TIMG0/1 (timer 0 with divider, auto-reload alarm, load), MWDT, RTC WDT and super watchdog (stages, feed, write protection, flash-boot protection; resets reboot the loaded image); timer-interrupt firmware `firmware/esp32c3-timer-irq` (`tests/timer_irq.rs`)
 - [ ] GPIO/IOMUX with electrical pin model (drive strength, thresholds, pulls)
   - [x] GPIO out/enable (+W1TS/W1TC), GPIO matrix `OUT_SEL` 128 and inversion, IO MUX function and drive strength, Thevenin pin model (estimated resistances)
-  - [ ] Inputs with thresholds and hysteresis, pulls, open drain, interrupts (`GPIO_PINn` open drain and the input select registers are stored on branch `p2-esp-hal-blinky`)
+  - [x] Inputs (branch `p2-gpio-inputs`): `GPIO_IN` from circuit node voltages through V_IL/V_IH watches (0.25/0.75 VDD, the datasheet limits, acting as hysteresis), `FUN_IE`, weak pull-up/pull-down (45 kΩ) in the analog pin model, datasheet reset pad settings, open drain (#21), pin interrupts (`INT_TYPE` edge and level, `INT_ENA`, `STATUS` W1TS/W1TC, `PCPU_INT`/`PCPU_NMI_INT`, matrix sources 16 and 17), the input-select matrix (`Gpio::peripheral_input`); esp-hal button firmware, polled and on an interrupt, co-simulated with a push-button part including bounce (`tests/esp_hal_button.rs`)
+  - [ ] Input synchronisers and glitch filter, GPIO wake-up, IO MUX direct peripheral inputs
 - [ ] ADC with attenuation, nonlinearity and noise; LEDC PWM
 - [ ] Mixed-signal sync: CPU stops on MMIO, analog advances to the exact time
   - [x] `Esp32c3Engine`: stops after each peripheral access, pin changes become kernel events at the exact hart time (blinky drives an LED + resistor, `tests/blinky_led.rs`)
-  - [ ] Stop before input reads so GPIO/ADC reads see the analog value at that instant
+  - [~] Stop before input reads so GPIO/ADC reads see the analog value at that instant: done for GPIO (branch `p2-gpio-inputs`: `Bus::defer_load`, lazy `wfi` woken at the input event; a busy core may take a pin interrupt up to one slice late, bounded by `Esp32c3Engine::set_max_lead`); ADC to do
 - [ ] egui schematic editor (place, wire, probe), oscilloscope, logic analyser with UART decode, serial monitor
   - [x] Read-only desktop blink demo (`of-ui` `BlinkDemo`, `cargo run -p of-app --features gui`): bundled blinky co-simulated with R1 330 Ω and a red LED, the schematic LED lit from the simulated current, an LED current trace and UART0 output. Not the editor or the real oscilloscope (GPU waveform path, decision d2)
 - [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
-- [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs
+- [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (blink and the button, polled and on an interrupt, run from esp-hal; branch `p2-gpio-inputs` for the button)
 
 ### First milestone: blinky end to end
 
-Each step lands with its own tests; firmware is ours and tiny, built with zig and committed (CI checks it rebuilds byte-identical). Steps 1 to 6 are on `main`.
+Each step lands with its own tests; firmware is ours and tiny, built with zig and committed (CI checks it rebuilds byte-identical). Steps 1 to 7 are on `main`.
 
 1. [x] Memory map and bus (`SocBus`): region routing, aliases, read-only ROM/flash, fetch rules (unit tests)
 2. [x] ELF reader (`of-firmware`) and direct boot (`Esp32c3::load_elf`): hand-built ELF, truncation and malformed-file tests, real zig-built ELF
@@ -115,7 +116,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 4. [x] SYSTIMER unit 0 read path, UART0 TX capture (unit tests; banner check in the blinky test)
 5. [x] Blinky firmware (`firmware/esp32c3-blinky`, RV32IMC asm, SYSTIMER-timed): edges every 250 µs without drift (`tests/blinky.rs`)
 6. [x] `Esp32c3Engine` + `PinDriver` + parts-library LED and resistor under the kernel: LED current switches with a 500 µs period, about 4 mA on (`tests/blinky_led.rs`)
-7. [x] Same blinky from esp-hal (Rust, `riscv32imc-unknown-none-elf`), branch `p2-esp-hal-blinky`: `firmware/esp32c3-esp-hal-blinky` (esp-hal 1.2.2, unmodified `esp_hal::init` with `CpuClock::max()`, 500 µs half period) boots through the real ROM and the ESP-IDF bootloader, prints its banner at 160 MHz and drives the LED circuit (`tests/esp_hal_blinky.rs`); CI rebuilds it byte for byte
+7. [x] Same blinky from esp-hal (Rust, `riscv32imc-unknown-none-elf`, #21): `firmware/esp32c3-esp-hal-blinky` (esp-hal 1.2.2, unmodified `esp_hal::init` with `CpuClock::max()`, 500 µs half period) boots through the real ROM and the ESP-IDF bootloader, prints its banner at 160 MHz and drives the LED circuit (`tests/esp_hal_blinky.rs`); CI rebuilds it byte for byte
 8. [ ] Arduino-ESP32 / ESP-IDF blink through the real ROM and a flash image (deferred: needs an ESP-IDF or Arduino toolchain in CI; the bootloader path it uses already works)
 
 ### MVP definition (exit criteria for 0.1)
