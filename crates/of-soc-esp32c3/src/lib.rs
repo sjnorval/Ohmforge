@@ -39,6 +39,7 @@
 //! written and are counted in [`SocBus::unmodelled`].
 
 pub mod boot;
+pub mod bootloader;
 pub mod bus;
 pub mod cache;
 pub mod csr;
@@ -48,11 +49,13 @@ pub mod flash;
 pub mod gpio;
 pub mod intmatrix;
 pub mod map;
+pub mod rng;
 pub mod rom;
 pub mod rtc_cntl;
 pub mod sha;
 pub mod soc;
 pub mod spi_mem;
+pub mod system;
 pub mod systimer;
 pub mod timg;
 pub mod uart;

@@ -86,7 +86,11 @@ pub struct HartConfig {
 impl HartConfig {
     /// ESP32-C3: RV32IMC + Zicsr + Zifencei at 160 MHz, 31 interrupt lines
     /// (bits 1 to 31) gated by the SoC's interrupt controller rather than
-    /// `mie` (no `mie`/`mip` CSRs), estimated timings.
+    /// `mie` (no `mie`/`mip` CSRs), estimated timings. Misaligned loads
+    /// and stores are performed, not trapped: the C3 core splits them in
+    /// hardware (ESP32-C3 errata CPU-863 describes that split), and
+    /// ESP-IDF code relies on it (the second-stage bootloader reads packed
+    /// image-header fields with `lhu` at odd addresses).
     pub fn esp32c3() -> Self {
         Self {
             hart_id: 0,
@@ -99,7 +103,7 @@ impl HartConfig {
             clock_hz: 160_000_000,
             irq_mask: 0xffff_fffe,
             mie_mip: false,
-            misaligned: MisalignedPolicy::Trap,
+            misaligned: MisalignedPolicy::Allow,
             ebreak: EbreakAction::Trap,
             timing: TimingModel::ESP32C3_ESTIMATE,
         }
@@ -224,7 +228,10 @@ pub struct Hart {
     state: HartState,
     reservation: Option<u32>,
     elapsed_cycles: u64,
+    /// Local time at `origin_cycles` elapsed cycles.
     time_origin: SimTime,
+    /// Elapsed cycles at the last clock change (0 if none).
+    origin_cycles: u64,
     period_ps: u64,
     breakpoints: BTreeSet<u32>,
 }
@@ -244,19 +251,38 @@ impl Hart {
             reservation: None,
             elapsed_cycles: 0,
             time_origin: SimTime::ZERO,
+            origin_cycles: 0,
             period_ps,
             breakpoints: BTreeSet::new(),
         }
     }
 
-    /// Reset architectural state (keeps breakpoints and elapsed time).
+    /// Reset architectural state (keeps breakpoints, elapsed time and the
+    /// current clock: the SoC decides the clock after a reset).
     pub fn reset(&mut self) {
         let keep_bp = std::mem::take(&mut self.breakpoints);
-        let (elapsed, origin) = (self.elapsed_cycles, self.time_origin);
+        let (elapsed, origin, origin_cycles, period) = (
+            self.elapsed_cycles,
+            self.time_origin,
+            self.origin_cycles,
+            self.period_ps,
+        );
         *self = Self::new(self.config.clone());
         self.breakpoints = keep_bp;
         self.elapsed_cycles = elapsed;
         self.time_origin = origin;
+        self.origin_cycles = origin_cycles;
+        self.period_ps = period;
+    }
+
+    /// Change the core clock from now on (the SoC's clock tree switched
+    /// source or divider). Time so far is kept; later cycles last
+    /// `1 / hz`. Cycle counters are unaffected.
+    pub fn set_clock_hz(&mut self, hz: u64) {
+        let now = self.local_time();
+        self.time_origin = now;
+        self.origin_cycles = self.elapsed_cycles;
+        self.period_ps = (1_000_000_000_000 / hz.max(1)).max(1);
     }
 
     // ----- inspection and debugger API ---------------------------------
@@ -339,13 +365,15 @@ impl Hart {
     pub fn cycle_period_ps(&self) -> u64 {
         self.period_ps
     }
-    /// Set the simulation time that corresponds to zero elapsed cycles.
+    /// Set the simulation time that corresponds to zero elapsed cycles
+    /// (at the current clock; forgets earlier clock changes).
     pub fn set_time_origin(&mut self, t: SimTime) {
         self.time_origin = t;
+        self.origin_cycles = 0;
     }
     /// The hart's local simulation time.
     pub fn local_time(&self) -> SimTime {
-        SimTime(self.time_origin.0 + self.elapsed_cycles * self.period_ps)
+        SimTime(self.time_origin.0 + (self.elapsed_cycles - self.origin_cycles) * self.period_ps)
     }
 
     fn account(&mut self, cycles: u32, retired: bool) {

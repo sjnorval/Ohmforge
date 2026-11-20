@@ -561,6 +561,12 @@ fn misaligned_and_faulting_accesses() {
 }
 
 #[test]
+fn esp32c3_performs_misaligned_accesses() {
+    assert_eq!(HartConfig::esp32c3().misaligned, MisalignedPolicy::Allow);
+    assert_eq!(HartConfig::generic_imac().misaligned, MisalignedPolicy::Trap);
+}
+
+#[test]
 fn misaligned_allowed_policy_splits_accesses() {
     let mut c = cfg();
     c.misaligned = MisalignedPolicy::Allow;
@@ -722,6 +728,24 @@ fn esp32c3_clock_and_cycle_costs() {
     let expected = t.alu + 3 * t.alu + 2 * t.branch_taken + t.branch_not_taken + t.div + t.system;
     assert_eq!(h.elapsed_cycles(), u64::from(expected));
     assert_eq!(h.local_time(), SimTime(u64::from(expected) * 6250));
+}
+
+#[test]
+fn clock_changes_keep_time_and_scale_later_cycles() {
+    let (mut h, mut ram) = setup(cfg(), &[jal(0, 0)]); // spin, 100 MHz
+    h.run_until(&mut ram, SimTime::from_us(1));
+    assert_eq!(h.elapsed_cycles(), 100);
+    h.set_clock_hz(40_000_000);
+    assert_eq!(h.cycle_period_ps(), 25_000);
+    assert_eq!(h.local_time(), SimTime::from_us(1), "time so far is kept");
+    h.run_until(&mut ram, SimTime::from_us(2));
+    assert_eq!(h.elapsed_cycles(), 140, "40 cycles in the next microsecond");
+    h.reset();
+    assert_eq!(
+        (h.cycle_period_ps(), h.local_time()),
+        (25_000, SimTime::from_us(2)),
+        "reset keeps the clock"
+    );
 }
 
 struct SlowBus(Ram);

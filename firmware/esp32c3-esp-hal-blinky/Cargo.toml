@@ -1,0 +1,30 @@
+[package]
+name = "esp32c3-esp-hal-blinky"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "AGPL-3.0-or-later"
+publish = false
+
+# Its own workspace: this is test firmware for the simulator, built for
+# riscv32imc-unknown-none-elf, not part of the Ohmforge workspace.
+[workspace]
+
+[[bin]]
+name = "esp32c3-esp-hal-blinky"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+esp-hal = { version = "=1.2.2", features = ["esp32c3"] }
+esp-bootloader-esp-idf = { version = "=0.6.0", features = ["esp32c3"] }
+esp-println = { version = "=0.18.0", default-features = false, features = ["esp32c3", "uart"] }
+
+[profile.release]
+opt-level = "s"
+debug = false
+codegen-units = 1
+lto = "fat"
+incremental = false
+panic = "abort"

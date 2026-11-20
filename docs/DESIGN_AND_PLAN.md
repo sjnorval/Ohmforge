@@ -298,7 +298,7 @@ artwork = "CC-BY-SA-4.0"
 1. **Accept what the toolchains produce.** ELF from ESP-IDF, Arduino-ESP32, esp-hal/esp-idf-hal (Rust), MicroPython; merged flash `.bin`; UF2.
 2. **Parse and map.** Our own minimal ELF32 reader in `of-firmware` for segments and symbols (`object`/`goblin` remain options for wider formats), `gimli` for DWARF so the debugger and profiler show source lines and variables.
 3. **Build a flash image.** Ohmforge parses and writes ESP images with its own code (`of_firmware::EspImage`: header, segments, checksum and our own SHA-256; no espflash dependency) and will place bootloader, partition table and app at real offsets; eFuses from a per-chip default file.
-4. **Boot like silicon.** Run the real mask ROM from Espressif's esp-rom-elfs (Apache-2.0 files around closed-source ROM code, so fetched by a script with a pinned checksum and never committed or bundled), or a fast direct-boot path that skips the bootloader.
+4. **Boot like silicon.** Run the real mask ROM from Espressif's esp-rom-elfs (Apache-2.0 files around closed-source ROM code, so fetched by a script with a pinned checksum and never committed or bundled), through the ESP-IDF second-stage bootloader (espflash's prebuilt one, fetched the same way; an esp-hal app boots this way), or a fast direct-boot path that skips the bootloader.
 5. **Watch and rebuild.** Optional: watch the build directory and hot-reload the firmware while keeping the circuit state.
 6. **Debug.** GDB remote protocol via the `gdbstub` crate: breakpoints, watchpoints, and pausing virtual time.
 

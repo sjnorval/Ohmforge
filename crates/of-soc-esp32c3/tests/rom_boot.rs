@@ -2,19 +2,16 @@
 //!
 //! The ROM ELF is Espressif's (esp-rom-elfs, Apache-2.0, closed-source
 //! code) and is never committed. Fetch it with
-//! `scripts/fetch-esp-rom-elfs.sh` (or `.ps1`); these tests look in
-//! `$OF_ESP_ROM_DIR`, then `$RUNNER_TEMP/esp-rom-elfs/<release>`, then
-//! `.cache/esp-rom-elfs/<release>` in the repository, and skip (with a
-//! note) when the file is absent, unless `OF_REQUIRE_ESP_ROM` is set, as in
-//! CI. A file with the wrong SHA-256 always fails.
+//! `scripts/fetch-esp-rom-elfs.sh` (or `.ps1`); see `common/mod.rs` for
+//! where the tests look and when they skip.
 
-use std::path::PathBuf;
+mod common;
 
+use common::rom;
 use of_core::SimTime;
 use of_cpu_riscv::asm::*;
-use of_firmware::{ElfImage, EspImage, ImageSegment, sha256};
+use of_firmware::{ElfImage, EspImage, ImageSegment};
 use of_soc_esp32c3::bus::STRAP_DOWNLOAD;
-use of_soc_esp32c3::rom::{C3_ROM_FILE, C3_ROM_SHA256, ROM_ELFS_RELEASE, RomImage};
 use of_soc_esp32c3::{CHIP_ID, Esp32c3, ResetKind, ResetSource};
 
 const XIP_ELF: &[u8] = include_bytes!("../../../firmware/esp32c3-xip-blinky/xip_blinky.elf");
@@ -22,37 +19,6 @@ const XIP_BIN: &[u8] = include_bytes!("../../../firmware/esp32c3-xip-blinky/xip_
 
 const BANNER: &str = "ESP-ROM:esp32c3-api1-20210207\r\nBuild:Feb  7 2021\r\n";
 const POWER_ON: &str = "rst:0x1 (POWERON),boot:0xc (SPI_FAST_FLASH_BOOT)\r\n";
-
-fn rom() -> Option<RomImage> {
-    let release = format!("esp-rom-elfs/{ROM_ELFS_RELEASE}");
-    let dirs = [
-        std::env::var_os("OF_ESP_ROM_DIR").map(PathBuf::from),
-        std::env::var_os("RUNNER_TEMP").map(|t| PathBuf::from(t).join(&release)),
-        Some(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../.cache")
-                .join(&release),
-        ),
-    ];
-    let Some(path) = dirs
-        .into_iter()
-        .flatten()
-        .map(|d| d.join(C3_ROM_FILE))
-        .find(|p| p.is_file())
-    else {
-        assert!(
-            std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
-            "OF_REQUIRE_ESP_ROM is set but {C3_ROM_FILE} was not found; run scripts/fetch-esp-rom-elfs.sh"
-        );
-        eprintln!("skipped: {C3_ROM_FILE} not found (run scripts/fetch-esp-rom-elfs.sh)");
-        return None;
-    };
-    let bytes = std::fs::read(&path).expect("readable ROM ELF");
-    let digest: String = sha256(&bytes).iter().map(|b| format!("{b:02x}")).collect();
-    assert_eq!(digest, C3_ROM_SHA256, "{} is not the pinned ROM", path.display());
-    let elf = ElfImage::parse(&bytes).expect("ROM ELF parses");
-    Some(RomImage::from_elf(&elf).expect("ROM image builds"))
-}
 
 /// A RAM-only app image: print '!' and sleep, never touching a watchdog.
 fn ram_image() -> EspImage {
@@ -115,7 +81,7 @@ fn rom_loads_and_verifies_an_image_at_offset_0() {
     let mut soc = Esp32c3::new();
     soc.write_flash(0, &ram_image().to_bytes());
     soc.power_on_rom(&rom);
-    soc.run_until(SimTime::from_ms(2));
+    soc.run_until(SimTime::from_ms(5));
     let text = soc.uart_text();
     // The ROM's loader read the header, loaded the segment, checked the
     // checksum and the SHA-256 (on the SHA accelerator) and jumped.
@@ -138,7 +104,7 @@ fn rom_reports_a_bad_digest_and_boots_anyway() {
     let mut soc = Esp32c3::new();
     soc.write_flash(0, &bytes);
     soc.power_on_rom(&rom);
-    soc.run_until(SimTime::from_ms(2));
+    soc.run_until(SimTime::from_ms(10));
     let text = soc.uart_text();
     assert!(text.contains("SHA-256 comparison failed:\r\n"), "{text:?}");
     assert!(

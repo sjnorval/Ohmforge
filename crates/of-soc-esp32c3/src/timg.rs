@@ -21,6 +21,17 @@
 //! armed ([`Timg::arm_boot_protection`]) and that bit is set, stage 0
 //! resets the system after `WDT_STG0_HOLD` ticks even with `WDT_EN` clear.
 //!
+//! **RTC clock calibration** (`RTCCALICFG`, `RTCCALICFG1`, `RTCCALICFG2`):
+//! counts XTAL (40 MHz) cycles over `RTC_CALI_MAX` cycles of the clock
+//! chosen by `RTC_CALI_CLK_SEL` (0 RC_SLOW, 1 RC_FAST / 256, 2 XTAL32K). A
+//! rising `RTC_CALI_START` starts a one-shot count; `RTC_CALI_RDY` sets when
+//! it ends, with the count in `RTC_CALI_VALUE`. `RTC_CALI_START_CYCLING`
+//! (set at reset) repeats the count, so a result is ready one count after
+//! cycling starts. A count longer than `RTC_CALI_TIMEOUT_THRES` XTAL cycles
+//! sets `RTC_CALI_TIMEOUT` at that point instead. The oscillators run at
+//! their nominal frequencies ([`RC_SLOW_HZ`], [`RC_FAST_DIV_HZ`]); no
+//! 32 kHz crystal is fitted, so XTAL32K counts always time out.
+//!
 //! `INT_ST = INT_RAW & INT_ENA` drives the level sources `TGn_T0` and
 //! `TGn_WDT`. Writes are applied with the time of the instruction that made
 //! them; call [`Timg::advance`] to that time first.
@@ -36,6 +47,12 @@ pub const XTAL_PS: u64 = 25_000;
 /// The MWDT write-protection key.
 pub const WDT_WKEY: u32 = 0x50d8_3aa1;
 const MASK54: u64 = (1 << 54) - 1;
+/// Nominal RC_SLOW frequency (136 kHz).
+pub const RC_SLOW_HZ: u64 = 136_000;
+/// Nominal RC_FAST (17.5 MHz) divided by 256, as the calibration sees it.
+pub const RC_FAST_DIV_HZ: u64 = 17_500_000 / 256;
+/// XTAL frequency.
+const XTAL_HZ: u64 = 40_000_000;
 
 /// Register offsets from a timer group's base.
 pub mod reg {
@@ -77,6 +94,14 @@ pub mod reg {
     pub const INT_ST: u32 = 0x78;
     /// Interrupt clear.
     pub const INT_CLR: u32 = 0x7c;
+    /// RTC calibration configuration (see [`super::cali`]).
+    pub const RTCCALICFG: u32 = 0x68;
+    /// RTC calibration result: `RTC_CALI_VALUE` bits 31:7,
+    /// `CYCLING_DATA_VLD` bit 0.
+    pub const RTCCALICFG1: u32 = 0x6c;
+    /// RTC calibration timeout: `TIMEOUT_THRES` bits 31:7,
+    /// `TIMEOUT_RST_CNT` bits 6:3, `TIMEOUT` bit 0.
+    pub const RTCCALICFG2: u32 = 0x80;
     /// Version register.
     pub const NTIMERS_DATE: u32 = 0xf8;
     /// Register clock control.
@@ -117,6 +142,131 @@ pub mod wdt {
     pub const FLASHBOOT_MOD_EN: u32 = 1 << 14;
     /// Reset value: flash boot protection, reset lengths 1.
     pub const RESET: u32 = FLASHBOOT_MOD_EN | (1 << 15) | (1 << 18);
+}
+
+/// `RTCCALICFG` bits.
+pub mod cali {
+    /// Repeat counts continuously.
+    pub const START_CYCLING: u32 = 1 << 12;
+    /// Clock select shift (bits 14:13).
+    pub const CLK_SEL_SHIFT: u32 = 13;
+    /// Count finished (read-only).
+    pub const RDY: u32 = 1 << 15;
+    /// Slow-clock cycles to count, shift (bits 30:16).
+    pub const MAX_SHIFT: u32 = 16;
+    /// Start a one-shot count.
+    pub const START: u32 = 1 << 31;
+    /// Reset value: cycling, RC_FAST / 256, one cycle.
+    pub const RESET: u32 = 0x0001_3000;
+    /// `RTCCALICFG2` reset value.
+    pub const CFG2_RESET: u32 = 0xffff_ff98;
+}
+
+/// The RTC calibration counter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Calibration {
+    cfg: u32,
+    cfg2: u32,
+    /// When the running count ends, if one is running.
+    ends: Option<SimTime>,
+    /// Whether that end is a timeout rather than a result.
+    times_out: bool,
+    rdy: bool,
+    timeout: bool,
+    value: u32,
+}
+
+impl Calibration {
+    fn new() -> Self {
+        let mut c = Self {
+            cfg: cali::RESET,
+            cfg2: cali::CFG2_RESET,
+            ends: None,
+            times_out: false,
+            rdy: false,
+            timeout: false,
+            value: 0,
+        };
+        // Cycling from reset.
+        c.start(SimTime::ZERO);
+        c
+    }
+
+    /// Slow clock frequency for the current `CLK_SEL`, if it runs.
+    fn slow_hz(&self) -> Option<u64> {
+        match (self.cfg >> cali::CLK_SEL_SHIFT) & 3 {
+            0 => Some(RC_SLOW_HZ),
+            1 => Some(RC_FAST_DIV_HZ),
+            _ => None,
+        }
+    }
+
+    /// Start a count at `t`.
+    fn start(&mut self, t: SimTime) {
+        let max = u64::from((self.cfg >> cali::MAX_SHIFT) & 0x7fff);
+        let thres = u64::from(self.cfg2 >> 7);
+        let xtal_cycles = self.slow_hz().map(|hz| max * XTAL_HZ / hz);
+        self.rdy = false;
+        self.timeout = false;
+        match xtal_cycles {
+            Some(n) if n <= thres => {
+                self.value = n as u32;
+                self.times_out = false;
+                self.ends = Some(SimTime(t.0 + n * XTAL_PS));
+            }
+            _ => {
+                self.times_out = true;
+                self.ends = Some(SimTime(t.0 + thres * XTAL_PS));
+            }
+        }
+    }
+
+    fn running(&self) -> bool {
+        self.cfg & (cali::START | cali::START_CYCLING) != 0
+    }
+
+    /// End of a one-shot count. (A cycling count's result is only looked
+    /// at when polled, so it needs no exact stop.)
+    fn next_event(&self) -> Option<SimTime> {
+        self.ends.filter(|_| self.cfg & cali::START != 0)
+    }
+
+    fn advance(&mut self, t: SimTime) {
+        if let Some(end) = self.ends.filter(|_| self.running())
+            && t >= end
+        {
+            self.ends = None;
+            if self.times_out {
+                self.timeout = true;
+            } else {
+                self.rdy = true;
+            }
+        }
+    }
+
+    fn write_cfg(&mut self, v: u32, t: SimTime) {
+        let old = self.cfg;
+        self.cfg = v & !cali::RDY;
+        let rose = |bit: u32| v & bit != 0 && old & bit == 0;
+        if rose(cali::START) || rose(cali::START_CYCLING) {
+            self.start(t);
+        } else if !self.running() {
+            self.ends = None;
+        }
+    }
+
+    fn read_cfg(&self) -> u32 {
+        self.cfg | if self.rdy { cali::RDY } else { 0 }
+    }
+
+    fn read_cfg1(&self) -> u32 {
+        let vld = self.rdy && self.cfg & cali::START_CYCLING != 0;
+        (self.value << 7) | u32::from(vld)
+    }
+
+    fn read_cfg2(&self) -> u32 {
+        (self.cfg2 & !1) | u32::from(self.timeout)
+    }
 }
 
 /// The general-purpose timer.
@@ -219,6 +369,7 @@ pub struct Timg {
     int_ena: u32,
     int_raw: u32,
     regclk: u32,
+    cali: Calibration,
 }
 
 impl Default for Timg {
@@ -239,6 +390,7 @@ impl Timg {
             int_ena: 0,
             int_raw: 0,
             regclk: 1 << 29,
+            cali: Calibration::new(),
         }
     }
 
@@ -278,15 +430,20 @@ impl Timg {
 
     /// Time of the next alarm or watchdog stage expiry.
     pub fn next_event(&self) -> Option<SimTime> {
-        [self.timer.next_alarm(), self.wdt.next(&self.wdt_timing())]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            self.timer.next_alarm(),
+            self.wdt.next(&self.wdt_timing()),
+            self.cali.next_event(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     /// Process everything due at or before `t`. Returns a watchdog reset,
     /// if one happened (state after it is moot: the chip resets).
     pub fn advance(&mut self, t: SimTime) -> Option<(SimTime, ResetKind)> {
+        self.cali.advance(t);
         if self.timer.advance(t) {
             self.int_raw |= 1;
         }
@@ -304,9 +461,8 @@ impl Timg {
 
     /// Whether `off` is a modelled register.
     pub fn is_reg(off: u32) -> bool {
-        // 0x68/0x6c (and 0x80) are RTC calibration: not modelled.
-        let wdt_or_int = (reg::WDTCONFIG0..=reg::INT_CLR).contains(&off) && !matches!(off, 0x68 | 0x6c);
-        off.is_multiple_of(4) && (off <= reg::T0LOAD || wdt_or_int || off >= reg::NTIMERS_DATE)
+        let wdt_cali_int = (reg::WDTCONFIG0..=reg::RTCCALICFG2).contains(&off);
+        off.is_multiple_of(4) && (off <= reg::T0LOAD || wdt_cali_int || off >= reg::NTIMERS_DATE)
     }
 
     /// Read a register.
@@ -326,6 +482,9 @@ impl Timg {
             reg::INT_ENA => self.int_ena,
             reg::INT_RAW => self.int_raw,
             reg::INT_ST => self.int_status(),
+            reg::RTCCALICFG => self.cali.read_cfg(),
+            reg::RTCCALICFG1 => self.cali.read_cfg1(),
+            reg::RTCCALICFG2 => self.cali.read_cfg2(),
             reg::NTIMERS_DATE => 0x200_6191,
             reg::REGCLK => self.regclk,
             _ => return None,
@@ -375,7 +534,9 @@ impl Timg {
             reg::WDTWPROTECT => self.wkey = v,
             reg::INT_ENA => self.int_ena = v & 3,
             reg::INT_RAW | reg::INT_CLR => self.int_raw &= !v,
-            reg::INT_ST | reg::NTIMERS_DATE => {}
+            reg::RTCCALICFG => self.cali.write_cfg(v, t),
+            reg::RTCCALICFG2 => self.cali.cfg2 = v & !0b111,
+            reg::INT_ST | reg::NTIMERS_DATE | reg::RTCCALICFG1 => {}
             reg::REGCLK => self.regclk = v,
             _ => return None,
         }
@@ -411,7 +572,7 @@ mod tests {
         assert_eq!(g.read(reg::WDTCONFIG2), Some(26_000_000));
         assert_eq!(g.read(reg::WDTWPROTECT), Some(0x50d8_3aa1));
         assert_eq!(g.next_event(), None, "nothing runs at reset");
-        assert!(Timg::is_reg(reg::T0LOAD) && Timg::is_reg(reg::INT_CLR) && !Timg::is_reg(0x68));
+        assert!(Timg::is_reg(reg::T0LOAD) && Timg::is_reg(reg::INT_CLR) && Timg::is_reg(reg::RTCCALICFG));
     }
 
     #[test]
@@ -544,6 +705,45 @@ mod tests {
         w(&mut g, reg::WDTWPROTECT, 0, us(3));
         assert_eq!(g.next_event(), None);
         assert_eq!(g.advance(SimTime(1_000_000_000_000)), None);
+    }
+
+    #[test]
+    fn rtc_calibration_counts_xtal_cycles_over_slow_cycles() {
+        let mut g = Timg::new();
+        assert_eq!(g.read(reg::RTCCALICFG), Some(cali::RESET), "cycling, not ready yet");
+        assert_eq!(g.read(reg::RTCCALICFG2), Some(cali::CFG2_RESET));
+        // Cycling from reset: one RC_FAST/256 cycle, 585 XTAL cycles.
+        g.advance(us(20));
+        assert_eq!(g.read(reg::RTCCALICFG), Some(cali::RESET | cali::RDY));
+        assert_eq!(
+            g.read(reg::RTCCALICFG1),
+            Some((40_000_000 / RC_FAST_DIV_HZ as u32) << 7 | 1)
+        );
+        // One-shot: 1024 RC_SLOW cycles (7.53 ms) as esp-hal does it.
+        w(&mut g, reg::RTCCALICFG, cali::RESET & !cali::START_CYCLING, us(100));
+        w(&mut g, reg::RTCCALICFG, 1024 << cali::MAX_SHIFT, us(100));
+        w(&mut g, reg::RTCCALICFG, 1024 << cali::MAX_SHIFT | cali::START, us(100));
+        let n = 1024 * 40_000_000 / RC_SLOW_HZ;
+        let end = SimTime(us(100).0 + n * XTAL_PS);
+        assert_eq!(g.next_event(), Some(end));
+        g.advance(SimTime(end.0 - 1));
+        assert_eq!(g.read(reg::RTCCALICFG).unwrap() & cali::RDY, 0);
+        g.advance(end);
+        assert_ne!(g.read(reg::RTCCALICFG).unwrap() & cali::RDY, 0);
+        assert_eq!(g.read(reg::RTCCALICFG1), Some((n as u32) << 7), "no cycling data");
+        assert_eq!(g.next_event(), None);
+    }
+
+    #[test]
+    fn rtc_calibration_times_out_without_a_32k_crystal() {
+        let mut g = Timg::new();
+        w(&mut g, reg::RTCCALICFG, 0, us(0));
+        w(&mut g, reg::RTCCALICFG2, 1000 << 7, us(0));
+        let cfg = 2 << cali::CLK_SEL_SHIFT | 100 << cali::MAX_SHIFT;
+        w(&mut g, reg::RTCCALICFG, cfg | cali::START, us(1));
+        g.advance(SimTime(us(1).0 + 1000 * XTAL_PS));
+        assert_eq!(g.read(reg::RTCCALICFG2), Some(1000 << 7 | 1));
+        assert_eq!(g.read(reg::RTCCALICFG).unwrap() & cali::RDY, 0);
     }
 
     #[test]

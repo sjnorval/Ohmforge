@@ -10,6 +10,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Added
 
+- **esp-hal blinky through the full boot path**: an unmodified esp-hal 1.2.2 blinky (`firmware/esp32c3-esp-hal-blinky`, built with espflash 4.7.0, reproducible) boots on the ESP32-C3 model through the real ROM and espflash's ESP-IDF second-stage bootloader (fetched with the ROM, never committed) and drives the LED circuit. New models: the CPU clock (SYSTEM), the RNG, PMP and debug trigger CSRs, TIMG RTC calibration, UART0 configuration registers and GPIO pin and input select registers.
 - **ESP32-C3 ROM boot, flash and cache MMU:** a 4 MiB SPI flash chip behind the SPI0/SPI1 memory controllers and the cache MMU (64 KiB pages into the IROM and DROM windows); Espressif's real mask ROM runs on the model (`Esp32c3::power_on_rom`): it prints its banner and reset cause, direct boots flash, loads and SHA-256-checks an image at flash offset 0, reboots after watchdog resets and honours download-mode strapping. The ROM ELF comes from esp-rom-elfs and is never committed: `scripts/fetch-esp-rom-elfs.sh`/`.ps1` fetch a pinned, checksummed release, and the ROM tests skip without it. A ROM-lite fast boot (`Esp32c3::boot_flash`) boots direct-boot flash, the app from the partition table at 0x8000, or the image at 0, without running the ROM. Also new: partition table parsing and writing (with the MD5 row), 64 KiB-aligned flash image layout (`EspImage::align_flash_segments`), the SHA accelerator, eFuse (blank chip), the USB Serial/JTAG console, the C3 performance-counter CSRs, and an XIP test firmware (`firmware/esp32c3-xip-blinky`) that runs in place from flash.
 - **Community and contributor setup:** issue forms (bug report, feature request, new part or model), a pull request checklist, `SECURITY.md` with private vulnerability reporting, `SUPPORT.md`, Dependabot for Cargo and GitHub Actions, this changelog and release-note categories.
 - **Desktop blink demo** (#11): `cargo run -p of-app --features gui` shows a live ESP32-C3 blink schematic, GPIO8 through a 330 Ω resistor to a red LED, with the LED lit from the simulated current, an LED current trace and the firmware's UART0 output. The desktop app now uses eframe's wgpu backend.
@@ -22,6 +23,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Changed
 
+- The ESP32-C3 core performs misaligned loads and stores in hardware, as the chip does, and its performance counter counts from reset; the hart follows the CPU clock the firmware selects instead of always running at 160 MHz.
 - ESP32-C3 flash windows are read through the cache MMU, which IROM and DROM share; the test firmware's read-only data moved to 0x3c01_0020 so it does not share flash with code.
 - The CPU core's `mie`/`mip` CSRs are optional (`HartConfig::mie_mip`); they are off for the ESP32-C3, which has neither (#10).
 - Every change to `main` needs the maintainer's review through `CODEOWNERS` and the main-branch ruleset (#9).

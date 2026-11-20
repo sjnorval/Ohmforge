@@ -9,7 +9,7 @@
 
 An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
 
-**Status:** pre-alpha. The SPICE-grade analog solver (`of-analog`, checked against ngspice), the RV32IMC CPU core (`of-cpu-riscv`, passing riscv-tests), the co-simulation kernel (`of-core`) and the parts-to-devices bridge (`of-components`) work. The ESP32-C3 SoC (`of-soc-esp32c3`) boots firmware from an ELF or an ESP flash image: a blinky drives a simulated LED and resistor end to end, and timer interrupts and watchdogs behave as on the chip. On branch `p2-rom-boot`, Espressif's real boot ROM runs on the model and boots firmware from simulated SPI flash through the cache MMU. In the desktop demo, the LED lights on the schematic in sync with the simulated current waveform. The app also shows the firmware's UART0 output. The plan is in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md); progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+**Status:** pre-alpha. The SPICE-grade analog solver (`of-analog`, checked against ngspice), the RV32IMC CPU core (`of-cpu-riscv`, passing riscv-tests), the co-simulation kernel (`of-core`) and the parts-to-devices bridge (`of-components`) work. The ESP32-C3 SoC (`of-soc-esp32c3`) boots firmware from an ELF or an ESP flash image: a blinky drives a simulated LED and resistor end to end, and timer interrupts and watchdogs behave as on the chip. Espressif's real boot ROM runs on the model and boots firmware from simulated SPI flash through the cache MMU; on branch `p2-esp-hal-blinky` an unmodified esp-hal blinky boots through the ROM and the ESP-IDF second-stage bootloader and drives the LED. In the desktop demo, the LED lights on the schematic in sync with the simulated current waveform. The app also shows the firmware's UART0 output. The plan is in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md); progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Goals
 
@@ -54,7 +54,7 @@ cargo test --workspace
 cargo run -p of-cli -- --version
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv   # SPICE netlist to CSV
 cargo test -p of-soc-esp32c3          # blinky, timer-interrupt and XIP firmware on the ESP32-C3 model, LED co-simulated
-scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM for the real-ROM boot tests (never committed)
+scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests (never committed)
 cargo run -p of-app --features gui   # desktop app with the ESP32-C3 LED blink demo
 ```
 
@@ -84,7 +84,7 @@ The full checklist is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **P0 Foundations**: mostly done (workspace, licences, CI, parts loader, kernel `Engine` trait). Leftovers such as the project file format and the mdBook skeleton continue alongside later phases.
 - **Phase one, RISC-V core**: done (RV32IMC core, 75 of 77 riscv-tests passing, 2 expected-unsupported).
 - **P1 Analog core**: done (sparse MNA with DC, AC and transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
-- **P2 ESP32-C3 MVP**: in progress. Landed: ELF boot, GPIO output, interrupts, timers, watchdogs, the flash image parser, and the desktop blink demo. In review: SPI flash, cache MMU and real-ROM boot. Next: esp-hal and ESP-IDF firmware through the ROM, GPIO inputs, ADC and PWM, the schematic editor, and BOM v1.
+- **P2 ESP32-C3 MVP**: in progress. Landed: ELF boot, GPIO output, interrupts, timers, watchdogs, the flash image parser, the desktop blink demo, SPI flash, cache MMU and real-ROM boot. In review: an esp-hal blinky through the ROM and the ESP-IDF bootloader. Next: ESP-IDF and Arduino firmware, GPIO inputs, ADC and PWM, the schematic editor, and BOM v1.
 - **P3 Breadth**: planned (classic ESP32 through a QEMU sidecar, I2C/SPI/RMT/DAC, breadboard view, about 50 parts, electromechanical models, KiCad export; exit 0.2).
 - **P4 Own Xtensa core and web**: planned (own Xtensa core, browser web app, Wi-Fi virtual radio, power profiler, energy parts; exit 0.3).
 - **P5 Realism**: planned (Monte Carlo, thermal model, fault injection, hardware-in-the-loop lab, published validation report; exit 0.4).

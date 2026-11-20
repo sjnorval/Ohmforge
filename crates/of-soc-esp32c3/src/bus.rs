@@ -12,12 +12,14 @@ use crate::flash::SpiFlash;
 use crate::gpio::Gpio;
 use crate::intmatrix::{IntMatrix, source};
 use crate::map::{self, within};
+use crate::rng::{self, Rng};
 use crate::rtc_cntl::{RtcCntl, RtcWatchdog};
 use crate::sha::Sha;
 use crate::spi_mem::SpiMem;
+use crate::system::System;
 use crate::systimer::Systimer;
 use crate::timg::Timg;
-use crate::uart;
+use crate::uart::{self, Uart};
 use crate::usb_serial::UsbSerialJtag;
 use crate::watchdog::{ResetKind, ResetSource, WatchdogReset};
 
@@ -53,8 +55,12 @@ pub struct SocBus {
     pub sha: Sha,
     /// eFuse controller (all fuses blank).
     pub efuse: Efuse,
+    /// Random number generator (deterministic).
+    pub rng: Rng,
     /// GPIO, GPIO matrix and IO MUX.
     pub gpio: Gpio,
+    /// SYSTEM clock configuration (the CPU clock).
+    pub system: System,
     /// SYSTIMER.
     pub systimer: Systimer,
     /// Timer groups 0 and 1 (timer and MWDT each).
@@ -63,6 +69,8 @@ pub struct SocBus {
     pub rtc_cntl: RtcCntl,
     /// Interrupt matrix and CPU interrupt controller.
     pub intmatrix: IntMatrix,
+    /// UART0 configuration (the bytes it sends are in `uart_tx`).
+    pub uart0: Uart,
     uart_tx: Vec<u8>,
     /// Writes to timed peripherals, applied at the next [`Self::settle`].
     deferred: Vec<(u32, u32)>,
@@ -106,11 +114,14 @@ impl SocBus {
             usb_serial: UsbSerialJtag::new(),
             sha: Sha::new(),
             efuse: Efuse::new(),
+            rng: Rng::new(),
             gpio: Gpio::new(),
+            system: System::new(),
             systimer: Systimer::new(),
             timg: [Timg::new(), Timg::new()],
             rtc_cntl: RtcCntl::new(),
             intmatrix: IntMatrix::new(),
+            uart0: Uart::new(),
             uart_tx: Vec::new(),
             deferred: Vec::new(),
             regs: BTreeMap::new(),
@@ -276,9 +287,11 @@ impl SocBus {
             return;
         }
         self.sha = Sha::new();
+        self.uart0 = Uart::new();
         self.gpio = Gpio::new();
         self.cache = Cache::new();
         self.spi = [SpiMem::new(), SpiMem::new()];
+        self.system = System::new();
         self.systimer = Systimer::new();
         self.timg = [Timg::new(), Timg::new()];
         self.intmatrix = IntMatrix::new();
@@ -384,6 +397,7 @@ impl SocBus {
             map::RTC_CNTL_BASE if off >= map::EFUSE_OFFSET => self.efuse.read(off - map::EFUSE_OFFSET),
             map::RTC_CNTL_BASE if self.rtc_cntl.read_static(off).is_some() => self.rtc_cntl.read_static(off),
             map::USB_SERIAL_JTAG_BASE => self.usb_serial.read(off),
+            map::APB_CTRL_BASE if off == rng::DATA => Some(self.rng.next_word()),
             map::SHA_BASE => self.sha.read(off),
             map::IO_MUX_BASE => self.gpio.io_mux_read(off),
             map::SYSTIMER_BASE => self.systimer.read(off),
@@ -391,14 +405,12 @@ impl SocBus {
             map::TIMG1_BASE => self.timg[1].read(off),
             map::RTC_CNTL_BASE => self.rtc_cntl.read(off),
             map::INTERRUPT_BASE => self.intmatrix.read(off),
+            map::SYSTEM_BASE => self.system.read(off),
             map::SPI0_BASE => self.spi[0].read(off),
             map::SPI1_BASE => self.spi[1].read(off),
             map::EXTMEM_BASE => self.cache.read(off),
             map::MMU_TABLE_BASE => self.cache.mmu_read(off),
-            map::UART0_BASE => match off {
-                uart::reg::FIFO | uart::reg::STATUS => Some(0),
-                _ => None,
-            },
+            map::UART0_BASE => self.uart0.read(off),
             _ => None,
         };
         v.unwrap_or_else(|| {
@@ -425,6 +437,7 @@ impl SocBus {
             }
             map::RTC_CNTL_BASE if self.rtc_cntl.write_static(off, v).is_some() => Some(()),
             map::INTERRUPT_BASE => self.intmatrix.write(off, v),
+            map::SYSTEM_BASE => self.system.write(off, v),
             map::SPI0_BASE => self.spi[0].write(off, v, &mut self.flash),
             map::SPI1_BASE => self.spi[1].write(off, v, &mut self.flash),
             map::EXTMEM_BASE => self.cache.write(off, v),
@@ -433,6 +446,7 @@ impl SocBus {
                 self.uart_tx.push(v as u8);
                 Some(())
             }
+            map::UART0_BASE => self.uart0.write(off, v),
             _ => None,
         };
         if handled.is_none() {
