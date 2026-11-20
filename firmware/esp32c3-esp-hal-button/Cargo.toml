@@ -1,0 +1,39 @@
+[package]
+name = "esp32c3-esp-hal-button"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "AGPL-3.0-or-later"
+publish = false
+
+# Its own workspace: this is test firmware for the simulator, built for
+# riscv32imc-unknown-none-elf, not part of the Ohmforge workspace.
+[workspace]
+
+# A push button on GPIO9 (to ground, pull-up) and an LED on GPIO8.
+[[bin]]
+name = "button-poll"
+path = "src/bin/poll.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "button-irq"
+path = "src/bin/irq.rs"
+test = false
+bench = false
+
+[dependencies]
+# `unstable` for the GPIO interrupt API (`Io`, `Input::listen`).
+esp-hal = { version = "=1.2.2", features = ["esp32c3", "unstable"] }
+esp-bootloader-esp-idf = { version = "=0.6.0", features = ["esp32c3"] }
+esp-println = { version = "=0.18.0", default-features = false, features = ["esp32c3", "uart"] }
+critical-section = "1"
+
+[profile.release]
+opt-level = "s"
+debug = false
+codegen-units = 1
+lto = "fat"
+incremental = false
+panic = "abort"
