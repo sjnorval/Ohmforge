@@ -169,7 +169,6 @@ pub fn regulate(
 }
 
 /// Short warning when the supply is outside the modelled chip's ratings.
-#[allow(dead_code)]
 pub fn rating_warning(status: &SupplyStatus) -> Option<&'static str> {
     status
         .outside_rated
@@ -177,7 +176,6 @@ pub fn rating_warning(status: &SupplyStatus) -> Option<&'static str> {
 }
 
 /// Mode label for the live readout.
-#[allow(dead_code)]
 pub fn mode_label(mode: SupplyMode) -> &'static str {
     match mode {
         SupplyMode::Off => "OFF",

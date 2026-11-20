@@ -7,6 +7,10 @@ mod blink;
 #[cfg(feature = "gui")]
 mod demo;
 #[cfg(feature = "gui")]
+mod kind;
+#[cfg(feature = "gui")]
+mod live;
+#[cfg(feature = "gui")]
 mod pins;
 #[cfg(feature = "gui")]
 mod rom;
@@ -16,6 +20,8 @@ mod serial;
 mod supply;
 #[cfg(feature = "gui")]
 mod theme;
+#[cfg(feature = "gui")]
+mod trace;
 
 #[cfg(feature = "gui")]
 pub use demo::OhmforgeDemo;

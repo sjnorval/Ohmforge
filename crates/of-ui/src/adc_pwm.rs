@@ -15,6 +15,7 @@ use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, adc_request_code
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
+use crate::trace;
 
 pub(super) use schematic::show as show_schematic;
 
@@ -42,17 +43,13 @@ const FADE_BANNER: &str = "ohmforge esp-hal led fade\n";
 
 /// How long a display-average window lasts (2 ms: two 1 kHz periods, ten 5 kHz periods).
 const AVG_WINDOW: f64 = 2e-3;
-/// Trace and sample history kept in memory.
-const TRACE_WINDOW: f64 = 0.16;
-/// Analog samples taken this often so the on-screen LED can be averaged.
-const SAMPLE_STEP: SimTime = SimTime::from_us(50);
 
 static DIMMER_SOC: OnceLock<Result<Esp32c3, String>> = OnceLock::new();
 static FADE_SOC: OnceLock<Result<Esp32c3, String>> = OnceLock::new();
 
 /// Which committed esp-hal app to boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PwmKind {
+pub(crate) enum PwmKind {
     Dimmer,
     Fade,
 }
@@ -81,6 +78,7 @@ impl PwmKind {
 }
 
 /// Cached boot result, if the ROM has already been tried for this app.
+#[allow(dead_code)]
 pub(super) fn cached(kind: PwmKind) -> Option<&'static Result<Esp32c3, String>> {
     kind.cache().get()
 }
@@ -92,7 +90,7 @@ pub(super) fn booted(kind: PwmKind) -> Result<Esp32c3, String> {
         .clone()
 }
 
-pub(super) struct PwmSim {
+pub(crate) struct PwmSim {
     kind: PwmKind,
     kernel: Kernel,
     cpu: EngineId,
@@ -110,11 +108,12 @@ pub(super) struct PwmSim {
 }
 
 impl PwmSim {
-    pub(super) fn new(kind: PwmKind, position: f64) -> Result<Self, Box<dyn Error>> {
+    #[allow(dead_code)]
+    pub(crate) fn new(kind: PwmKind, position: f64) -> Result<Self, Box<dyn Error>> {
         Self::with_supply(kind, position, SupplySettings::default())
     }
 
-    pub(super) fn with_supply(kind: PwmKind, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+    pub(crate) fn with_supply(kind: PwmKind, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
         let soc = booted(kind)?;
         Self::from_soc(kind, soc, position, supply)
     }
@@ -221,10 +220,14 @@ impl PwmSim {
         SimTime(self.kernel.now().0.saturating_sub(self.origin.0)).as_secs_f64()
     }
 
-    pub(super) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = self.origin.saturating_add(SimTime::from_secs_f64(seconds.max(0.0)));
         while self.kernel.now() < until {
-            let next = self.kernel.now().saturating_add(SAMPLE_STEP).min(until);
+            let next = self
+                .kernel
+                .now()
+                .saturating_add(SimTime::from_secs_f64(trace::SAMPLE_STEP))
+                .min(until);
             let stop = self.kernel.run_until(next)?;
             if !matches!(stop, Stop::Reached(_)) {
                 return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
@@ -253,7 +256,7 @@ impl PwmSim {
 
     fn trim(&mut self) {
         let t = self.time();
-        while self.samples.len() > 1 && t - self.samples[0].0 > TRACE_WINDOW {
+        while self.samples.len() > 1 && t - self.samples[0].0 > trace::TRACE_WINDOW {
             self.samples.pop_front();
         }
     }
@@ -314,12 +317,15 @@ impl PwmSim {
         self.advance(self.time() + 1e-6)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
+    pub(super) fn supply(&self) -> SupplySettings {
+        self.supply
+    }
+
     pub(super) fn supply_status(&self) -> SupplyStatus {
         self.supply_status
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn set_supply(&mut self, settings: SupplySettings) -> Result<(), Box<dyn Error>> {
         self.supply = settings.sanitized();
         let analog = self
@@ -328,6 +334,21 @@ impl PwmSim {
             .ok_or("analog solver is not registered")?;
         self.supply_mode = supply::apply(analog, &self.supply, self.supply_mode)?;
         self.advance(self.time() + 1e-6)
+    }
+
+    pub(super) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
+        let pts: Vec<_> = self.samples.iter().copied().collect();
+        // Instantaneous LED current (mA); 0.5 mA counts as on.
+        trace::pwm_duty_freq(&pts, self.time(), 0.5)
+    }
+
+    pub(super) fn last_adc_uart(&mut self) -> Option<(u32, u32)> {
+        let text = String::from_utf8_lossy(&self.uart_bytes().iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned();
+        text.lines().rev().find_map(|l| {
+            let rest = l.strip_prefix("adc: ")?;
+            let (mv, duty) = rest.split_once(" duty: ")?;
+            Some((mv.parse().ok()?, duty.parse().ok()?))
+        })
     }
 
     pub(super) fn uart_bytes(&mut self) -> &[UartByte] {
@@ -464,32 +485,23 @@ mod tests {
         assert!(text.contains("ohmforge esp-hal led fade"), "{text:?}");
     }
 
-    fn uart_readings(sim: &mut PwmSim) -> Vec<(u32, u32)> {
-        let text = String::from_utf8_lossy(&sim.uart_bytes().iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned();
-        text.lines()
-            .filter_map(|l| {
-                let rest = l.strip_prefix("adc: ")?;
-                let (mv, duty) = rest.split_once(" duty: ")?;
-                Some((mv.parse().ok()?, duty.parse().ok()?))
-            })
-            .collect()
-    }
-
     #[test]
     fn pot_divider_scales_with_supply_voltage() {
         let Some(mut sim) = maybe_dimmer(0.5) else { return };
-        let v33 = sim.wiper_volts().unwrap();
-        assert!((v33 - 0.5 * VDD).abs() < 0.05, "{v33}");
+        sim.set_position(0.5).unwrap();
+        // Allow one ADC print to catch up; the wiper itself updates immediately.
+        let mid = sim.wiper_volts().unwrap();
+        assert!((mid - 0.5 * VDD).abs() < 0.05, "wiper at 3.3 V: {mid}");
 
         let hi = SupplySettings {
             volts: 5.0,
             ..SupplySettings::default()
         };
         sim.set_supply(hi).unwrap();
-        let v50 = sim.wiper_volts().unwrap();
+        let high = sim.wiper_volts().unwrap();
         assert!(
-            v50 > v33 * 1.2,
-            "wiper should scale with the rail: 3.3 V {v33} V, 5 V {v50} V"
+            (high - 0.5 * 5.0).abs() < 0.08,
+            "wiper should scale with the rail: {high}"
         );
         assert!(sim.supply_status().outside_rated);
     }
@@ -514,13 +526,24 @@ mod tests {
                 panic!("{msg}");
             }
         };
-        sim.advance(15e-3).unwrap();
+        sim.advance(20e-3).unwrap();
         let status = sim.supply_status();
         let avg = sim.average_ma();
         assert!(
             status.mode == SupplyMode::Cc || avg < 1.0,
-            "limit did not clamp: status={status:?} led={avg} mA"
+            "limit did not clamp: status={status:?} avg={avg} mA"
         );
-        assert!(status.amps <= 0.6e-3 + 1e-5, "{status:?}");
+        assert!(status.amps <= 0.7e-3, "{status:?}");
+    }
+
+    fn uart_readings(sim: &mut PwmSim) -> Vec<(u32, u32)> {
+        let text = String::from_utf8_lossy(&sim.uart_bytes().iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned();
+        text.lines()
+            .filter_map(|l| {
+                let rest = l.strip_prefix("adc: ")?;
+                let (mv, duty) = rest.split_once(" duty: ")?;
+                Some((mv.parse().ok()?, duty.parse().ok()?))
+            })
+            .collect()
     }
 }

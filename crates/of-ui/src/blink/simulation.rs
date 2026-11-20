@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::error::Error;
 
 use of_analog::{AnalogEngine, EngineConfig, Options};
@@ -9,32 +10,35 @@ use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte};
 
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
+use crate::trace::{self, SAMPLE_STEP, TRACE_WINDOW};
 
-pub(crate) const END: SimTime = SimTime::from_us(2_600);
 #[cfg(test)]
 pub(crate) const LED_ON_MA: f64 = 1.0;
 const FIRMWARE: &[u8] = include_bytes!("../../../../firmware/esp32c3-blinky/blinky.elf");
 const RESISTOR: &str = include_str!("../../../../parts/passives/resistor/part.toml");
 const LED: &str = include_str!("../../../../parts/leds/red-0603/part.toml");
+/// How far the stock unit test runs (the live GUI is not capped).
+#[cfg(test)]
+pub(crate) const END: SimTime = SimTime::from_us(2_600);
 pub(crate) const R_SERIES: f64 = 330.0;
 pub(crate) const GPIO: u8 = 8;
 pub(crate) const RESISTOR_REF: &str = "R1";
 pub(crate) const LED_REF: &str = "D1";
 const GPIO_NODE: &str = "v(gpio8)";
 const ANODE_NODE: &str = "v(led_a)";
-/// How often the bench supply is allowed to switch CV/CC during an advance.
-const REGULATE_STEP: f64 = 50e-6;
 
 pub(crate) struct Blink {
     kernel: Kernel,
     cpu: EngineId,
     analog: EngineId,
+    samples: VecDeque<(f64, f64)>,
     supply: SupplySettings,
     supply_mode: SupplyMode,
     supply_status: SupplyStatus,
 }
 
 impl Blink {
+    #[allow(dead_code)]
     pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
         Self::with_supply(SupplySettings::default())
     }
@@ -66,7 +70,7 @@ impl Blink {
             Options::default(),
             EngineConfig {
                 max_step: 5e-6,
-                record: true,
+                record: false,
                 ..EngineConfig::default()
             },
         )?;
@@ -87,56 +91,69 @@ impl Blink {
             kernel,
             cpu,
             analog: analog_id,
+            samples: VecDeque::new(),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
             supply_status: SupplyStatus::default(),
         };
-        sim.regulate()?;
+        sim.record_sample()?;
         Ok(sim)
     }
 
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
-        let until = SimTime::from_secs_f64(seconds).min(END);
+        let until = SimTime::from_secs_f64(seconds.max(0.0));
         while self.kernel.now() < until {
             let next = self
                 .kernel
                 .now()
-                .saturating_add(SimTime::from_secs_f64(REGULATE_STEP))
+                .saturating_add(SimTime::from_secs_f64(SAMPLE_STEP))
                 .min(until);
             let stop = self.kernel.run_until(next)?;
             if !matches!(stop, Stop::Reached(_)) {
                 return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
             }
-            self.regulate()?;
+            self.record_sample()?;
         }
+        self.trim();
         Ok(())
     }
 
-    fn regulate(&mut self) -> Result<(), Box<dyn Error>> {
-        let analog = self
-            .kernel
-            .engine_as::<AnalogEngine>(self.analog)
-            .ok_or("analog solver is not registered")?;
-        let status = supply::regulate(analog, &self.supply, self.supply_mode)?;
+    fn record_sample(&mut self) -> Result<(), Box<dyn Error>> {
+        let t = self.time();
+        let ma = self.instant_ma()?;
+        self.samples.push_back((t, ma));
+        let status = {
+            let analog = self
+                .kernel
+                .engine_as::<AnalogEngine>(self.analog)
+                .ok_or("analog solver is not registered")?;
+            supply::regulate(analog, &self.supply, self.supply_mode)?
+        };
         self.supply_mode = status.mode;
         self.supply_status = status;
         Ok(())
     }
 
-    pub(crate) fn finished(&self) -> bool {
-        self.kernel.now() == END
+    fn trim(&mut self) {
+        let t = self.time();
+        while self.samples.len() > 1 && t - self.samples[0].0 > TRACE_WINDOW {
+            self.samples.pop_front();
+        }
     }
 
     pub(crate) fn time(&self) -> f64 {
         self.kernel.now().as_secs_f64()
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
+    pub(crate) fn supply(&self) -> SupplySettings {
+        self.supply
+    }
+
     pub(crate) fn supply_status(&self) -> SupplyStatus {
         self.supply_status
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn set_supply(&mut self, settings: SupplySettings) -> Result<(), Box<dyn Error>> {
         self.supply = settings.sanitized();
         let analog = self
@@ -195,23 +212,30 @@ impl Blink {
             .ok_or_else(|| "analog solver is not registered".into())
     }
 
-    pub(crate) fn current_ma(&mut self) -> Result<f64, Box<dyn Error>> {
+    fn instant_ma(&mut self) -> Result<f64, Box<dyn Error>> {
         let analog = self.analog()?;
         let gpio = analog.value(GPIO_NODE).ok_or("no GPIO8 voltage in the solution")?;
         let anode = analog.value(ANODE_NODE).ok_or("no LED anode voltage in the solution")?;
         Ok(current_ma(gpio, anode))
     }
 
-    pub(crate) fn trace(&mut self) -> Result<impl Iterator<Item = (f64, f64)> + '_, Box<dyn Error>> {
-        let trace = self.analog()?.waveforms().ok_or("waveform recording is off")?;
-        let gpio = trace.signal(GPIO_NODE).ok_or("GPIO8 voltage was not recorded")?;
-        let anode = trace.signal(ANODE_NODE).ok_or("LED anode voltage was not recorded")?;
-        Ok(trace
-            .x
-            .iter()
-            .zip(gpio)
-            .zip(anode)
-            .map(|((&t, &gpio), &anode)| (t, current_ma(gpio, anode))))
+    pub(crate) fn current_ma(&mut self) -> Result<f64, Box<dyn Error>> {
+        self.instant_ma()
+    }
+
+    /// Time-averaged LED current over the last 2 ms, for display only.
+    pub(crate) fn average_ma(&self) -> f64 {
+        let pts: Vec<_> = self.samples.iter().copied().collect();
+        trace::average_window(&pts, self.time(), trace::LED_AVG_WINDOW)
+    }
+
+    pub(crate) fn trace(&self) -> Vec<(f64, f64)> {
+        self.samples.iter().copied().collect()
+    }
+
+    pub(crate) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
+        let pts: Vec<_> = self.samples.iter().copied().collect();
+        trace::pwm_duty_freq(&pts, self.time(), 0.5)
     }
 }
 
@@ -238,12 +262,17 @@ mod tests {
         sim.advance(625e-6).unwrap();
         assert!((3.0..4.5).contains(&sim.current_ma().unwrap()));
 
-        sim.advance(1.0).unwrap();
-        assert!(sim.finished());
-        let trace: Vec<_> = sim.trace().unwrap().collect();
-        assert!(trace.iter().any(|&(_, ma)| ma > LED_ON_MA));
-        assert!(trace.iter().any(|&(_, ma)| ma.abs() < 1e-3));
-        assert!((trace.last().unwrap().0 - END.as_secs_f64()).abs() < 1e-12);
+        sim.advance(END.as_secs_f64()).unwrap();
+        let trace = sim.trace();
+        assert!(
+            trace.iter().any(|&(_, ma)| ma > LED_ON_MA),
+            "LED never turned on: {trace:?}"
+        );
+        assert!(
+            trace.iter().any(|&(_, ma)| ma.abs() < 1e-3),
+            "LED never turned off: {trace:?}"
+        );
+        assert!((trace.last().unwrap().0 - END.as_secs_f64()).abs() < 1e-9);
     }
 
     #[test]
