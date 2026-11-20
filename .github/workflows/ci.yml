@@ -36,9 +36,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The pot dimmer and LED fade demos boot the fetched ROM and bootloader.
+      - run: scripts/fetch-esp-rom-elfs.sh
       - run: cargo check -p of-app --features gui
       - run: cargo clippy -p of-ui -p of-app --features of-ui/gui,of-app/gui --all-targets -- -D warnings
       - run: cargo test -p of-ui --features gui
+        env: { OF_REQUIRE_ESP_ROM: "1" }
   riscv-tests:
     runs-on: ubuntu-latest
     steps:
