@@ -136,6 +136,18 @@ impl Blink {
             .baud(APB_HZ)
     }
 
+    /// Push host bytes into UART0's RX FIFO.
+    pub(super) fn push_uart_rx(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        self.kernel
+            .engine_as::<Esp32c3Engine>(self.cpu)
+            .expect("registered ESP32-C3")
+            .soc
+            .push_uart_rx(bytes);
+    }
+
     fn analog(&mut self) -> Result<&AnalogEngine, Box<dyn Error>> {
         self.kernel
             .engine_as::<AnalogEngine>(self.analog)
@@ -203,5 +215,16 @@ mod tests {
             demo_monitor.push_rx(b.at, &[b.byte]);
         }
         assert_eq!(demo_monitor.text_device_to_host(), "ohmforge blinky\n");
+    }
+
+    #[test]
+    fn push_uart_rx_is_readable_from_fifo() {
+        let mut sim = Blink::new().unwrap();
+        sim.push_uart_rx(b"Z");
+        let engine = sim
+            .kernel
+            .engine_as::<Esp32c3Engine>(sim.cpu)
+            .expect("registered ESP32-C3");
+        assert_eq!(engine.soc.bus.uart0.pop_rx(), b'Z');
     }
 }

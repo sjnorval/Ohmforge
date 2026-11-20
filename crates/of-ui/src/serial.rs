@@ -97,8 +97,13 @@ impl SerialMonitorPanel {
                 }
             }
 
-            if monitor.delivery() == Delivery::QueuedOnly {
-                ui.weak("Send queues bytes — UART RX not modelled yet");
+            match monitor.delivery() {
+                Delivery::QueuedOnly => {
+                    ui.weak("Send queues bytes — UART RX not modelled yet");
+                }
+                Delivery::Attached => {
+                    ui.weak("Send delivers to UART0 RX");
+                }
             }
 
             ui.add_space(6.0);

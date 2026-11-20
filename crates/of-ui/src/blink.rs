@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use egui::{Align2, Color32, FontId, Frame, Margin, Pos2, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2};
 use of_core::SimTime;
-use of_instruments::SerialMonitor;
+use of_instruments::{Delivery, SerialMonitor};
 
 use crate::SerialMonitorPanel;
 use simulation::{Blink, END};
@@ -33,10 +33,12 @@ impl Default for BlinkDemo {
 impl BlinkDemo {
     /// Load the bundled firmware and initialise the LED circuit.
     pub fn new() -> Self {
+        let mut monitor = SerialMonitor::new();
+        monitor.set_delivery(Delivery::Attached);
         Self {
             sim: Blink::new(),
             playing: None,
-            monitor: SerialMonitor::new(),
+            monitor,
             serial_panel: SerialMonitorPanel::default(),
             uart_cursor: 0,
         }
@@ -46,14 +48,17 @@ impl BlinkDemo {
         self.playing = None;
         self.sim = Blink::new();
         self.monitor.clear();
+        self.monitor.set_delivery(Delivery::Attached);
         self.uart_cursor = 0;
         self.serial_panel = SerialMonitorPanel::default();
     }
 
     fn sync_serial(&mut self) {
+        let pending = self.monitor.drain_tx_queue();
         let Ok(sim) = &mut self.sim else {
             return;
         };
+        sim.push_uart_rx(&pending);
         self.monitor.set_baud(sim.uart_baud());
         let bytes: Vec<_> = sim.uart_bytes().to_vec();
         while self.uart_cursor < bytes.len() {
