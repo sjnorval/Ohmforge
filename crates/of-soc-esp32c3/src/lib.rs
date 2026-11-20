@@ -64,7 +64,10 @@ pub mod watchdog;
 
 pub use boot::{FlashBoot, FlashBootError};
 pub use bus::SocBus;
-pub use engine::{Esp32c3Engine, PinLink, all_pin_codes, decode_pin_code, pin_code};
+pub use engine::{
+    Esp32c3Engine, InputWatch, PinLink, all_pin_codes, decode_input_code, decode_pin_code, initial_input_level,
+    input_code, input_watches, pin_code,
+};
 pub use gpio::{GPIO_COUNT, PinOut};
 pub use intmatrix::IntMatrix;
 pub use soc::{CHIP_ID, Esp32c3, LoadError, PinEdge, UartByte};

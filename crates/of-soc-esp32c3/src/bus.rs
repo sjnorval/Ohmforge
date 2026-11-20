@@ -78,6 +78,7 @@ pub struct SocBus {
     unmodelled: BTreeMap<u32, u64>,
     sync: bool,
     pins_dirty: bool,
+    input_horizon: Option<SimTime>,
 }
 
 impl Default for SocBus {
@@ -128,6 +129,7 @@ impl SocBus {
             unmodelled: BTreeMap::new(),
             sync: false,
             pins_dirty: false,
+            input_horizon: None,
         }
     }
 
@@ -264,6 +266,15 @@ impl SocBus {
         std::mem::take(&mut self.pins_dirty)
     }
 
+    /// Defer loads of the GPIO input registers (`GPIO_IN`, `GPIO_STATUS`,
+    /// `GPIO_PCPU_INT`, `GPIO_PCPU_NMI_INT`) made after `horizon`, the time
+    /// up to which outside pin levels are known (see
+    /// [`of_cpu_riscv::Bus::defer_load`]). `None` (the default) never
+    /// defers: pin levels are whatever was last set.
+    pub fn set_input_horizon(&mut self, horizon: Option<SimTime>) {
+        self.input_horizon = horizon;
+    }
+
     /// Accesses to peripheral registers that are not modelled, by word
     /// address, with access counts. Useful to see what firmware expects.
     pub fn unmodelled(&self) -> &BTreeMap<u32, u64> {
@@ -288,7 +299,7 @@ impl SocBus {
         }
         self.sha = Sha::new();
         self.uart0 = Uart::new();
-        self.gpio = Gpio::new();
+        self.gpio.reset();
         self.cache = Cache::new();
         self.spi = [SpiMem::new(), SpiMem::new()];
         self.system = System::new();
@@ -364,13 +375,22 @@ impl SocBus {
     fn update_sources(&mut self) {
         let st = |bit: u32, src: u8| u64::from(bit != 0) << src;
         let (g0, g1) = (self.timg[0].int_status(), self.timg[1].int_status());
+        let (gpio_cpu, gpio_nmi) = self.gpio.irq();
         let levels = (u64::from(self.systimer.int_status()) << source::SYSTIMER_TARGET0)
             | st(g0 & 1, source::TG0_T0)
             | st(g0 & 2, source::TG0_WDT)
             | st(g1 & 1, source::TG1_T0)
             | st(g1 & 2, source::TG1_WDT)
-            | st(u32::from(self.rtc_cntl.irq()), source::RTC_CORE);
+            | st(u32::from(self.rtc_cntl.irq()), source::RTC_CORE)
+            | st(u32::from(gpio_cpu), source::GPIO)
+            | st(u32::from(gpio_nmi), source::GPIO_NMI);
         self.intmatrix.set_sources(levels);
+    }
+
+    /// Update the interrupt sources after a pin input changed outside an
+    /// instruction (see [`Gpio::set_input`]).
+    pub fn inputs_changed(&mut self) {
+        self.update_sources();
     }
 
     /// Interrupt lines for the hart: the controller's winning interrupt.
@@ -510,6 +530,14 @@ impl Bus for SocBus {
         }
         self.mem_mut(m)[off..off + n as usize].copy_from_slice(&value.to_le_bytes()[..n as usize]);
         Ok(())
+    }
+
+    fn defer_load(&mut self, addr: u32, now: SimTime) -> bool {
+        use crate::gpio::reg;
+        self.input_horizon.is_some_and(|h| now > h)
+            && (addr & !3)
+                .checked_sub(map::GPIO_BASE)
+                .is_some_and(|off| matches!(off, reg::IN | reg::STATUS | reg::PCPU_INT | reg::PCPU_NMI_INT))
     }
 
     fn take_sync_request(&mut self) -> bool {
