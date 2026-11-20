@@ -1,15 +1,24 @@
 use egui::{Align2, FontId, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
-use super::simulation::{GPIO, LED_ON_MA, LED_REF, R_SERIES, RESISTOR_REF};
-use super::{LED_RED, TEAL, panel};
+use super::simulation::{GPIO, LED_REF, R_SERIES, RESISTOR_REF};
+use crate::theme::{LED_RED, TEAL, panel};
 
-pub(super) fn show(ui: &mut Ui, current_ma: f64) {
-    let on = current_ma > LED_ON_MA;
+pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32) {
     panel().show(ui, |ui| {
         ui.label(RichText::new("Schematic").strong());
-        draw(ui, on);
+        draw(ui, brightness);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(if on { "LED on" } else { "LED off" }).strong());
+            let pct = (brightness * 100.0).round() as i32;
+            ui.label(
+                RichText::new(if pct == 0 {
+                    "LED off".into()
+                } else if pct >= 99 {
+                    "LED on".into()
+                } else {
+                    format!("LED {pct}%")
+                })
+                .strong(),
+            );
             ui.separator();
             let current = if current_ma.abs() < 0.005 { 0.0 } else { current_ma };
             ui.monospace(format!("{current:.2} mA"));
@@ -17,7 +26,7 @@ pub(super) fn show(ui: &mut Ui, current_ma: f64) {
     });
 }
 
-fn draw(ui: &mut Ui, on: bool) {
+fn draw(ui: &mut Ui, brightness: f32) {
     let (response, painter) = ui.allocate_painter(vec2(ui.available_width(), 215.0), Sense::hover());
     let description = format!(
         "ESP32-C3 GPIO{GPIO} connects through {RESISTOR_REF} ({R_SERIES:.0} ohms) to the {LED_REF} anode. The cathode returns to ESP32-C3 ground."
@@ -30,8 +39,13 @@ fn draw(ui: &mut Ui, on: bool) {
     let text = ui.visuals().text_color();
     let muted = ui.visuals().weak_text_color();
     let wire = Stroke::new(1.7, muted);
+    let on = brightness > 0.02;
     let signal = if on { Stroke::new(2.0, TEAL) } else { wire };
-    let led = if on { Stroke::new(2.4, LED_RED) } else { wire };
+    let led = if on {
+        Stroke::new(2.4, LED_RED.gamma_multiply(0.45 + 0.55 * brightness))
+    } else {
+        wire
+    };
     let line = |points: &[(f32, f32)], stroke| {
         painter.add(Shape::line(points.iter().map(|&(x, y)| point(x, y)).collect(), stroke));
     };
@@ -65,8 +79,16 @@ fn draw(ui: &mut Ui, on: bool) {
     label(182.0, 53.0, Align2::CENTER_CENTER, &format!("{R_SERIES:.0} Ω"), muted);
 
     if on {
-        painter.circle_filled(point(279.0, 82.0), 29.0, LED_RED.gamma_multiply(0.13));
-        painter.circle_filled(point(279.0, 82.0), 22.0, LED_RED.gamma_multiply(0.18));
+        painter.circle_filled(
+            point(279.0, 82.0),
+            29.0,
+            LED_RED.gamma_multiply(0.08 + 0.22 * brightness),
+        );
+        painter.circle_filled(
+            point(279.0, 82.0),
+            22.0,
+            LED_RED.gamma_multiply(0.10 + 0.28 * brightness),
+        );
     }
     line(&[(267.0, 70.0), (291.0, 82.0), (267.0, 94.0), (267.0, 70.0)], led);
     line(&[(291.0, 69.0), (291.0, 95.0)], led);

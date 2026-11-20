@@ -6,8 +6,8 @@
 #[cfg(feature = "gui")]
 fn main() -> eframe::Result<()> {
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_inner_size([950.0, 640.0])
-        .with_min_inner_size([560.0, 570.0]);
+        .with_inner_size([980.0, 720.0])
+        .with_min_inner_size([560.0, 620.0]);
     // Window and taskbar icon (assets/icon-192.png); skipped if it fails to decode.
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon-192.png")) {
         viewport = viewport.with_icon(icon);
@@ -30,13 +30,13 @@ fn main() -> eframe::Result<()> {
                     ..Visuals::dark()
                 },
             );
-            Ok(Box::new(App(of_ui::BlinkDemo::new())))
+            Ok(Box::new(App(of_ui::OhmforgeDemo::new())))
         }),
     )
 }
 
 #[cfg(feature = "gui")]
-struct App(of_ui::BlinkDemo);
+struct App(of_ui::OhmforgeDemo);
 
 #[cfg(feature = "gui")]
 impl eframe::App for App {
@@ -50,5 +50,5 @@ impl eframe::App for App {
 
 #[cfg(not(feature = "gui"))]
 fn main() {
-    println!("Ohmforge desktop app. Rebuild with `--features gui` for the LED blink demo.");
+    println!("Ohmforge desktop app. Rebuild with `--features gui` for the LED blink, pot dimmer and LED fade demos.");
 }

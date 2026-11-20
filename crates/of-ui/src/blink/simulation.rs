@@ -8,28 +8,29 @@ use of_firmware::ElfImage;
 use of_parts::parse_part;
 use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, all_pin_codes};
 
-pub(super) const END: SimTime = SimTime::from_us(2_600);
-pub(super) const LED_ON_MA: f64 = 1.0;
+pub(crate) const END: SimTime = SimTime::from_us(2_600);
+#[cfg(test)]
+pub(crate) const LED_ON_MA: f64 = 1.0;
 const FIRMWARE: &[u8] = include_bytes!("../../../../firmware/esp32c3-blinky/blinky.elf");
 const RESISTOR: &str = include_str!("../../../../parts/passives/resistor/part.toml");
 const LED: &str = include_str!("../../../../parts/leds/red-0603/part.toml");
 const VDD: f64 = 3.3;
-pub(super) const R_SERIES: f64 = 330.0;
-pub(super) const GPIO: u8 = 8;
-pub(super) const RESISTOR_REF: &str = "R1";
-pub(super) const LED_REF: &str = "D1";
+pub(crate) const R_SERIES: f64 = 330.0;
+pub(crate) const GPIO: u8 = 8;
+pub(crate) const RESISTOR_REF: &str = "R1";
+pub(crate) const LED_REF: &str = "D1";
 const DRIVER: &str = "u1_gpio8";
 const GPIO_NODE: &str = "v(gpio8)";
 const ANODE_NODE: &str = "v(led_a)";
 
-pub(super) struct Blink {
+pub(crate) struct Blink {
     kernel: Kernel,
     cpu: EngineId,
     analog: EngineId,
 }
 
 impl Blink {
-    pub(super) fn new() -> Result<Self, Box<dyn Error>> {
+    pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
         let mut lib = Library::new();
         lib.add(parse_part(RESISTOR)?, None)?;
         lib.add(parse_part(LED)?, None)?;
@@ -89,7 +90,7 @@ impl Blink {
         Ok(Self { kernel, cpu, analog })
     }
 
-    pub(super) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = SimTime::from_secs_f64(seconds).min(END);
         if until > self.kernel.now() {
             let stop = self.kernel.run_until(until)?;
@@ -100,16 +101,16 @@ impl Blink {
         Ok(())
     }
 
-    pub(super) fn finished(&self) -> bool {
+    pub(crate) fn finished(&self) -> bool {
         self.kernel.now() == END
     }
 
-    pub(super) fn time(&self) -> f64 {
+    pub(crate) fn time(&self) -> f64 {
         self.kernel.now().as_secs_f64()
     }
 
     #[allow(dead_code)] // unit tests; UI syncs via `uart_bytes`.
-    pub(super) fn uart(&mut self) -> String {
+    pub(crate) fn uart(&mut self) -> String {
         self.kernel
             .engine_as::<Esp32c3Engine>(self.cpu)
             .expect("registered ESP32-C3")
@@ -117,7 +118,7 @@ impl Blink {
             .uart_text()
     }
 
-    pub(super) fn uart_bytes(&mut self) -> &[UartByte] {
+    pub(crate) fn uart_bytes(&mut self) -> &[UartByte] {
         self.kernel
             .engine_as::<Esp32c3Engine>(self.cpu)
             .expect("registered ESP32-C3")
@@ -125,7 +126,7 @@ impl Blink {
             .uart_bytes()
     }
 
-    pub(super) fn uart_baud(&mut self) -> Option<f64> {
+    pub(crate) fn uart_baud(&mut self) -> Option<f64> {
         const APB_HZ: u64 = 80_000_000;
         self.kernel
             .engine_as::<Esp32c3Engine>(self.cpu)
@@ -137,7 +138,7 @@ impl Blink {
     }
 
     /// Push host bytes into UART0's RX FIFO.
-    pub(super) fn push_uart_rx(&mut self, bytes: &[u8]) {
+    pub(crate) fn push_uart_rx(&mut self, bytes: &[u8]) {
         if bytes.is_empty() {
             return;
         }
@@ -155,14 +156,14 @@ impl Blink {
             .ok_or_else(|| "analog solver is not registered".into())
     }
 
-    pub(super) fn current_ma(&mut self) -> Result<f64, Box<dyn Error>> {
+    pub(crate) fn current_ma(&mut self) -> Result<f64, Box<dyn Error>> {
         let analog = self.analog()?;
         let gpio = analog.value(GPIO_NODE).ok_or("no GPIO8 voltage in the solution")?;
         let anode = analog.value(ANODE_NODE).ok_or("no LED anode voltage in the solution")?;
         Ok(current_ma(gpio, anode))
     }
 
-    pub(super) fn trace(&mut self) -> Result<impl Iterator<Item = (f64, f64)> + '_, Box<dyn Error>> {
+    pub(crate) fn trace(&mut self) -> Result<impl Iterator<Item = (f64, f64)> + '_, Box<dyn Error>> {
         let trace = self.analog()?.waveforms().ok_or("waveform recording is off")?;
         let gpio = trace.signal(GPIO_NODE).ok_or("GPIO8 voltage was not recorded")?;
         let anode = trace.signal(ANODE_NODE).ok_or("LED anode voltage was not recorded")?;
