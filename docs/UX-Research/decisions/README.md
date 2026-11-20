@@ -36,5 +36,6 @@ updated: 2026-11-03
 | `d4` | Logic analyser: protocol decode panels | Stable |
 | `d5` | UI shell: soft-front-panel instrument shell | Stable |
 | `d6` | UI toolkit: egui/eframe 0.37 (keep, not iced/Slint) | Stable |
+| `d7` | Serial monitor: lean console + queued host→device | Stable |
 
 > Add a new record here when a design call is made. The companion `design-brief.md` screen notes carry the earlier, screen-level detail.

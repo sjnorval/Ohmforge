@@ -103,6 +103,7 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
   - [~] Stop before input reads so GPIO/ADC reads see the analog value at that instant: done for GPIO (branch `p2-gpio-inputs`: `Bus::defer_load`, lazy `wfi` woken at the input event; a busy core may take a pin interrupt up to one slice late, bounded by `Esp32c3Engine::set_max_lead`); ADC to do
 - [ ] egui schematic editor (place, wire, probe), oscilloscope, logic analyser with UART decode, serial monitor
   - [x] Read-only desktop blink demo (`of-ui` `BlinkDemo`, `cargo run -p of-app --features gui`): bundled blinky co-simulated with R1 330 Ω and a red LED, the schematic LED lit from the simulated current, an LED current trace and UART0 output. Not the editor or the real oscilloscope (GPU waveform path, decision d2)
+  - [~] Serial monitor: lean console in `of-instruments` / `of-ui` (TX log, queued Send); SoC UART RX delivery, hex/find, and soft-front-panel hosting still to do (d7)
 - [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
 - [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (blink and the button, polled and on an interrupt, run from esp-hal; branch `p2-gpio-inputs` for the button)
 
@@ -125,6 +126,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Blink, button with interrupt, potentiometer into ADC, LED dimming via LEDC behave as on hardware
 - [x] RC filter, LED with series resistor, transistor switch, AMS1117 regulator within 1 % of ngspice
 - [ ] Oscilloscope, logic analyser with UART decode, multimeter probe, serial monitor
+  - [~] Serial monitor: lean console (TX log, queued Send); SoC UART RX delivery, hex/find, and d5 shell hosting still to do (d7)
 - [ ] BOM CSV export with MPNs, supplier links and ZAR cost, plus build checklist
 - [ ] Desktop builds on Windows, macOS, Linux; deterministic headless runs in CI
 
