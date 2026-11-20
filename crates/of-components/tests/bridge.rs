@@ -197,3 +197,51 @@ fn spice_export_round_trips() {
         assert!((x - y).abs() <= 1e-9 * x.abs().max(1.0), "{sig}: deck {x}, bridge {y}");
     }
 }
+
+fn button_board(closed: Option<f64>) -> Board {
+    let mut sw = Placement::new("SW1", "generic.pushbutton", &[("1", "btn"), ("2", "gnd")]);
+    if let Some(c) = closed {
+        sw = sw.with("closed", c);
+    }
+    Board {
+        placements: vec![
+            Placement::new("R1", "generic.resistor", &[("1", "vdd"), ("2", "btn")]).with("resistance", 10e3),
+            sw,
+        ],
+        ..Board::default()
+    }
+}
+
+#[test]
+fn push_button_with_pull_up_is_a_switched_resistor() {
+    let lib = common::library();
+    let v_btn = |board: &Board| {
+        let mut b = build(&lib, board).unwrap();
+        let vdd = b.circuit.node("vdd");
+        b.circuit
+            .add(VoltageSource::new("v1", vdd, 0, SourceValue::dc(3.3)))
+            .unwrap();
+        let op = analysis::operating_point(&mut b.circuit, &Options::default()).unwrap();
+        op.get("v(btn)").unwrap()
+    };
+    // Open (the default): 10 kΩ against 100 MΩ.
+    let open = v_btn(&button_board(None));
+    assert!((open - 3.3 * 100e6 / (100e6 + 10e3)).abs() < 1e-6, "{open}");
+    assert_eq!(v_btn(&button_board(Some(0.0))), open);
+    // Closed: 10 kΩ against 0.1 Ω.
+    let closed = v_btn(&button_board(Some(1.0)));
+    assert!(closed < 1e-4 && closed > 0.0, "{closed}");
+
+    let b = build(&lib, &button_board(None)).unwrap();
+    assert_eq!(b.instances["SW1"], "sw1");
+    assert_eq!(
+        b.switch_param("SW1", true).map(|p| (p.device, p.param, p.value)),
+        Some(("sw1".into(), "r".into(), 0.1))
+    );
+    assert_eq!(b.switch_param("SW1", false).unwrap().value, 100e6);
+    assert_eq!(b.switch_param("R1", true), None, "not a switch");
+    assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+
+    let deck = to_spice(&lib, &button_board(Some(1.0))).unwrap();
+    assert!(deck.contains("Rsw1 btn gnd 1e-1"), "{deck}");
+}

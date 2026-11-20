@@ -29,6 +29,8 @@ pub const SOURCE_COUNT: usize = 62;
 pub mod source {
     /// GPIO.
     pub const GPIO: u8 = 16;
+    /// GPIO non-maskable interrupt.
+    pub const GPIO_NMI: u8 = 17;
     /// UART0.
     pub const UART0: u8 = 21;
     /// RTC core (includes the RTC watchdog interrupt).

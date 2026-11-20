@@ -68,13 +68,7 @@ fn gpio8_toggles_every_250_us_and_uart_prints_the_banner() {
     let edges: Vec<_> = soc.pin_edges().iter().filter(|e| e.pin == 8).copied().collect();
     assert!(soc.pin_edges().iter().all(|e| e.pin == 8), "only GPIO8 changes");
     // Enable first drives the pin low, then the loop starts high.
-    assert_eq!(
-        edges[0].out,
-        PinOut {
-            level: Some(false),
-            strength: 2
-        }
-    );
+    assert_eq!(edges[0].out, PinOut::driven(false, 2));
     let levels: Vec<_> = edges[1..].iter().map(|e| e.out.level.unwrap()).collect();
     assert!(levels.iter().step_by(2).all(|&l| l) && levels.iter().skip(1).step_by(2).all(|&l| !l));
     // Start-up (banner, setup) takes well under 10 µs.

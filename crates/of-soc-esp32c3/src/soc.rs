@@ -363,6 +363,16 @@ impl Esp32c3 {
         self.hart.state() == HartState::WaitingForInterrupt
     }
 
+    /// Set the level the outside world puts on `pin` (it must be marked
+    /// external with [`crate::gpio::Gpio::set_external`] to override the
+    /// pin's own loopback), at the hart's current time: `GPIO_IN`, pin
+    /// interrupts and the interrupt lines update at once.
+    pub fn set_pin_input(&mut self, pin: usize, level: bool) {
+        self.bus.gpio.set_input(pin, level);
+        self.bus.inputs_changed();
+        self.hart.set_interrupt_lines(self.bus.cpu_lines());
+    }
+
     /// Current output state of `pin`.
     pub fn pin(&self, pin: usize) -> PinOut {
         self.pins[pin]

@@ -4,6 +4,8 @@
 //! implements [`Bus`] to route accesses to ROM, flash cache, IRAM, DRAM and
 //! peripheral registers, and to add wait states and custom CSRs.
 
+use of_core::SimTime;
+
 /// Width of a memory access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Size {
@@ -75,6 +77,18 @@ pub trait Bus {
     /// Write a CSR the core does not implement. Return `false` to make the
     /// instruction illegal.
     fn csr_write(&mut self, _csr: u16, _value: u32) -> bool {
+        false
+    }
+
+    /// Called before a data load (or the read half of an atomic) from
+    /// `addr`, with the hart's local time at the start of the instruction.
+    /// Return `true` to stop *before* the instruction: it does not execute
+    /// (registers, memory and time are unchanged) and [`crate::Hart::run`]
+    /// returns [`crate::RunExit::Deferred`]. A SoC uses this when the value
+    /// depends on engines that have not reached `now` yet, such as GPIO
+    /// inputs fed by the analog solver. It must return `false` once they
+    /// have, or the hart makes no progress.
+    fn defer_load(&mut self, _addr: u32, _now: SimTime) -> bool {
         false
     }
 

@@ -16,5 +16,6 @@ Current parts:
 | `passives/capacitor-tantalum` | `generic.capacitor-tantalum` | Tantalum chip capacitor 22 µF 16 V |
 | `leds/red-0603` | `generic.led-red-0603` | LED, red, 0603 |
 | `discretes/npn-small-signal` | `generic.npn-small-signal` | Small-signal NPN transistor (MMBT3904 class) |
+| `switches/pushbutton-6mm` | `generic.pushbutton` | Tactile push button, 6 mm, SPST-NO (ideal switch: `ron`/`roff`) |
 | `regulators/ams1117` | `ams.ams1117-3.3` | AMS1117-3.3 1 A LDO, with our own macromodel (`ams1117.lib`) |
 | `sensors/bosch-bme280` | `bosch.bme280` | BME280 temperature, humidity, pressure sensor (supply load model) |

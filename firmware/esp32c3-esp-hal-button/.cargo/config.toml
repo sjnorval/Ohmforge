@@ -1,0 +1,10 @@
+[build]
+target = "riscv32imc-unknown-none-elf"
+
+[target.riscv32imc-unknown-none-elf]
+rustflags = [
+  "-C", "link-arg=-Tlinkall.x",
+  "-C", "force-frame-pointers",
+]
+# build.sh adds --remap-path-prefix flags so no host paths end up in the
+# image (panic messages carry source paths).
