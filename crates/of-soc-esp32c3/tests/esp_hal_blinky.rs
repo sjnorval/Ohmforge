@@ -142,13 +142,7 @@ fn gpio8_toggles_at_the_firmware_period() {
     let edges: Vec<_> = soc.pin_edges().iter().filter(|e| e.pin == 8).copied().collect();
     // Output enable drives the pin low first; the loop then toggles it,
     // starting high, every HALF_PERIOD.
-    assert_eq!(
-        edges[0].out,
-        PinOut {
-            level: Some(false),
-            strength: 2
-        }
-    );
+    assert_eq!(edges[0].out, PinOut::driven(false, 2));
     assert!(
         edges[0].at > SimTime::from_ms(20) && edges[0].at < APP_BY,
         "{:?}",

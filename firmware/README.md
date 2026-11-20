@@ -10,6 +10,7 @@ Rust crates, see below); third-party binaries are never committed.
 | `esp32c3-timer-irq` | Prints `ohmforge timer irq`, switches off the RTC WDT, both MWDTs and the super watchdog (auto-feed), routes SYSTIMER target 0 (period 250 µs) to CPU interrupt 1 and the TIMG0 timer 0 alarm (1 ms, auto-reload) to CPU interrupt 2 through the interrupt matrix, then sleeps in `wfi`; the vectored handlers toggle GPIO8 and count ticks | `crates/of-soc-esp32c3/tests/timer_irq.rs` |
 | `esp32c3-xip-blinky` | A direct-boot flash image (`xip_blinky.bin`, written at flash offset 0; starts with the magic `0xaedb041d` twice) that runs in place from flash: the ROM maps flash into the IROM/DROM windows and jumps to `0x4200_0008`. It switches off the boot watchdogs, prints `ohmforge xip blinky` from DROM, sums a DROM table into `drom_sum`, then toggles GPIO8 every 250 µs (SYSTIMER deadlines) and counts rising edges in `toggles` | `crates/of-soc-esp32c3/tests/rom_boot.rs` (real ROM), `tests/flash_boot.rs` (ROM-lite) |
 | `esp32c3-esp-hal-blinky` | An unmodified esp-hal 1.2.2 app in Rust: `esp_hal::init` with `CpuClock::max()` (160 MHz), prints `ohmforge esp-hal blinky` on UART0, then toggles GPIO8 every 500 µs (`Instant` deadlines). Built as espflash builds it: `partitions.bin` (flash 0x8000) and `app.bin` (ESP-IDF app image with its app descriptor, flash 0x10000) are cut from `espflash save-image --merge`; the real ROM boots it through espflash's ESP-IDF bootloader | `crates/of-soc-esp32c3/tests/esp_hal_blinky.rs` (real ROM and bootloader) |
+| `esp32c3-esp-hal-button` | Two esp-hal 1.2.2 apps for a push button on GPIO9 (internal pull-up, pressed = low) and an LED on GPIO8, with no debouncing. `button_poll.bin` copies GPIO9 to the LED in a tight loop and prints `poll: <n> <level>` on each change; `button_irq.bin` toggles the LED from a GPIO9 falling-edge interrupt (esp-hal `Io` handler), sleeps in `wfi` and prints `irq: <n>`. Built like the blinky (`partitions.bin` plus one app image each, flash 0x10000) | `crates/of-soc-esp32c3/tests/esp_hal_button.rs` (real ROM and bootloader, analog push button) |
 
 The assembly folders each hold the source, a linker script, a `build.sh` and
 the built ELF (plus the flash image `xip_blinky.bin` for `esp32c3-xip-blinky`). They are
@@ -40,7 +41,13 @@ Espressif's ROM, which boots `esp32c3-xip-blinky` in the ROM tests, is not
 firmware of ours and is never committed; `scripts/fetch-esp-rom-elfs.sh`
 downloads it (see `AGENTS.md` section 3c).
 
-## esp32c3-esp-hal-blinky
+## esp32c3-esp-hal-blinky and esp32c3-esp-hal-button
+
+`esp32c3-esp-hal-button` is built the same way (`build.sh` there; it adds
+esp-hal's `unstable` feature for the GPIO interrupt API and the
+`critical-section` crate, MIT OR Apache-2.0) and commits only
+`partitions.bin`, `button_poll.bin` and `button_irq.bin` (the ELFs stay in
+`target/`). The rest of this section applies to both.
 
 A Rust crate with its own Cargo workspace, `Cargo.lock` and pinned toolchain
 (Rust 1.95.0, `riscv32imc-unknown-none-elf`, from `rust-toolchain.toml`). It

@@ -191,6 +191,12 @@ pub enum StepOutcome {
     Waiting,
     /// The hart is halted; nothing happened.
     Halted(HaltReason),
+    /// The bus deferred a load ([`Bus::defer_load`]): the instruction at
+    /// `pc` did not execute and no time passed.
+    Deferred {
+        /// Its address.
+        pc: u32,
+    },
 }
 
 /// Why [`Hart::run`] or [`Hart::run_until`] returned.
@@ -208,6 +214,9 @@ pub enum RunExit {
     /// The bus requested a sync point (peripheral access) after the
     /// instruction at this PC.
     SyncRequested(u32),
+    /// The bus deferred a load ([`Bus::defer_load`]); the instruction at
+    /// this PC has not executed. Run again once the bus is ready.
+    Deferred(u32),
 }
 
 struct Flow {
@@ -234,6 +243,8 @@ pub struct Hart {
     origin_cycles: u64,
     period_ps: u64,
     breakpoints: BTreeSet<u32>,
+    /// Set by a load the bus deferred, so `step` does not trap.
+    deferred: bool,
 }
 
 impl Hart {
@@ -254,6 +265,7 @@ impl Hart {
             origin_cycles: 0,
             period_ps,
             breakpoints: BTreeSet::new(),
+            deferred: false,
         }
     }
 
@@ -482,6 +494,7 @@ impl Hart {
                 }
                 StepOutcome::Retired { pc, raw, instr, cycles }
             }
+            Err(_) if std::mem::take(&mut self.deferred) => StepOutcome::Deferred { pc },
             Err((exc, tval, cycles)) => {
                 let cause = TrapCause::Exception(exc, tval);
                 self.trap(cause, pc);
@@ -576,10 +589,15 @@ impl Hart {
             AccessKind::Load => (Exception::LoadAddressMisaligned, Exception::LoadAccessFault),
             _ => (Exception::StoreAddressMisaligned, Exception::StoreAccessFault),
         };
-        if !addr.is_multiple_of(n) {
-            if kind != AccessKind::Load || self.config.misaligned == MisalignedPolicy::Trap {
-                return Err((mis, addr));
-            }
+        let misaligned = !addr.is_multiple_of(n);
+        if misaligned && (kind != AccessKind::Load || self.config.misaligned == MisalignedPolicy::Trap) {
+            return Err((mis, addr));
+        }
+        if bus.defer_load(addr, self.local_time()) {
+            self.deferred = true;
+            return Err((fault, addr));
+        }
+        if misaligned {
             let mut v = 0u32;
             let mut wait = 0;
             for k in 0..n {
@@ -841,6 +859,7 @@ impl Hart {
             match self.step(bus) {
                 StepOutcome::Halted(r) => return RunExit::Halted(r),
                 StepOutcome::Waiting => return RunExit::WaitingForInterrupt,
+                StepOutcome::Deferred { pc } => return RunExit::Deferred(pc),
                 StepOutcome::Retired { .. } | StepOutcome::Trapped { .. } => {}
             }
             if let HartState::Halted(r) = self.state {
