@@ -118,8 +118,7 @@ impl Blink {
     }
 
     pub(super) fn uart_bytes(&mut self) -> &[UartByte] {
-        &self
-            .kernel
+        self.kernel
             .engine_as::<Esp32c3Engine>(self.cpu)
             .expect("registered ESP32-C3")
             .soc
