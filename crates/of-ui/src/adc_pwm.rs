@@ -6,14 +6,15 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::OnceLock;
 
-use of_analog::devices::{PinDriver, SourceValue, VoltageSource};
 use of_analog::{AnalogEngine, EngineConfig, Options};
 use of_components::analog::{Board, BuiltBoard, Library, Placement, build};
 use of_core::{EngineId, Kernel, SimTime, Stop};
 use of_parts::parse_part;
-use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, adc_request_code, adc_value_code, all_pin_codes};
+use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, adc_request_code, adc_value_code};
 
+use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
+use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
 
 pub(super) use schematic::show as show_schematic;
 
@@ -24,6 +25,7 @@ const RESISTOR: &str = include_str!("../../../parts/passives/resistor/part.toml"
 const LED: &str = include_str!("../../../parts/leds/red-0603/part.toml");
 const POT: &str = include_str!("../../../parts/passives/bourns-ptv09a/part.toml");
 
+#[cfg_attr(not(test), allow(dead_code))]
 const VDD: f64 = 3.3;
 const R_SERIES: f64 = 330.0;
 pub(super) const GPIO_LED: u8 = 8;
@@ -31,7 +33,6 @@ pub(super) const GPIO_POT: u8 = 2;
 pub(super) const RESISTOR_REF: &str = "R2";
 pub(super) const LED_REF: &str = "D1";
 pub(super) const POT_REF: &str = "RV1";
-const DRIVER: &str = "u1_gpio8";
 const GPIO_NODE: &str = "v(gpio8)";
 const ANODE_NODE: &str = "v(led_a)";
 const WIPER_NODE: &str = "v(gpio2)";
@@ -103,15 +104,23 @@ pub(super) struct PwmSim {
     origin: SimTime,
     /// Instantaneous LED current samples (t relative to `origin`, mA).
     samples: VecDeque<(f64, f64)>,
+    supply: SupplySettings,
+    supply_mode: SupplyMode,
+    supply_status: SupplyStatus,
 }
 
 impl PwmSim {
     pub(super) fn new(kind: PwmKind, position: f64) -> Result<Self, Box<dyn Error>> {
-        let soc = booted(kind)?;
-        Self::from_soc(kind, soc, position)
+        Self::with_supply(kind, position, SupplySettings::default())
     }
 
-    fn from_soc(kind: PwmKind, soc: Esp32c3, position: f64) -> Result<Self, Box<dyn Error>> {
+    pub(super) fn with_supply(kind: PwmKind, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+        let soc = booted(kind)?;
+        Self::from_soc(kind, soc, position, supply)
+    }
+
+    fn from_soc(kind: PwmKind, soc: Esp32c3, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+        let supply = supply.sanitized();
         let position = position.clamp(0.0, 1.0);
         let mut lib = Library::new();
         lib.add(parse_part(RESISTOR)?, None)?;
@@ -140,15 +149,10 @@ impl PwmSim {
                 ..Board::default()
             },
         )?;
-        if kind == PwmKind::Dimmer {
-            let vdd = board.circuit.node("vdd");
-            board
-                .circuit
-                .add(VoltageSource::new("vdd", vdd, 0, SourceValue::dc(VDD)))?;
-        }
+        let vdd = board.circuit.node("vdd");
+        supply::add_supply(&mut board.circuit, vdd, &supply)?;
         let node = board.circuit.node("gpio8");
-        let (v, r) = soc.pin(usize::from(GPIO_LED)).thevenin(VDD);
-        board.circuit.add(PinDriver::new(DRIVER, node, 0, v, r))?;
+        add_pin_drivers(&mut board.circuit, GPIO_LED, node, vdd, soc.pin(usize::from(GPIO_LED)))?;
 
         let circuit = std::mem::replace(&mut board.circuit, of_analog::Circuit::new());
         let mut analog = AnalogEngine::new(
@@ -161,24 +165,7 @@ impl PwmSim {
                 ..EngineConfig::default()
             },
         )?;
-        for (code, out) in all_pin_codes(GPIO_LED) {
-            let (v, r) = out.thevenin(VDD);
-            analog.on_code(
-                code,
-                vec![
-                    of_analog::SetParam {
-                        device: DRIVER.into(),
-                        param: "v".into(),
-                        value: v,
-                    },
-                    of_analog::SetParam {
-                        device: DRIVER.into(),
-                        param: "r".into(),
-                        value: r,
-                    },
-                ],
-            );
-        }
+        hook_pin(&mut analog, GPIO_LED);
         if kind == PwmKind::Dimmer {
             analog.sample_on(adc_request_code(GPIO_POT), WIPER_NODE, 0, adc_value_code(GPIO_POT))?;
         }
@@ -214,9 +201,11 @@ impl PwmSim {
             position,
             origin,
             samples: VecDeque::new(),
+            supply,
+            supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
+            supply_status: SupplyStatus::default(),
         };
-        let ma = sim.instant_ma()?;
-        sim.samples.push_back((0.0, ma));
+        sim.record_sample()?;
         Ok(sim)
     }
 
@@ -240,11 +229,25 @@ impl PwmSim {
             if !matches!(stop, Stop::Reached(_)) {
                 return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
             }
-            let t = self.time();
-            let ma = self.instant_ma()?;
-            self.samples.push_back((t, ma));
+            self.record_sample()?;
         }
         self.trim();
+        Ok(())
+    }
+
+    fn record_sample(&mut self) -> Result<(), Box<dyn Error>> {
+        let t = self.time();
+        let ma = self.instant_ma()?;
+        self.samples.push_back((t, ma));
+        let status = {
+            let analog = self
+                .kernel
+                .engine_as::<AnalogEngine>(self.analog)
+                .ok_or("analog solver is not registered")?;
+            supply::regulate(analog, &self.supply, self.supply_mode)?
+        };
+        self.supply_mode = status.mode;
+        self.supply_status = status;
         Ok(())
     }
 
@@ -308,6 +311,22 @@ impl PwmSim {
             }
         }
         // One short step so the wiper voltage updates while playback is paused.
+        self.advance(self.time() + 1e-6)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn supply_status(&self) -> SupplyStatus {
+        self.supply_status
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn set_supply(&mut self, settings: SupplySettings) -> Result<(), Box<dyn Error>> {
+        self.supply = settings.sanitized();
+        let analog = self
+            .kernel
+            .engine_as::<AnalogEngine>(self.analog)
+            .ok_or("analog solver is not registered")?;
+        self.supply_mode = supply::apply(analog, &self.supply, self.supply_mode)?;
         self.advance(self.time() + 1e-6)
     }
 
@@ -454,5 +473,54 @@ mod tests {
                 Some((mv.parse().ok()?, duty.parse().ok()?))
             })
             .collect()
+    }
+
+    #[test]
+    fn pot_divider_scales_with_supply_voltage() {
+        let Some(mut sim) = maybe_dimmer(0.5) else { return };
+        let v33 = sim.wiper_volts().unwrap();
+        assert!((v33 - 0.5 * VDD).abs() < 0.05, "{v33}");
+
+        let hi = SupplySettings {
+            volts: 5.0,
+            ..SupplySettings::default()
+        };
+        sim.set_supply(hi).unwrap();
+        let v50 = sim.wiper_volts().unwrap();
+        assert!(
+            v50 > v33 * 1.2,
+            "wiper should scale with the rail: 3.3 V {v33} V, 5 V {v50} V"
+        );
+        assert!(sim.supply_status().outside_rated);
+    }
+
+    #[test]
+    fn current_limit_clamps_led_current() {
+        let settings = SupplySettings {
+            current_limit: 0.5e-3,
+            ..SupplySettings::default()
+        };
+        let mut sim = match PwmSim::with_supply(PwmKind::Dimmer, 1.0, settings) {
+            Ok(sim) => sim,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("fetch-esp-rom-elfs") {
+                    assert!(
+                        std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
+                        "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {msg}"
+                    );
+                    return;
+                }
+                panic!("{msg}");
+            }
+        };
+        sim.advance(15e-3).unwrap();
+        let status = sim.supply_status();
+        let avg = sim.average_ma();
+        assert!(
+            status.mode == SupplyMode::Cc || avg < 1.0,
+            "limit did not clamp: status={status:?} led={avg} mA"
+        );
+        assert!(status.amps <= 0.6e-3 + 1e-5, "{status:?}");
     }
 }

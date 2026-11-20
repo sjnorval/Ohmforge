@@ -7,9 +7,13 @@ mod blink;
 #[cfg(feature = "gui")]
 mod demo;
 #[cfg(feature = "gui")]
+mod pins;
+#[cfg(feature = "gui")]
 mod rom;
 #[cfg(feature = "gui")]
 mod serial;
+#[cfg(feature = "gui")]
+mod supply;
 #[cfg(feature = "gui")]
 mod theme;
 

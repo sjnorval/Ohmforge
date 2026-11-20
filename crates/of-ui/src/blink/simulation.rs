@@ -1,12 +1,14 @@
 use std::error::Error;
 
-use of_analog::devices::PinDriver;
 use of_analog::{AnalogEngine, EngineConfig, Options};
 use of_components::analog::{Board, Library, Placement, build};
 use of_core::{EngineId, Kernel, SimTime, Stop};
 use of_firmware::ElfImage;
 use of_parts::parse_part;
-use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, all_pin_codes};
+use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte};
+
+use crate::pins::{add_pin_drivers, hook_pin};
+use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
 
 pub(crate) const END: SimTime = SimTime::from_us(2_600);
 #[cfg(test)]
@@ -14,23 +16,31 @@ pub(crate) const LED_ON_MA: f64 = 1.0;
 const FIRMWARE: &[u8] = include_bytes!("../../../../firmware/esp32c3-blinky/blinky.elf");
 const RESISTOR: &str = include_str!("../../../../parts/passives/resistor/part.toml");
 const LED: &str = include_str!("../../../../parts/leds/red-0603/part.toml");
-const VDD: f64 = 3.3;
 pub(crate) const R_SERIES: f64 = 330.0;
 pub(crate) const GPIO: u8 = 8;
 pub(crate) const RESISTOR_REF: &str = "R1";
 pub(crate) const LED_REF: &str = "D1";
-const DRIVER: &str = "u1_gpio8";
 const GPIO_NODE: &str = "v(gpio8)";
 const ANODE_NODE: &str = "v(led_a)";
+/// How often the bench supply is allowed to switch CV/CC during an advance.
+const REGULATE_STEP: f64 = 50e-6;
 
 pub(crate) struct Blink {
     kernel: Kernel,
     cpu: EngineId,
     analog: EngineId,
+    supply: SupplySettings,
+    supply_mode: SupplyMode,
+    supply_status: SupplyStatus,
 }
 
 impl Blink {
     pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
+        Self::with_supply(SupplySettings::default())
+    }
+
+    pub(crate) fn with_supply(supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+        let supply = supply.sanitized();
         let mut lib = Library::new();
         lib.add(parse_part(RESISTOR)?, None)?;
         lib.add(parse_part(LED)?, None)?;
@@ -44,7 +54,12 @@ impl Blink {
         };
         let mut circuit = build(&lib, &board)?.circuit;
         let pin = circuit.node("gpio8");
-        circuit.add(PinDriver::new(DRIVER, pin, 0, 0.0, 1e9))?;
+        let vdd = circuit.node("vdd");
+        supply::add_supply(&mut circuit, vdd, &supply)?;
+        let mut soc = Esp32c3::new();
+        soc.load_elf(&ElfImage::parse(FIRMWARE)?)?;
+        add_pin_drivers(&mut circuit, GPIO, pin, vdd, soc.pin(usize::from(GPIO)))?;
+
         let mut analog = AnalogEngine::new(
             "analog",
             circuit,
@@ -55,49 +70,56 @@ impl Blink {
                 ..EngineConfig::default()
             },
         )?;
-        for (code, out) in all_pin_codes(GPIO) {
-            let (voltage, resistance) = out.thevenin(VDD);
-            analog.on_code(
-                code,
-                vec![
-                    of_analog::SetParam {
-                        device: DRIVER.into(),
-                        param: "v".into(),
-                        value: voltage,
-                    },
-                    of_analog::SetParam {
-                        device: DRIVER.into(),
-                        param: "r".into(),
-                        value: resistance,
-                    },
-                ],
-            );
-        }
+        hook_pin(&mut analog, GPIO);
 
-        let mut soc = Esp32c3::new();
-        soc.load_elf(&ElfImage::parse(FIRMWARE)?)?;
         // Register the CPU first so its GPIO changes reach the analog solver in time.
         let mut kernel = Kernel::new(SimTime::from_us(50));
         let cpu = kernel.add_engine(Box::new(Esp32c3Engine::new("esp32c3", soc)));
-        let analog = kernel.add_engine(Box::new(analog));
+        let analog_id = kernel.add_engine(Box::new(analog));
         kernel
             .engine_as::<Esp32c3Engine>(cpu)
             .expect("registered ESP32-C3")
             .link_pin(PinLink {
                 pin: GPIO,
-                target: analog.0,
+                target: analog_id.0,
             });
-        Ok(Self { kernel, cpu, analog })
+        let mut sim = Self {
+            kernel,
+            cpu,
+            analog: analog_id,
+            supply,
+            supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
+            supply_status: SupplyStatus::default(),
+        };
+        sim.regulate()?;
+        Ok(sim)
     }
 
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = SimTime::from_secs_f64(seconds).min(END);
-        if until > self.kernel.now() {
-            let stop = self.kernel.run_until(until)?;
+        while self.kernel.now() < until {
+            let next = self
+                .kernel
+                .now()
+                .saturating_add(SimTime::from_secs_f64(REGULATE_STEP))
+                .min(until);
+            let stop = self.kernel.run_until(next)?;
             if !matches!(stop, Stop::Reached(_)) {
                 return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
             }
+            self.regulate()?;
         }
+        Ok(())
+    }
+
+    fn regulate(&mut self) -> Result<(), Box<dyn Error>> {
+        let analog = self
+            .kernel
+            .engine_as::<AnalogEngine>(self.analog)
+            .ok_or("analog solver is not registered")?;
+        let status = supply::regulate(analog, &self.supply, self.supply_mode)?;
+        self.supply_mode = status.mode;
+        self.supply_status = status;
         Ok(())
     }
 
@@ -107,6 +129,23 @@ impl Blink {
 
     pub(crate) fn time(&self) -> f64 {
         self.kernel.now().as_secs_f64()
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn supply_status(&self) -> SupplyStatus {
+        self.supply_status
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn set_supply(&mut self, settings: SupplySettings) -> Result<(), Box<dyn Error>> {
+        self.supply = settings.sanitized();
+        let analog = self
+            .kernel
+            .engine_as::<AnalogEngine>(self.analog)
+            .ok_or("analog solver is not registered")?;
+        self.supply_mode = supply::apply(analog, &self.supply, self.supply_mode)?;
+        // A short step so the rail updates while playback is paused.
+        self.advance(self.time() + 1e-6)
     }
 
     #[allow(dead_code)] // unit tests; UI syncs via `uart_bytes`.
@@ -227,5 +266,43 @@ mod tests {
             .engine_as::<Esp32c3Engine>(sim.cpu)
             .expect("registered ESP32-C3");
         assert_eq!(engine.soc.bus.uart0.pop_rx(), b'Z');
+    }
+
+    #[test]
+    fn led_current_scales_with_supply_voltage() {
+        let mut sim = Blink::new().unwrap();
+        sim.advance(125e-6).unwrap();
+        let i33 = sim.current_ma().unwrap();
+        assert!((3.0..4.5).contains(&i33), "{i33}");
+
+        let hi = SupplySettings {
+            volts: 5.0,
+            ..SupplySettings::default()
+        };
+        sim.set_supply(hi).unwrap();
+        // Stay in the on period (~0–250 µs).
+        let i50 = sim.current_ma().unwrap();
+        assert!(
+            i50 > i33 * 1.15,
+            "expected higher LED current at 5 V: 3.3 V {i33} mA, 5 V {i50} mA"
+        );
+        assert!(sim.supply_status().outside_rated);
+    }
+
+    #[test]
+    fn current_limit_clamps_the_led() {
+        let settings = SupplySettings {
+            current_limit: 0.5e-3,
+            ..SupplySettings::default()
+        };
+        let mut sim = Blink::with_supply(settings).unwrap();
+        sim.advance(125e-6).unwrap();
+        let status = sim.supply_status();
+        let ma = sim.current_ma().unwrap();
+        assert!(
+            status.mode == SupplyMode::Cc || ma < LED_ON_MA,
+            "limit did not clamp: status={status:?} led={ma} mA"
+        );
+        assert!(status.amps <= 0.6e-3 + 1e-5, "{status:?}");
     }
 }
