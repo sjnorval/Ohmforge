@@ -627,6 +627,7 @@ impl Hart {
                 if (csr >> 10) == 3 && writes {
                     return Err(illegal);
                 }
+                bus.csr_cycles(self.elapsed_cycles);
                 if reads || op != CsrOp::Rw {
                     let v = bus.csr_read(csr).ok_or(illegal)?;
                     if writes {

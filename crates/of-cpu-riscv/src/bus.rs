@@ -61,6 +61,11 @@ pub trait Bus {
         0
     }
 
+    /// Called with the hart's elapsed cycle count right before
+    /// [`Self::csr_read`] or [`Self::csr_write`], so SoC CSRs that count
+    /// cycles (such as the ESP32-C3 performance counter) can see the time.
+    fn csr_cycles(&mut self, _cycles: u64) {}
+
     /// Read a CSR the core does not implement (for example ESP32-C3 custom
     /// CSRs). `None` makes the instruction illegal.
     fn csr_read(&mut self, _csr: u16) -> Option<u32> {

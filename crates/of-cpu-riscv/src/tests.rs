@@ -471,6 +471,7 @@ fn counter_writes_and_inhibit() {
 struct CustomCsrBus {
     ram: Ram,
     custom: u32,
+    cycles: Vec<u64>,
 }
 
 impl Bus for CustomCsrBus {
@@ -479,6 +480,9 @@ impl Bus for CustomCsrBus {
     }
     fn write(&mut self, addr: u32, size: Size, value: u32, kind: AccessKind) -> Result<(), BusError> {
         self.ram.write(addr, size, value, kind)
+    }
+    fn csr_cycles(&mut self, cycles: u64) {
+        self.cycles.push(cycles);
     }
     fn csr_read(&mut self, csr: u16) -> Option<u32> {
         (csr == 0x7e0).then_some(self.custom)
@@ -496,10 +500,17 @@ fn unknown_csrs_go_to_the_bus() {
     let mut ram = Ram::new(BASE, 0x1000);
     ram.load_words(BASE, &[addi(1, 0, 3), csrrw(2, 0x7e0, 1), csrrsi(3, 0x7e0, 4), EBREAK])
         .unwrap();
-    let mut bus = CustomCsrBus { ram, custom: 0x10 };
+    let mut bus = CustomCsrBus {
+        ram,
+        custom: 0x10,
+        cycles: Vec::new(),
+    };
     let mut h = Hart::new(cfg());
     h.run(&mut bus, 100);
     assert_eq!((h.reg(2), h.reg(3), bus.custom), (0x10, 3, 7));
+    // The bus sees the cycle count before each custom CSR access.
+    assert_eq!(bus.cycles.len(), 2);
+    assert!(bus.cycles[0] >= 1 && bus.cycles[1] > bus.cycles[0], "{:?}", bus.cycles);
 }
 
 // ----- traps --------------------------------------------------------------------
