@@ -1,16 +1,24 @@
 use egui::{Align2, FontId, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::{GPIO_BTN, GPIO_LED, LED_REF, RESISTOR_REF, SWITCH_REF};
+use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
 use crate::schematic::{draw_psu, draw_switch, hold_press, hover_tooltip};
 use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
 
-/// Draw the button board. Returns whether SW1 is being held down.
-pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32, closed: bool, supply: SupplyStatus) -> bool {
-    let mut pressed = closed;
+/// Draw the button board. Returns whether SW1 is being held down, plus any probe click.
+pub(crate) fn show(
+    ui: &mut Ui,
+    current_ma: f64,
+    brightness: f32,
+    closed: bool,
+    supply: SupplyStatus,
+    meters: &MeterView<'_>,
+) -> SchematicHit {
+    let mut hit = SchematicHit::default();
     panel().show(ui, |ui| {
         ui.label(RichText::new("Schematic").strong());
-        pressed = draw(ui, brightness, closed, supply);
+        hit = draw(ui, brightness, closed, supply, meters);
         ui.horizontal(|ui| {
             let pct = (brightness * 100.0).round() as i32;
             ui.label(
@@ -27,13 +35,13 @@ pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32, closed: bool, 
             let current = if current_ma.abs() < 0.005 { 0.0 } else { current_ma };
             ui.monospace(format!("{current:.2} mA"));
             ui.separator();
-            ui.monospace(if pressed { "SW1 held" } else { "SW1 open" });
+            ui.monospace(if hit.button { "SW1 held" } else { "SW1 open" });
         });
     });
-    pressed
+    hit
 }
 
-fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus) -> bool {
+fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus, meters: &MeterView<'_>) -> SchematicHit {
     let (response, painter) = ui.allocate_painter(vec2(ui.available_width(), 268.0), Sense::hover());
     let description = format!(
         "ESP32-C3 GPIO{GPIO_LED} connects through {RESISTOR_REF} (330 ohms) to the {LED_REF} anode. {SWITCH_REF} pulls GPIO{GPIO_BTN} to ground when held."
@@ -180,5 +188,76 @@ fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus) -> boo
         "D1 · red LED 0603",
     );
     hover_tooltip(ui, psu, "psu", "Bench supply feeding the VDD rail");
-    hold_press(ui, body, "sw1", "SW1 · hold to close (GPIO9 to ground)")
+    let button = hold_press(ui, body, "sw1", "SW1 · hold to close (GPIO9 to ground)");
+
+    let probes = [
+        ProbePoint {
+            id: "gpio8",
+            node: "gpio8",
+            label: "GPIO8",
+            xy: (120.0, 82.0),
+        },
+        ProbePoint {
+            id: "led_a",
+            node: "led_a",
+            label: "LED anode",
+            xy: (267.0, 82.0),
+        },
+        ProbePoint {
+            id: "led_k",
+            node: "0",
+            label: "LED cathode",
+            xy: (291.0, 82.0),
+        },
+        ProbePoint {
+            id: "gnd",
+            node: "0",
+            label: "GND",
+            xy: (120.0, 133.0),
+        },
+        ProbePoint {
+            id: "gnd_sym",
+            node: "0",
+            label: "GND",
+            xy: (222.0, 154.0),
+        },
+        ProbePoint {
+            id: "vdd",
+            node: "vdd",
+            label: "VDD",
+            xy: (18.0, 64.0),
+        },
+        ProbePoint {
+            id: "gpio9",
+            node: "gpio9",
+            label: "GPIO9",
+            xy: (120.0, 112.0),
+        },
+        ProbePoint {
+            id: "sw1_a",
+            node: "gpio9",
+            label: "SW1 (GPIO9)",
+            xy: (130.0, 190.0),
+        },
+        ProbePoint {
+            id: "sw1_b",
+            node: "0",
+            label: "SW1 (GND)",
+            xy: (186.0, 190.0),
+        },
+        ProbePoint {
+            id: "psu_plus",
+            node: "vdd",
+            label: "PSU +",
+            xy: (96.0, 224.0),
+        },
+        ProbePoint {
+            id: "psu_minus",
+            node: "0",
+            label: "PSU -",
+            xy: (96.0, 252.0),
+        },
+    ];
+    let probe = meter_layer(ui, point, &painter, &probes, meters, muted);
+    SchematicHit { button, probe }
 }

@@ -11,6 +11,7 @@ use crate::adc_pwm::{PwmKind, PwmSim};
 use crate::blink::Blink;
 use crate::button::{ButtonKind, ButtonSim};
 use crate::kind::DemoKind;
+use crate::meters::CircuitReadout;
 use crate::supply::{SupplySettings, SupplyStatus};
 use crate::trace;
 
@@ -53,6 +54,7 @@ pub(crate) struct Snapshot {
     pub led_trace: Vec<(f64, f64)>,
     pub uart: Vec<UartByte>,
     pub uart_baud: Option<f64>,
+    pub readout: CircuitReadout,
     /// Bumped on every boot/reset so the UI can drop stale UART.
     pub generation: u64,
 }
@@ -82,6 +84,7 @@ impl Snapshot {
             led_trace: Vec::new(),
             uart: Vec::new(),
             uart_baud: None,
+            readout: CircuitReadout::new(),
             generation: 0,
         }
     }
@@ -260,6 +263,7 @@ impl Worker {
                 snap.pwm_freq = f;
                 snap.uart = s.uart_bytes().to_vec();
                 snap.uart_baud = s.uart_baud();
+                snap.readout = s.circuit_readout();
             }
             Ok(Running::Pwm(s)) => {
                 snap.time = s.time();
@@ -277,6 +281,7 @@ impl Worker {
                 }
                 snap.uart = s.uart_bytes().to_vec();
                 snap.uart_baud = s.uart_baud();
+                snap.readout = s.circuit_readout();
             }
             Ok(Running::Button(s)) => {
                 snap.time = s.time();
@@ -288,6 +293,7 @@ impl Worker {
                 snap.button_v = s.button_volts().ok();
                 snap.uart = s.uart_bytes().to_vec();
                 snap.uart_baud = s.uart_baud();
+                snap.readout = s.circuit_readout();
             }
         }
         snap

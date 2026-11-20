@@ -12,6 +12,8 @@ use crate::blink;
 use crate::button;
 use crate::kind::DemoKind;
 use crate::live::{Command, LiveSession, Snapshot};
+use crate::meters::{MeterKind, PlacedMeter, ProbeRef, place_ammeter, read_meter};
+use crate::meters_ui::{MeterView, SchematicHit};
 use crate::supply::{self, SupplySettings};
 use crate::theme::{LED_RED, TEAL, panel};
 use crate::trace;
@@ -31,6 +33,11 @@ pub struct OhmforgeDemo {
     speed: f64,
     supply: SupplySettings,
     generation: u64,
+    arm: Option<MeterKind>,
+    pending_a: Option<ProbeRef>,
+    meters: Vec<PlacedMeter>,
+    next_meter: u64,
+    meter_message: Option<String>,
 }
 
 impl Default for OhmforgeDemo {
@@ -55,6 +62,11 @@ impl OhmforgeDemo {
             speed: 1.0,
             supply: SupplySettings::default(),
             generation: 0,
+            arm: None,
+            pending_a: None,
+            meters: Vec::new(),
+            next_meter: 0,
+            meter_message: None,
         }
     }
 
@@ -79,6 +91,10 @@ impl OhmforgeDemo {
             self.pot = 0.5;
         }
         self.button = false;
+        self.arm = None;
+        self.pending_a = None;
+        self.meters.clear();
+        self.meter_message = None;
         self.reset_monitor();
         self.session.send(Command::SetKind(kind));
     }
@@ -93,6 +109,82 @@ impl OhmforgeDemo {
             let b = snap.uart[self.uart_cursor];
             self.monitor.push_rx(b.at, &[b.byte]);
             self.uart_cursor += 1;
+        }
+    }
+
+    fn on_probe(&mut self, probe: ProbeRef, readout: &crate::meters::CircuitReadout) {
+        let Some(kind) = self.arm else {
+            return;
+        };
+        match self.pending_a.take() {
+            None => {
+                self.pending_a = Some(probe);
+                self.meter_message = None;
+            }
+            Some(a) => {
+                if kind == MeterKind::Amp
+                    && let Err(e) = place_ammeter(readout, &a, &probe)
+                {
+                    self.meter_message = Some(e.message().to_owned());
+                    return;
+                }
+                self.next_meter = self.next_meter.saturating_add(1);
+                self.meters.push(PlacedMeter {
+                    id: self.next_meter,
+                    kind,
+                    a,
+                    b: probe,
+                });
+                self.arm = None;
+                self.meter_message = None;
+            }
+        }
+    }
+
+    fn meter_bar(&mut self, ui: &mut Ui, snap: &Snapshot) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Meters").strong());
+            let volt = self.arm == Some(MeterKind::Volt);
+            if ui.selectable_label(volt, "Voltmeter").clicked() {
+                self.arm = if volt { None } else { Some(MeterKind::Volt) };
+                self.pending_a = None;
+                self.meter_message = None;
+            }
+            let amp = self.arm == Some(MeterKind::Amp);
+            if ui.selectable_label(amp, "Ammeter").clicked() {
+                self.arm = if amp { None } else { Some(MeterKind::Amp) };
+                self.pending_a = None;
+                self.meter_message = None;
+            }
+            if self.arm.is_some() {
+                let step = if self.pending_a.is_none() {
+                    "click point A, then point B"
+                } else {
+                    "click point B"
+                };
+                ui.weak(step);
+            }
+        });
+        if let Some(msg) = &self.meter_message {
+            ui.colored_label(LED_RED, msg);
+        }
+        let mut remove = None;
+        for meter in &self.meters {
+            ui.horizontal(|ui| {
+                let reading = read_meter(meter, &snap.readout).display();
+                ui.monospace(format!(
+                    "{}  {} to {}  {reading}",
+                    meter.kind.label(),
+                    meter.a.label,
+                    meter.b.label
+                ));
+                if ui.small_button("Remove").clicked() {
+                    remove = Some(meter.id);
+                }
+            });
+        }
+        if let Some(id) = remove {
+            self.meters.retain(|m| m.id != id);
         }
     }
 
@@ -247,6 +339,9 @@ impl OhmforgeDemo {
             }
 
             ui.add_space(8.0);
+            self.meter_bar(ui, &snap);
+
+            ui.add_space(8.0);
             readouts(ui, &snap);
 
             ui.add_space(14.0);
@@ -255,10 +350,21 @@ impl OhmforgeDemo {
             } else if let Some(error) = &snap.error {
                 ui.colored_label(LED_RED, error);
             } else {
-                let pressed = instruments(ui, &snap, self.kind);
-                if self.kind.has_button() && pressed != self.button {
-                    self.button = pressed;
-                    self.session.send(Command::SetButton(pressed));
+                let hit = {
+                    let view = MeterView {
+                        arm: self.arm,
+                        pending_a: self.pending_a.as_ref().map(|p| p.id.as_str()),
+                        meters: &self.meters,
+                        readout: &snap.readout,
+                    };
+                    instruments(ui, &snap, self.kind, &view)
+                };
+                if self.kind.has_button() && hit.button != self.button {
+                    self.button = hit.button;
+                    self.session.send(Command::SetButton(hit.button));
+                }
+                if let Some(probe) = hit.probe {
+                    self.on_probe(probe, &snap.readout);
                 }
                 ui.add_space(12.0);
                 let now = SimTime::from_secs_f64(snap.time);
@@ -298,36 +404,43 @@ fn readouts(ui: &mut Ui, snap: &Snapshot) {
     });
 }
 
-fn instruments(ui: &mut Ui, snap: &Snapshot, kind: DemoKind) -> bool {
+fn instruments(ui: &mut Ui, snap: &Snapshot, kind: DemoKind, meters: &MeterView<'_>) -> SchematicHit {
     let current = snap.led_ma;
     let glow = brightness(current);
     let pos = kind.has_pot().then_some(snap.pot);
-    let mut pressed = snap.button;
+    let mut hit = SchematicHit {
+        button: snap.button,
+        probe: None,
+    };
     if ui.available_width() >= 820.0 {
         ui.columns(2, |columns| {
-            pressed = schematic(&mut columns[0], kind, current, glow, pos, snap);
+            hit = schematic(&mut columns[0], kind, current, glow, pos, snap, meters);
             scope_panel(&mut columns[1], snap, kind);
         });
     } else {
-        pressed = schematic(ui, kind, current, glow, pos, snap);
+        hit = schematic(ui, kind, current, glow, pos, snap, meters);
         ui.add_space(12.0);
         scope_panel(ui, snap, kind);
     }
-    pressed
+    hit
 }
 
-fn schematic(ui: &mut Ui, kind: DemoKind, current: f64, glow: f32, pos: Option<f64>, snap: &Snapshot) -> bool {
+fn schematic(
+    ui: &mut Ui,
+    kind: DemoKind,
+    current: f64,
+    glow: f32,
+    pos: Option<f64>,
+    snap: &Snapshot,
+    meters: &MeterView<'_>,
+) -> SchematicHit {
     match kind {
-        DemoKind::Blink => {
-            blink::show_schematic(ui, current, glow, snap.supply_status);
-            false
-        }
+        DemoKind::Blink => blink::show_schematic(ui, current, glow, snap.supply_status, meters),
         DemoKind::Dimmer | DemoKind::Fade => {
-            adc_pwm::show_schematic(ui, current, glow, pos, snap.supply_status);
-            false
+            adc_pwm::show_schematic(ui, current, glow, pos, snap.supply_status, meters)
         }
         DemoKind::ButtonPoll | DemoKind::ButtonIrq => {
-            button::show_schematic(ui, current, glow, snap.button, snap.supply_status)
+            button::show_schematic(ui, current, glow, snap.button, snap.supply_status, meters)
         }
     }
 }

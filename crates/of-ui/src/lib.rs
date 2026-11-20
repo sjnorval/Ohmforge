@@ -13,6 +13,10 @@ mod kind;
 #[cfg(feature = "gui")]
 mod live;
 #[cfg(feature = "gui")]
+mod meters;
+#[cfg(feature = "gui")]
+mod meters_ui;
+#[cfg(feature = "gui")]
 mod pins;
 #[cfg(feature = "gui")]
 mod rom;

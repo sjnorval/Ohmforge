@@ -12,6 +12,7 @@ use of_core::{EngineId, Kernel, SimTime, Stop};
 use of_parts::parse_part;
 use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, initial_input_level, input_watches};
 
+use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
@@ -345,6 +346,26 @@ impl ButtonSim {
             .expect("registered ESP32-C3")
             .soc
             .push_uart_rx(bytes);
+    }
+
+    pub(crate) fn circuit_readout(&mut self) -> CircuitReadout {
+        let sw = self.board.switches.get(SWITCH_REF).cloned();
+        let closed = self.closed;
+        let mut out = CircuitReadout::new();
+        {
+            let analog = match self.analog() {
+                Ok(a) => a,
+                Err(_) => return out,
+            };
+            meters::take_nodes(analog, &["gpio8", "led_a", "vdd", "gpio9"], &mut out);
+        }
+        meters::add_led_series(&mut out, "R2", "D1", "gpio8", "led_a", R_SERIES);
+        if let Some(s) = sw {
+            let ohms = if closed { s.ron } else { s.roff };
+            meters::add_resistor(&mut out, "SW1", "gpio9", "0", ohms);
+        }
+        meters::add_psu(&mut out, self.supply_status.amps);
+        out
     }
 }
 

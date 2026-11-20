@@ -8,6 +8,7 @@ use of_firmware::ElfImage;
 use of_parts::parse_part;
 use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte};
 
+use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
 use crate::trace::{self, SAMPLE_STEP, TRACE_WINDOW};
@@ -236,6 +237,20 @@ impl Blink {
     pub(crate) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
         let pts: Vec<_> = self.samples.iter().copied().collect();
         trace::pwm_duty_freq(&pts, self.time(), 0.5)
+    }
+
+    pub(crate) fn circuit_readout(&mut self) -> CircuitReadout {
+        let mut out = CircuitReadout::new();
+        {
+            let analog = match self.analog() {
+                Ok(a) => a,
+                Err(_) => return out,
+            };
+            meters::take_nodes(analog, &["gpio8", "led_a", "vdd"], &mut out);
+        }
+        meters::add_led_series(&mut out, "R1", "D1", "gpio8", "led_a", R_SERIES);
+        meters::add_psu(&mut out, self.supply_status.amps);
+        out
     }
 }
 

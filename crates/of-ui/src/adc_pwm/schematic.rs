@@ -1,14 +1,23 @@
 use egui::{Align2, FontId, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use super::{GPIO_LED, GPIO_POT, LED_REF, POT_REF, RESISTOR_REF};
+use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
 use crate::schematic::{draw_psu, hover_tooltip};
 use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
 
-pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32, position: Option<f64>, supply: SupplyStatus) {
+pub(crate) fn show(
+    ui: &mut Ui,
+    current_ma: f64,
+    brightness: f32,
+    position: Option<f64>,
+    supply: SupplyStatus,
+    meters: &MeterView<'_>,
+) -> SchematicHit {
+    let mut hit = SchematicHit::default();
     panel().show(ui, |ui| {
         ui.label(RichText::new("Schematic").strong());
-        draw(ui, brightness, position, supply);
+        hit = draw(ui, brightness, position, supply, meters);
         ui.horizontal(|ui| {
             let pct = (brightness * 100.0).round() as i32;
             ui.label(RichText::new(format!("LED {pct}%")).strong());
@@ -21,9 +30,16 @@ pub(crate) fn show(ui: &mut Ui, current_ma: f64, brightness: f32, position: Opti
             }
         });
     });
+    hit
 }
 
-fn draw(ui: &mut Ui, brightness: f32, position: Option<f64>, supply: SupplyStatus) {
+fn draw(
+    ui: &mut Ui,
+    brightness: f32,
+    position: Option<f64>,
+    supply: SupplyStatus,
+    meters: &MeterView<'_>,
+) -> SchematicHit {
     let (response, painter) = ui.allocate_painter(vec2(ui.available_width(), 268.0), Sense::hover());
     let description = if position.is_some() {
         format!(
@@ -210,4 +226,101 @@ fn draw(ui: &mut Ui, brightness: f32, position: Option<f64>, supply: SupplyStatu
         "D1 · red LED 0603",
     );
     hover_tooltip(ui, psu, "psu", "Bench supply feeding the VDD rail");
+
+    let mut probes = vec![
+        ProbePoint {
+            id: "gpio8",
+            node: "gpio8",
+            label: "GPIO8",
+            xy: (120.0, 82.0),
+        },
+        ProbePoint {
+            id: "led_a",
+            node: "led_a",
+            label: "LED anode",
+            xy: (267.0, 82.0),
+        },
+        ProbePoint {
+            id: "led_k",
+            node: "0",
+            label: "LED cathode",
+            xy: (291.0, 82.0),
+        },
+        ProbePoint {
+            id: "gnd",
+            node: "0",
+            label: "GND",
+            xy: (120.0, 133.0),
+        },
+        ProbePoint {
+            id: "gnd_sym",
+            node: "0",
+            label: "GND",
+            xy: (222.0, 154.0),
+        },
+        ProbePoint {
+            id: "vdd",
+            node: "vdd",
+            label: "VDD",
+            xy: (18.0, 64.0),
+        },
+    ];
+    if let Some(pos) = position {
+        let wy = 228.0 - 60.0 * pos as f32;
+        probes.extend([
+            ProbePoint {
+                id: "gpio2",
+                node: "gpio2",
+                label: "GPIO2",
+                xy: (120.0, 112.0),
+            },
+            ProbePoint {
+                id: "wiper",
+                node: "gpio2",
+                label: "RV1 wiper",
+                xy: (72.0, wy),
+            },
+            ProbePoint {
+                id: "pot_3",
+                node: "vdd",
+                label: "RV1 pin 3",
+                xy: (62.0, 168.0),
+            },
+            ProbePoint {
+                id: "pot_1",
+                node: "0",
+                label: "RV1 pin 1",
+                xy: (62.0, 228.0),
+            },
+            ProbePoint {
+                id: "psu_plus",
+                node: "vdd",
+                label: "PSU +",
+                xy: (300.0, 182.0),
+            },
+            ProbePoint {
+                id: "psu_minus",
+                node: "0",
+                label: "PSU -",
+                xy: (300.0, 210.0),
+            },
+        ]);
+    } else {
+        probes.extend([
+            ProbePoint {
+                id: "psu_plus",
+                node: "vdd",
+                label: "PSU +",
+                xy: (96.0, 224.0),
+            },
+            ProbePoint {
+                id: "psu_minus",
+                node: "0",
+                label: "PSU -",
+                xy: (96.0, 252.0),
+            },
+        ]);
+    }
+    let probe = meter_layer(ui, point, &painter, &probes, meters, muted);
+    SchematicHit { button: false, probe }
 }
