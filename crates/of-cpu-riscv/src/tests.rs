@@ -1051,3 +1051,56 @@ fn program_timer_interrupt_counter() {
     }
     assert_eq!((h.reg(20), ticks), (3, 3));
 }
+
+/// Defers loads from `DATA` until the caller says the rest of the
+/// simulation has caught up to `ready`.
+struct DeferBus {
+    ram: Ram,
+    ready: SimTime,
+    asked: Vec<SimTime>,
+}
+
+impl Bus for DeferBus {
+    fn read(&mut self, addr: u32, size: Size, kind: AccessKind) -> Result<u32, BusError> {
+        self.ram.read(addr, size, kind)
+    }
+    fn write(&mut self, addr: u32, size: Size, value: u32, kind: AccessKind) -> Result<(), BusError> {
+        self.ram.write(addr, size, value, kind)
+    }
+    fn defer_load(&mut self, addr: u32, now: SimTime) -> bool {
+        if addr != DATA {
+            return false;
+        }
+        self.asked.push(now);
+        now > self.ready
+    }
+}
+
+#[test]
+fn deferred_loads_stop_before_the_instruction() {
+    let [l1, a1] = li(1, DATA);
+    let prog = [l1, a1, addi(2, 0, 7), lw(3, 1, 0), addi(4, 0, 1), EBREAK];
+    let mut ram = Ram::new(BASE, 0x10000);
+    ram.load_words(BASE, &prog).unwrap();
+    ram.write(DATA, Size::Word, 0x1234, AccessKind::Store).unwrap();
+    let mut bus = DeferBus {
+        ram,
+        ready: SimTime::ZERO,
+        asked: Vec::new(),
+    };
+    let mut h = Hart::new(cfg());
+    let lw_pc = BASE + 12;
+    assert_eq!(h.run(&mut bus, 100), RunExit::Deferred(lw_pc));
+    // Nothing of the load happened: same PC, x3 untouched, no time spent.
+    let (t, cycles) = (h.local_time(), h.elapsed_cycles());
+    assert_eq!((h.pc(), h.reg(2), h.reg(3)), (lw_pc, 7, 0));
+    assert_eq!(bus.asked, [t]);
+    assert_eq!(h.run(&mut bus, 100), RunExit::Deferred(lw_pc), "still not ready");
+    assert_eq!((h.local_time(), h.elapsed_cycles()), (t, cycles));
+    bus.ready = t;
+    assert!(matches!(
+        h.run(&mut bus, 100),
+        RunExit::Halted(HaltReason::Ebreak { .. })
+    ));
+    assert_eq!((h.reg(3), h.reg(4)), (0x1234, 1));
+}

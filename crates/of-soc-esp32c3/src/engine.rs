@@ -139,6 +139,7 @@ impl Engine for Esp32c3Engine {
                 RunExit::SyncRequested(_) if sent_any && t > cx.now() => return Ok(t),
                 RunExit::SyncRequested(_) if t < limit => {}
                 RunExit::SyncRequested(_) | RunExit::BudgetExhausted => return Ok(t.max(limit)),
+                RunExit::Deferred(_) => return Ok(t),
                 RunExit::WaitingForInterrupt => {
                     self.soc.hart.idle_until(limit);
                     return Ok(limit);
