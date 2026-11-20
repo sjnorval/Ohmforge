@@ -1,0 +1,49 @@
+# Bourns PTV09A 9 mm rotary potentiometer, 10 kOhm linear (B) taper.
+# Pins 1 and 3 are the track ends, pin 2 the wiper. Simulated as two
+# resistors split at the wiper: pin 1 to wiper is position x resistance,
+# wiper to pin 3 the rest. Set the wiper per placement (`position`, 0 =
+# fully at pin 1, 1 = fully at pin 3, default 0.5) or at run time through
+# `BuiltBoard::pot_params`. The residual (end) resistance, the sliding
+# noise and the taper's shape error are not part of the model.
+[part]
+id = "bourns.ptv09a-b103"
+name = "Potentiometer, 9 mm rotary, 10 kOhm linear"
+category = "passive/potentiometer"
+model = "rust:potentiometer"
+datasheet = "https://www.bourns.com/docs/Product-Datasheets/PTV09.pdf"
+verification = "datasheet"
+
+[[pin]]
+number = "1"
+name = "1"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "W"
+kind = "passive"
+[[pin]]
+number = "3"
+name = "3"
+kind = "passive"
+
+[electrical]
+resistance = { typ = 10e3, min = 8e3, max = 12e3, unit = "ohm", note = "standard tolerance +/-20 %" }
+residual_resistance = { max = 500.0, unit = "ohm", note = "500 ohms or 1 % max (not modelled)" }
+power = { max = 0.05, unit = "W" }
+voltage = { max = 20.0, unit = "V", note = "DC" }
+rotation = { typ = 280.0, unit = "deg", note = "mechanical angle +/-10 deg" }
+
+[analog]
+kind = "potentiometer"
+pins = ["1", "W", "3"]
+params = { resistance = { typ = 10e3, tol = 0.2, unit = "ohm" } }
+
+[[variant]]
+label = "PTV09A rear mount, bushingless, 20 mm flatted shaft, 10 kOhm linear"
+mpn = "PTV09A-4020F-B103"
+manufacturer = "Bourns"
+footprint = "Potentiometer_THT:Potentiometer_Bourns_PTV09A-1_Single_Vertical"
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

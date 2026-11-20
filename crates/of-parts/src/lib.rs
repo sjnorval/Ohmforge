@@ -205,6 +205,7 @@ pub const ANALOG_KINDS: &[&str] = &[
     "pnp",
     "load",
     "switch",
+    "potentiometer",
     "subckt",
 ];
 
@@ -221,8 +222,10 @@ pub struct AnalogModel {
     /// (with `esr`, `esl`), `inductance` (with `rser`), SPICE diode/BJT model
     /// names (`is`, `n`, `rs`, `bf`, ...), LED extras (`vf`, `if`,
     /// `wavelength`, `eqe`), `tc1`/`tc2`, `voltage` and `current` for a
-    /// `load`, or `ron` and `roff` for a `switch` (state from the placement
-    /// parameter `closed`). For `subckt` they are passed as subcircuit
+    /// `load`, `ron` and `roff` for a `switch` (state from the placement
+    /// parameter `closed`), or `resistance` (end to end) for a
+    /// `potentiometer` (pins: end, wiper, end; wiper from the placement
+    /// parameter `position`). For `subckt` they are passed as subcircuit
     /// parameters.
     #[serde(default)]
     pub params: BTreeMap<String, ModelParam>,
@@ -277,7 +280,7 @@ impl PartFile {
                 out.push(format!("unknown analog kind '{}'", a.kind));
             }
             let want = match a.kind.as_str() {
-                "npn" | "pnp" => Some(3),
+                "npn" | "pnp" | "potentiometer" => Some(3),
                 "subckt" => None,
                 _ => Some(2),
             };
