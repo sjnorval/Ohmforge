@@ -397,4 +397,9 @@ impl Esp32c3 {
     pub fn uart_text(&self) -> String {
         String::from_utf8_lossy(&self.uart.iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned()
     }
+
+    /// Push host (or test) bytes into UART0's RX FIFO instantly.
+    pub fn push_uart_rx(&mut self, bytes: &[u8]) {
+        self.bus.uart0.push_rx(bytes);
+    }
 }

@@ -1,14 +1,18 @@
-//! UART0 (TRM chapter 26): transmit capture plus the configuration
+//! UART0 (TRM chapter 26): transmit capture, receive FIFO, and configuration
 //! registers.
 //!
 //! Bytes written to `UART_FIFO` are captured instantly: the TX FIFO never
 //! fills, so `UART_STATUS.TXFIFO_CNT` reads 0, `INT_RAW.TXFIFO_EMPTY` stays
-//! set and `UART_FSM_STATUS` reads idle. The configuration registers
-//! (`INT_ENA`, `CLKDIV`, `CONF0`, `CONF1`, `SLEEP_CONF`, `IDLE_CONF`,
-//! `MEM_CONF`, `CLK_CONF`, `ID`) hold what is written, with the TRM reset
-//! values, and [`Uart::baud`] works out the configured baud rate from
-//! `CLK_CONF` and `CLKDIV`. Baud-rate timing of the output, the receive
-//! path and UART interrupts are not modelled yet.
+//! set and `UART_FSM_STATUS` reads idle. Host (or test) bytes pushed with
+//! [`Uart::push_rx`] land in a 128-byte RX FIFO instantly; FIFO reads pop
+//! them and `STATUS.RXFIFO_CNT` reflects the depth. Overfill drops the
+//! oldest bytes. The configuration registers (`INT_ENA`, `CLKDIV`, `CONF0`,
+//! `CONF1`, `SLEEP_CONF`, `IDLE_CONF`, `MEM_CONF`, `CLK_CONF`, `ID`) hold
+//! what is written, with the TRM reset values, and [`Uart::baud`] works out
+//! the configured baud rate from `CLK_CONF` and `CLKDIV`. Baud-rate timing
+//! of TX/RX and UART interrupts are not modelled yet.
+
+use std::collections::VecDeque;
 
 /// Register offsets from [`crate::map::UART0_BASE`].
 pub mod reg {
@@ -48,7 +52,7 @@ pub mod reg {
 /// `INT_RAW.TXFIFO_EMPTY`.
 const TXFIFO_EMPTY: u32 = 1 << 1;
 /// `STATUS` with empty FIFOs and idle-high lines (TXD, RTSN, DTRN, RXD,
-/// CTSN).
+/// CTSN). `RXFIFO_CNT` (bits 9:0) is overlaid at read time.
 const STATUS_IDLE: u32 = 0xe000_c000;
 
 /// Configured registers, by offset, with their reset values.
@@ -64,11 +68,12 @@ const CONFIG_RESET: [(u32, u32); 9] = [
     (reg::ID, 0x4000_0500),
 ];
 
-/// UART0 configuration and interrupt state.
+/// UART0 configuration, interrupt state, and receive FIFO.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Uart {
     config: [u32; CONFIG_RESET.len()],
     int_raw: u32,
+    rx: VecDeque<u8>,
 }
 
 impl Default for Uart {
@@ -78,11 +83,15 @@ impl Default for Uart {
 }
 
 impl Uart {
+    /// Hardware RX FIFO depth (bytes). Overfill drops the oldest byte.
+    pub const RX_CAPACITY: usize = 128;
+
     /// Reset state.
     pub fn new() -> Self {
         Self {
             config: CONFIG_RESET.map(|(_, v)| v),
             int_raw: TXFIFO_EMPTY,
+            rx: VecDeque::new(),
         }
     }
 
@@ -94,14 +103,38 @@ impl Uart {
         Self::slot(off).map_or(0, |i| self.config[i])
     }
 
+    fn status(&self) -> u32 {
+        (STATUS_IDLE & !0x3ff) | (self.rx.len() as u32 & 0x3ff)
+    }
+
+    /// Push host (or test) bytes into the RX FIFO instantly.
+    ///
+    /// When the FIFO is full, the oldest bytes are dropped so the newest
+    /// input is kept.
+    pub fn push_rx(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            if self.rx.len() == Self::RX_CAPACITY {
+                self.rx.pop_front();
+            }
+            self.rx.push_back(b);
+        }
+    }
+
+    /// Pop one RX byte, or `0` if the FIFO is empty.
+    pub fn pop_rx(&mut self) -> u8 {
+        self.rx.pop_front().unwrap_or(0)
+    }
+
     /// Read a register other than the FIFO; `None` if not modelled.
+    ///
+    /// FIFO reads go through [`Self::pop_rx`] from the bus.
     pub fn read(&self, off: u32) -> Option<u32> {
         match off {
             reg::FIFO => Some(0),
             reg::INT_RAW => Some(self.int_raw),
             reg::INT_ST => Some(self.int_raw & self.cfg(reg::INT_ENA)),
             reg::INT_CLR => Some(0),
-            reg::STATUS => Some(STATUS_IDLE),
+            reg::STATUS => Some(self.status()),
             reg::FSM_STATUS => Some(0),
             _ => Self::slot(off).map(|i| self.config[i]),
         }
@@ -173,5 +206,28 @@ mod tests {
         assert!((u.baud(80_000_000).unwrap() - 115_200.0).abs() < 12.0);
         u.write(reg::CLKDIV, 0).unwrap();
         assert_eq!(u.baud(80_000_000), None);
+    }
+
+    #[test]
+    fn rx_fifo_push_pop_and_status_count() {
+        let mut u = Uart::new();
+        u.push_rx(b"ab");
+        assert_eq!(u.read(reg::STATUS).unwrap() & 0x3ff, 2, "RXFIFO_CNT");
+        assert_eq!(u.pop_rx(), b'a');
+        assert_eq!(u.pop_rx(), b'b');
+        assert_eq!(u.pop_rx(), 0);
+        assert_eq!(u.read(reg::STATUS).unwrap() & 0x3ff, 0);
+    }
+
+    #[test]
+    fn rx_fifo_cap_drops_oldest() {
+        let mut u = Uart::new();
+        let mut data = vec![0u8; Uart::RX_CAPACITY + 3];
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        u.push_rx(&data);
+        assert_eq!(u.read(reg::STATUS).unwrap() & 0x3ff, Uart::RX_CAPACITY as u32);
+        assert_eq!(u.pop_rx(), data[3]);
     }
 }
