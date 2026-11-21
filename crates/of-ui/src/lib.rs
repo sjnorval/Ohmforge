@@ -27,6 +27,8 @@ mod rom;
 mod schematic;
 #[cfg(feature = "gui")]
 mod serial;
+#[cfg(feature = "gui")]
+pub mod splash;
 #[cfg(all(feature = "gui", test))]
 mod stats;
 #[cfg(feature = "gui")]

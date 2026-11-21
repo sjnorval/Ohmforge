@@ -55,7 +55,8 @@ cargo run -p of-cli -- --version
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv   # SPICE netlist to CSV
 cargo test -p of-soc-esp32c3          # blinky, timer-interrupt, XIP and button firmware on the ESP32-C3 model, LED and button co-simulated
 scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests and the pot dimmer / LED fade demos (never committed)
-cargo run -p of-app --features gui   # desktop app: live blink, dimmer, fade and push-button demos
+cargo run -p of-app --features gui   # desktop app: load screen, then live blink, dimmer, fade and push-button demos
+cargo run -p of-app --features gui -- --no-splash   # skip the EILIi load screen (`OF_NO_SPLASH=1` also works)
 ```
 
 On Windows, build from a shell with the MSVC Build Tools environment loaded (see `AGENTS.md` section 9).
