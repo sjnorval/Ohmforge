@@ -1,0 +1,52 @@
+# schematic routes
+# grid=4 clearance=4
+component d1 D1 267,70 291,95
+  pin A 267,82 W led_a
+  pin K 291,82 E gnd
+component gnd_sym GND 211,174 233,184
+  pin pin 222,174 N gnd
+component psu PSU 300,168 378,220
+  pin plus 300,182 W vdd
+  pin minus 300,210 W gnd stub
+component r2 R2 157,70 207,94
+  pin 1 157,82 W gpio8
+  pin 2 207,82 E led_a
+component rv1 RV1 52,168 72,228
+  pin 3 62,168 N vdd
+  pin 1 62,228 S gnd stub
+  pin wiper 86,198 E gpio2
+component u1 U1 18,49 120,145
+  pin vdd 18,64 W vdd
+  pin gpio8 120,82 E gpio8
+  pin gpio2 120,112 E gpio2
+  pin gnd 120,133 E gnd
+net gnd ground u1.gnd d1.K psu.minus gnd_sym.pin rv1.1
+  route 291,82 312,82 312,133 120,133
+  route 222,133 222,174
+  route 300,210 296,210
+  route 62,228 62,232
+net gpio2 signal u1.gpio2 rv1.wiper
+  route 86,198 90,198 90,156 128,156 128,112 120,112
+net gpio8 signal u1.gpio8 r2.1
+  route 157,82 120,82
+net led_a signal r2.2 d1.A
+  route 267,82 207,82
+net vdd power u1.vdd psu.plus rv1.3
+  route 62,152 62,168
+  route 300,182 240,182 240,152 8,152 8,64 18,64
+keepout 18,28 112,40
+keepout 168,28 196,40
+keepout 160,47 204,59
+keepout 264,28 288,40
+keepout 251,100 265,112
+keepout 294,100 308,112
+keepout 254,119 304,131
+keepout 211,195 233,207
+keepout 96,232 120,244
+keepout 98,162 140,174
+keepout 36,172 50,184
+keepout 36,214 50,226
+keepout 50,252 74,264
+keepout 8,16 400,50
+junction gnd 222,133
+junction vdd 62,152

@@ -4,6 +4,8 @@
 //! goldens and invariants run in the workspace test job.
 
 mod blink;
+mod button;
+mod dimmer;
 mod golden;
 mod invariants;
 mod model;
@@ -15,16 +17,26 @@ pub use model::{
 };
 
 pub use blink::{board as blink_board, r1_zigzag};
+pub use button::board as button_board;
+pub use dimmer::{board as dimmer_board, board_at as dimmer_board_at, fade_board};
 pub use golden::serialize;
 pub use invariants::check;
 pub use router::route;
 
 #[cfg(test)]
 mod tests {
-    use super::{Hop, Point, StrokeStyle, blink_board, check, serialize};
+    use super::{
+        Hop, Point, StrokeStyle, blink_board, button_board, check, dimmer_board, dimmer_board_at, fade_board, serialize,
+    };
 
     const BLINK_GOLDEN: &str = include_str!("goldens/blink.routes.txt");
     const BLINK_INVARIANTS: &str = include_str!("goldens/blink.invariants.txt");
+    const DIMMER_GOLDEN: &str = include_str!("goldens/dimmer.routes.txt");
+    const DIMMER_INVARIANTS: &str = include_str!("goldens/dimmer.invariants.txt");
+    const FADE_GOLDEN: &str = include_str!("goldens/fade.routes.txt");
+    const FADE_INVARIANTS: &str = include_str!("goldens/fade.invariants.txt");
+    const BUTTON_GOLDEN: &str = include_str!("goldens/button.routes.txt");
+    const BUTTON_INVARIANTS: &str = include_str!("goldens/button.invariants.txt");
 
     #[test]
     fn blink_serialise_is_deterministic() {
@@ -284,5 +296,158 @@ mod tests {
             );
         }
         assert_eq!(check(&schematic), Vec::new(), "{:?}", check(&schematic));
+    }
+
+    fn assert_invariants_hold(name: &str, board: &super::Schematic, snapshot: &str, snapshot_path: &str) {
+        let violations = check(board);
+        assert!(
+            violations.is_empty(),
+            "{name} invariants failed:\n{}",
+            violations.iter().map(|v| v.line()).collect::<Vec<_>>().join("\n")
+        );
+        let got = violations.iter().map(|v| v.line()).collect::<Vec<_>>().join("\n");
+        let got = if got.is_empty() { got } else { format!("{got}\n") };
+        assert_eq!(
+            got, snapshot,
+            "{name} invariant snapshot drifted; update {snapshot_path}\n--- got ---\n{got}"
+        );
+    }
+
+    fn maybe_write_golden(path: &str, body: &str) {
+        if std::env::var("OF_WRITE_WIRING_GOLDENS").is_ok() {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+            std::fs::write(root.join(path), body).expect("write golden");
+        }
+    }
+
+    #[test]
+    fn dimmer_serialise_is_deterministic() {
+        let board = dimmer_board();
+        assert!(board.component("u1").is_some());
+        assert!(board.component("rv1").is_some());
+        assert!(board.net("gpio2").and_then(|n| n.route.as_ref()).is_some());
+        assert!(board.net("vdd").and_then(|n| n.route.as_ref()).is_some());
+        let a = serialize(&board);
+        let b = serialize(&dimmer_board());
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn dimmer_routes_match_golden() {
+        let got = serialize(&dimmer_board());
+        maybe_write_golden("src/wiring/goldens/dimmer.routes.txt", &got);
+        assert_eq!(
+            got, DIMMER_GOLDEN,
+            "dimmer route golden drifted; if the change is intended, update crates/of-ui/src/wiring/goldens/dimmer.routes.txt\n--- got ---\n{got}"
+        );
+    }
+
+    #[test]
+    fn dimmer_invariants_hold() {
+        let board = dimmer_board();
+        let got = check(&board).iter().map(|v| v.line()).collect::<Vec<_>>().join("\n");
+        let got = if got.is_empty() { got } else { format!("{got}\n") };
+        maybe_write_golden("src/wiring/goldens/dimmer.invariants.txt", &got);
+        assert_invariants_hold(
+            "dimmer",
+            &board,
+            DIMMER_INVARIANTS,
+            "crates/of-ui/src/wiring/goldens/dimmer.invariants.txt",
+        );
+    }
+
+    #[test]
+    fn dimmer_router_is_deterministic() {
+        assert_eq!(serialize(&dimmer_board()), serialize(&dimmer_board()));
+    }
+
+    #[test]
+    fn dimmer_board_at_mid_matches_canonical_and_invariants_hold_at_ends() {
+        assert_eq!(serialize(&dimmer_board()), serialize(&dimmer_board_at(0.5)));
+        for pos in [0.0, 1.0] {
+            let board = dimmer_board_at(pos);
+            let v = check(&board);
+            assert!(
+                v.is_empty(),
+                "dimmer at {pos} invariants failed:
+{}",
+                v.iter().map(|x| x.line()).collect::<Vec<_>>().join(
+                    "
+"
+                )
+            );
+            assert!(board.net("gpio2").and_then(|n| n.route.as_ref()).is_some());
+        }
+    }
+
+    #[test]
+    fn fade_routes_match_golden() {
+        let board = fade_board();
+        assert!(board.component("rv1").is_none());
+        assert!(board.net("gpio2").is_none());
+        let got = serialize(&board);
+        maybe_write_golden("src/wiring/goldens/fade.routes.txt", &got);
+        assert_eq!(
+            got, FADE_GOLDEN,
+            "fade route golden drifted; if the change is intended, update crates/of-ui/src/wiring/goldens/fade.routes.txt\n--- got ---\n{got}"
+        );
+    }
+
+    #[test]
+    fn fade_invariants_hold() {
+        let board = fade_board();
+        let got = check(&board).iter().map(|v| v.line()).collect::<Vec<_>>().join("\n");
+        let got = if got.is_empty() { got } else { format!("{got}\n") };
+        maybe_write_golden("src/wiring/goldens/fade.invariants.txt", &got);
+        assert_invariants_hold(
+            "fade",
+            &board,
+            FADE_INVARIANTS,
+            "crates/of-ui/src/wiring/goldens/fade.invariants.txt",
+        );
+    }
+
+    #[test]
+    fn fade_router_is_deterministic() {
+        assert_eq!(serialize(&fade_board()), serialize(&fade_board()));
+    }
+
+    #[test]
+    fn button_serialise_is_deterministic() {
+        let board = button_board();
+        assert!(board.component("sw1").is_some());
+        assert!(board.net("gpio9").and_then(|n| n.route.as_ref()).is_some());
+        let a = serialize(&board);
+        let b = serialize(&button_board());
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn button_routes_match_golden() {
+        let got = serialize(&button_board());
+        maybe_write_golden("src/wiring/goldens/button.routes.txt", &got);
+        assert_eq!(
+            got, BUTTON_GOLDEN,
+            "button route golden drifted; if the change is intended, update crates/of-ui/src/wiring/goldens/button.routes.txt\n--- got ---\n{got}"
+        );
+    }
+
+    #[test]
+    fn button_invariants_hold() {
+        let board = button_board();
+        let got = check(&board).iter().map(|v| v.line()).collect::<Vec<_>>().join("\n");
+        let got = if got.is_empty() { got } else { format!("{got}\n") };
+        maybe_write_golden("src/wiring/goldens/button.invariants.txt", &got);
+        assert_invariants_hold(
+            "button",
+            &board,
+            BUTTON_INVARIANTS,
+            "crates/of-ui/src/wiring/goldens/button.invariants.txt",
+        );
+    }
+
+    #[test]
+    fn button_router_is_deterministic() {
+        assert_eq!(serialize(&button_board()), serialize(&button_board()));
     }
 }
