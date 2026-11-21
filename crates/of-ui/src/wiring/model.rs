@@ -128,6 +128,11 @@ pub struct Pin {
     pub position: Point,
     pub direction: Direction,
     pub net: Option<String>,
+    /// When `false`, the router emits a perpendicular stub only and does not
+    /// join the pin to the net trunk. Used for labelled power or ground pins
+    /// that connect by name (see `docs/design/wire-routing.md` §2 and open
+    /// question 3).
+    pub routed: bool,
 }
 
 /// A placed symbol. `body` is the routing obstacle, not necessarily the hover hit target.
@@ -203,6 +208,9 @@ pub struct Schematic {
     pub components: Vec<Component>,
     pub nets: Vec<Net>,
     pub fixture_strokes: Vec<FixtureStroke>,
+    /// Label and annotation boxes the router must not run through. Clearance
+    /// is already included in the rect; these are not component bodies.
+    pub keepouts: Vec<Rect>,
 }
 
 impl Schematic {

@@ -34,6 +34,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 - **Analog core** (#7): a sparse MNA solver (faer sparse LU) with DC operating point, nested DC sweeps, AC and transient analyses; R, C, L, K, independent and controlled sources (including POLY), switches, diodes and LEDs, Gummel-Poon BJTs and level 1 and 3 MOSFETs, with temperature effects; a SPICE netlist subset parser; `ohmforge run netlist.cir` with CSV and VCD output; an AMS1117-3.3 macromodel; the parts-to-solver bridge; and the analog engine under the `of-core` kernel. 39 reference circuits match ngspice within 1 %.
 - **Foundations:** the Cargo workspace, the `of-core` deterministic kernel (`Engine` trait, quantum slices, breakpoints), the `part.toml` loader and example parts, CI on Linux, Windows and macOS with fmt, clippy, cargo-deny, wasm32 and GUI checks, the README banner, favicon and app icon, and UX research specs (#1, #3, #5).
 - **Schematic wiring model:** the blink demo declares components, pins, nets and hand-authored fixture routes in `of-ui` (`crates/of-ui/src/wiring`). The painted schematic is unchanged.
+- **Schematic wire router:** an orthogonal grid router in `of-ui` generates the blink demo net paths. Symbol strokes (including the R1 zigzag) stay hand-drawn; PSU pins leave the body perpendicularly. Stroke widths and colours are unchanged.
 
 ### Changed
 
