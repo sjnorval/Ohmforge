@@ -154,7 +154,7 @@ pub fn regulate(
             if v > s.volts { SupplyMode::Cv } else { SupplyMode::Cc }
         }
     };
-    let applied = apply(analog, &s, next)?;
+    let applied = if next == mode { next } else { apply(analog, &s, next)? };
     let amps = match applied {
         SupplyMode::Cc => s.current_limit,
         SupplyMode::Cv => i_cv.max(0.0),

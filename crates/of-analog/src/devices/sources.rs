@@ -56,6 +56,10 @@ fn set_source_param(v: &mut SourceValue, name: &str, value: f64) -> bool {
     }
 }
 
+fn get_source_param(v: &SourceValue, name: &str) -> Option<f64> {
+    if name == "dc" { v.dc } else { None }
+}
+
 /// A pin driver: a Thevenin source `v` behind `r` between `p` and `n`,
 /// changed at run time by the scheduler engine (`set_param("v" | "r")`).
 /// A large `r` (e.g. [`PinDriver::HI_Z`]) models a high-impedance output.
@@ -108,6 +112,13 @@ impl Device for PinDriver {
             _ => return false,
         }
         true
+    }
+    fn get_param(&self, name: &str) -> Option<f64> {
+        match name {
+            "v" => Some(self.v),
+            "r" => Some(self.r),
+            _ => None,
+        }
     }
     fn probes(&self, x: &[f64], out: &mut Vec<(String, f64)>) {
         // Current delivered out of the p terminal.
@@ -181,12 +192,18 @@ impl Device for VoltageSource {
     fn next_breakpoint(&self, t: f64, tran: &TranSpec) -> Option<f64> {
         self.value.next_breakpoint(t, tran)
     }
+    fn is_changing(&self, t: f64, tran: &TranSpec) -> bool {
+        self.value.wave.as_ref().is_some_and(|w| w.is_changing(t, tran))
+    }
     fn set_dc(&mut self, value: f64) -> bool {
         self.value.dc = Some(value);
         true
     }
     fn set_param(&mut self, name: &str, value: f64) -> bool {
         set_source_param(&mut self.value, name, value)
+    }
+    fn get_param(&self, name: &str) -> Option<f64> {
+        get_source_param(&self.value, name)
     }
     fn ac_stimulus(&self, re: &mut [f64], im: &mut [f64]) {
         if let Some((mag, ph)) = self.ac {
@@ -241,12 +258,18 @@ impl Device for CurrentSource {
     fn next_breakpoint(&self, t: f64, tran: &TranSpec) -> Option<f64> {
         self.value.next_breakpoint(t, tran)
     }
+    fn is_changing(&self, t: f64, tran: &TranSpec) -> bool {
+        self.value.wave.as_ref().is_some_and(|w| w.is_changing(t, tran))
+    }
     fn set_dc(&mut self, value: f64) -> bool {
         self.value.dc = Some(value);
         true
     }
     fn set_param(&mut self, name: &str, value: f64) -> bool {
         set_source_param(&mut self.value, name, value)
+    }
+    fn get_param(&self, name: &str) -> Option<f64> {
+        get_source_param(&self.value, name)
     }
     fn ac_stimulus(&self, re: &mut [f64], im: &mut [f64]) {
         if let Some((mag, ph)) = self.ac {

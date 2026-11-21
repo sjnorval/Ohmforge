@@ -244,6 +244,11 @@ pub trait Device: std::fmt::Debug + Send {
         false
     }
 
+    /// True when this device's contribution is ramping or oscillating at `t`.
+    fn is_changing(&self, _t: f64, _tran: &TranSpec) -> bool {
+        false
+    }
+
     /// First breakpoint strictly after `t` (source corners), if any.
     fn next_breakpoint(&self, _t: f64, _tran: &TranSpec) -> Option<f64> {
         None
@@ -272,6 +277,11 @@ pub trait Device: std::fmt::Debug + Send {
     /// pattern must not change.
     fn set_param(&mut self, _name: &str, _value: f64) -> bool {
         false
+    }
+
+    /// Current value of a run-time parameter, if this device has it.
+    fn get_param(&self, _name: &str) -> Option<f64> {
+        None
     }
 }
 
@@ -365,6 +375,11 @@ impl Circuit {
     /// Devices in the circuit.
     pub fn devices(&self) -> impl Iterator<Item = &dyn Device> {
         self.devices.iter().map(|d| d.as_ref())
+    }
+
+    /// A device by instance name.
+    pub fn device(&self, name: &str) -> Option<&dyn Device> {
+        self.devices.iter().find(|d| d.name() == name).map(|d| d.as_ref())
     }
 
     /// Mutable access to a device by name.

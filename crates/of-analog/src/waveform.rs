@@ -216,6 +216,43 @@ impl Wave {
         }
     }
 
+    /// Whether the waveform is actively ramping or oscillating at `t`.
+    ///
+    /// Breakpoints alone are not enough: a PWL or PULSE rise is linear
+    /// *between* corners, so a DC hold would freeze the mid-ramp value.
+    pub fn is_changing(&self, t: f64, tran: &TranSpec) -> bool {
+        let eps = 1e-15 * tran.tstop.max(1e-12);
+        match self {
+            Wave::Dc(_) => false,
+            Wave::Pulse { v1, v2, .. } => {
+                if (v1 - v2).abs() <= 1e-18 {
+                    return false;
+                }
+                let Some((td, tr, tf, pw, per)) = self.pulse_times(tran) else {
+                    return false;
+                };
+                if t + eps < td {
+                    return false;
+                }
+                let tau = if per > 0.0 { (t - td).rem_euclid(per) } else { t - td };
+                (eps < tau && tau < tr - eps) || (tr + pw + eps < tau && tau < tr + pw + tf - eps)
+            }
+            Wave::Sin { va, td, .. } => *td <= t + eps && va.abs() > 0.0,
+            Wave::Exp { v1, v2, td1, .. } => *td1 <= t + eps && (v1 - v2).abs() > 0.0,
+            Wave::Pwl(pts) => {
+                for w in pts.windows(2) {
+                    if t + eps < w[0].0 {
+                        return false;
+                    }
+                    if t <= w[1].0 + eps {
+                        return (w[1].1 - w[0].1).abs() > 1e-18 && (w[1].0 - w[0].0) > eps;
+                    }
+                }
+                false
+            }
+        }
+    }
+
     /// First breakpoint strictly after `t`.
     pub fn next_breakpoint(&self, t: f64, tran: &TranSpec) -> Option<f64> {
         let eps = 1e-15 * tran.tstop.max(1e-12);
@@ -289,6 +326,17 @@ mod tests {
         for (a, b) in bps.iter().zip(expect) {
             assert!((a - b).abs() < 1e-15, "{bps:?}");
         }
+    }
+
+    #[test]
+    fn pwl_ramp_is_changing_between_corners() {
+        let w = Wave::Pwl(vec![(0.0, 0.0), (1e-3, 5.0)]);
+        assert!(w.is_changing(0.0, &TR));
+        assert!(w.is_changing(0.5e-3, &TR));
+        assert!(!w.is_changing(1.1e-3, &TR));
+        let flat = Wave::Pwl(vec![(0.0, 1.0), (1e-3, 1.0), (2e-3, 2.0)]);
+        assert!(!flat.is_changing(0.2e-3, &TR));
+        assert!(flat.is_changing(1.5e-3, &TR));
     }
 
     #[test]
