@@ -18,6 +18,7 @@ fn pin(id: &str, name: &str, pos: Point, dir: Direction, net: &str) -> Pin {
         position: pos,
         direction: dir,
         net: Some(net.into()),
+        routed: true,
     }
 }
 
@@ -137,6 +138,7 @@ pub fn board() -> Schematic {
                 true,
             ),
         ],
+        keepouts: Vec::new(),
     };
 
     attach_routes(&mut schematic);

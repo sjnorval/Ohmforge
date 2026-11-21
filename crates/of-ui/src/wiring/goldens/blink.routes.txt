@@ -1,4 +1,4 @@
-# schematic fixture routes
+# schematic routes
 # grid=4 clearance=4
 component d1 D1 267,70 291,95
   pin A 267,82 W led_a
@@ -16,9 +16,15 @@ component u1 U1 18,49 120,149
   pin gpio8 120,82 E gpio8
   pin gnd 120,133 E gnd
 net gnd ground u1.gnd d1.K psu.minus gnd_sym.pin
+  route 291,82 382,82 382,154 142,154 142,133 120,133
+  route 222,154 222,174
+  route 96,252 96,258
 net gpio8 signal u1.gpio8 r1.1
+  route 120,82 157,82 162,74 170,90 178,74 186,90 194,74 202,90 207,82 267,82
 net led_a signal r1.2 d1.A
+  route 120,82 157,82 162,74 170,90 178,74 186,90 194,74 202,90 207,82 267,82
 net vdd power u1.vdd psu.plus
+  route 96,224 8,224 8,64 18,64
 stroke gpio8_to_led_a live gpio8,led_a
   120,82 157,82 162,74 170,90 178,74 186,90 194,74 202,90 207,82 267,82
 stroke gnd_return wire gnd

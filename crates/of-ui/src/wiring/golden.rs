@@ -24,7 +24,7 @@ fn fmt_points(points: &[Point]) -> String {
 /// (that order is part of the golden). Junctions and hops are sorted by
 /// position then net id.
 pub fn serialize(schematic: &Schematic) -> String {
-    let mut out = String::from("# schematic fixture routes\n");
+    let mut out = String::from("# schematic routes\n");
     out.push_str(&format!(
         "# grid={} clearance={}\n",
         crate::wiring::GRID,
@@ -43,12 +43,14 @@ pub fn serialize(schematic: &Schematic) -> String {
         ));
         for pin in &c.pins {
             let net = pin.net.as_deref().unwrap_or("-");
+            let stub = if pin.routed { "" } else { " stub" };
             out.push_str(&format!(
-                "  pin {} {} {} {}\n",
+                "  pin {} {} {} {}{}\n",
                 pin.id,
                 fmt_point(pin.position),
                 pin.direction.as_str(),
-                net
+                net,
+                stub
             ));
         }
     }
@@ -67,6 +69,19 @@ pub fn serialize(schematic: &Schematic) -> String {
             let pts = n.waypoints.iter().map(|p| fmt_point(*p)).collect::<Vec<_>>().join(" ");
             out.push_str(&format!("  waypoints {pts}\n"));
         }
+        if let Some(route) = &n.route {
+            for poly in &route.polylines {
+                out.push_str(&format!("  route {}\n", fmt_points(poly)));
+            }
+        }
+    }
+
+    for keepout in &schematic.keepouts {
+        out.push_str(&format!(
+            "keepout {} {}\n",
+            fmt_point(keepout.min),
+            fmt_point(keepout.max)
+        ));
     }
 
     for s in &schematic.fixture_strokes {
