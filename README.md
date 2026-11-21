@@ -42,7 +42,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-web` | WASM entry point |
 | `of-cli` | `ohmforge` headless runner |
 
-Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo and icons), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
+Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo, icons, and the [startup animation](assets/startup/README.md)), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
 
 ## Building
 
