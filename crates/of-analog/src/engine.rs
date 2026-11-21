@@ -12,7 +12,9 @@
 //!   A change is a discontinuity: the next step restarts with backward Euler
 //!   and a small step, as after a source corner.
 //! * **Threshold watches:** [`AnalogEngine::watch`] reports a node crossing
-//!   a level (for example a GPIO input threshold). The step that crosses is
+//!   a fixed level; [`AnalogEngine::watch_relative`] reports a node crossing
+//!   a fraction of another node (for example a GPIO input at 0.75 VDD). The
+//!   step that crosses is
 //!   redone until it ends within `resolution` after the crossing; the engine
 //!   then stops early there and posts the bound event, so the kernel shrinks
 //!   the slice and the receiver sees the crossing time.
@@ -255,6 +257,46 @@ impl AnalogEngine {
             crossing: Crossing {
                 var,
                 level,
+                ref_var: None,
+                fraction: 0.0,
+                rising: edge != Edge::Falling,
+                falling: edge != Edge::Rising,
+            },
+            target,
+            code,
+            enabled: true,
+        });
+        Ok(WatchId(self.watches.len() - 1))
+    }
+
+    /// Report crossings of `signal` through `fraction * reference` as event
+    /// `(target, code)` at the crossing time; the engine stops there.
+    ///
+    /// Use this when the threshold itself should track a live node (for
+    /// example GPIO `V_IH` = 0.75 VDD) so a Vset change does not need Reset.
+    pub fn watch_relative(
+        &mut self,
+        signal: &str,
+        reference: &str,
+        fraction: f64,
+        edge: Edge,
+        target: u32,
+        code: u32,
+    ) -> Result<WatchId, EngineApiError> {
+        let var = self
+            .ckt
+            .var_named(signal)
+            .ok_or_else(|| EngineApiError::UnknownSignal(signal.to_owned()))?;
+        let ref_var = self
+            .ckt
+            .var_named(reference)
+            .ok_or_else(|| EngineApiError::UnknownSignal(reference.to_owned()))?;
+        self.watches.push(Watch {
+            crossing: Crossing {
+                var,
+                level: 0.0,
+                ref_var: Some(ref_var),
+                fraction,
                 rising: edge != Edge::Falling,
                 falling: edge != Edge::Rising,
             },

@@ -106,17 +106,33 @@ fn truncation_step(integ: &Integrator, t_new: f64, states: &States, hist: &VecDe
 }
 
 /// A threshold watch: report when `x[var] - level` changes sign.
+///
+/// `level` is the constant [`Self::level`] when [`Self::ref_var`] is `None`,
+/// otherwise `fraction * x[ref_var]` (so a GPIO V_IH can track a live VDD).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Crossing {
     pub var: usize,
     pub level: f64,
+    pub ref_var: Option<usize>,
+    pub fraction: f64,
     pub rising: bool,
     pub falling: bool,
 }
 
 impl Crossing {
-    fn crossed(&self, a: f64, b: f64) -> bool {
-        let (s0, s1) = (a - self.level, b - self.level);
+    fn threshold(&self, x: &[f64]) -> f64 {
+        match self.ref_var {
+            Some(r) => self.fraction * x[r],
+            None => self.level,
+        }
+    }
+
+    fn signed(&self, x: &[f64]) -> f64 {
+        x[self.var] - self.threshold(x)
+    }
+
+    fn crossed(&self, x0: &[f64], x1: &[f64]) -> bool {
+        let (s0, s1) = (self.signed(x0), self.signed(x1));
         (self.rising && s0 < 0.0 && s1 >= 0.0) || (self.falling && s0 > 0.0 && s1 <= 0.0)
     }
 }
@@ -378,9 +394,10 @@ impl Stepper {
             // interpolated) crossing until it lands within `resolution`.
             let mut fired = None;
             for (k, w) in watches.iter().enumerate() {
-                let (a, b) = (self.x[w.var], self.x_new[w.var]);
-                if w.crossed(a, b) {
-                    let tc = t + (t_new - t) * (w.level - a) / (b - a);
+                if w.crossed(&self.x, &self.x_new) {
+                    let s0 = w.signed(&self.x);
+                    let s1 = w.signed(&self.x_new);
+                    let tc = t + (t_new - t) * s0 / (s0 - s1);
                     if t_new - tc > resolution && redo < 12 && t_new - t > resolution {
                         let c = clip.map_or(tc, |c: f64| c.min(tc));
                         clip = Some(c.max(t + 0.5 * resolution.min(t_new - t)));

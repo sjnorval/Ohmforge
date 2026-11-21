@@ -1,7 +1,7 @@
 //! The analog solver under the `of-core` kernel: slices, pin drivers,
 //! threshold watches and breakpoints.
 
-use of_analog::devices::{Capacitor, PinDriver, Resistor};
+use of_analog::devices::{Capacitor, PinDriver, Resistor, SourceValue, VoltageSource};
 use of_analog::{AnalogEngine, Circuit, Edge, EngineConfig, Options, SetParam, analysis, netlist};
 use of_core::{Engine, EngineError, Event, HOST, Kernel, SimTime, Stop, SyncCtx, ValueCode};
 
@@ -277,4 +277,35 @@ fn sample_requests_are_answered_at_once_with_the_node_voltage() {
         };
         assert!((v - expect).abs() < 0.01 * 3.3, "at {t:?}: {v} V, expected {expect} V");
     }
+}
+
+#[test]
+fn relative_watch_tracks_a_changing_reference() {
+    // A pad parked at 2.0 V starts below 0.75 * 3.3 V. Dropping VDD to 2.4 V
+    // moves the threshold under the pad without the pad itself changing, and
+    // the relative watch must fire (as a live Vset change should).
+    let mut c = Circuit::new();
+    let vdd = c.node("vdd");
+    let pad = c.node("pad");
+    c.add(VoltageSource::new("vdd", vdd, 0, SourceValue::dc(3.3))).unwrap();
+    c.add(VoltageSource::new("vpad", pad, 0, SourceValue::dc(2.0))).unwrap();
+    let mut eng = AnalogEngine::new("analog", c, Options::default(), EngineConfig::default()).unwrap();
+    eng.watch_relative("v(pad)", "v(vdd)", 0.75, Edge::Rising, HOST, 1)
+        .unwrap();
+    let mut k = Kernel::new(SimTime::from_us(50));
+    let a = k.add_engine(Box::new(eng));
+    assert_eq!(
+        k.run_until(SimTime::from_us(100)).unwrap(),
+        Stop::Reached(SimTime::from_us(100))
+    );
+    k.engine_as::<AnalogEngine>(a).unwrap().set("vdd", "dc", 2.4).unwrap();
+    let Stop::Host(ev) = k.run_until(SimTime::from_us(200)).unwrap() else {
+        panic!("expected the relative watch to fire after VDD changed");
+    };
+    assert_eq!(ev.code, 1);
+    assert!(
+        ev.at >= SimTime::from_us(100) && ev.at <= SimTime::from_us(200),
+        "{:?}",
+        ev.at
+    );
 }
