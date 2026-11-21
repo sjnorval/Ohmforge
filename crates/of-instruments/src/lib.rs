@@ -4,4 +4,4 @@
 
 pub mod serial;
 
-pub use serial::{Delivery, Dir, Entry, SendError, SerialMonitor};
+pub use serial::{Delivery, Dir, Entry, FindHit, SendError, SerialMonitor};
