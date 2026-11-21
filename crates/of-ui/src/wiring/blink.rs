@@ -1,11 +1,11 @@
-//! Hand-authored blink demo board: components, nets, and fixture routes.
+//! Blink demo board: components, nets, symbol geometry, and generated routes.
 //!
-//! Geometry matches `crates/of-ui/src/blink/schematic.rs` as of the PR 1
-//! snapshot. Painting must keep the historical strokes, colours and order.
+//! The resistor zigzag is symbol geometry (not a net stroke). Net paths are
+//! produced by the orthogonal grid router. Label boxes are keepouts so routes
+//! do not run through text.
 
-use crate::wiring::model::{
-    Component, Direction, FixtureStroke, Net, NetKind, Pin, PinRef, Point, Rect, Route, Schematic, StrokeStyle,
-};
+use crate::wiring::model::{Component, Direction, Net, NetKind, Pin, PinRef, Point, Rect, Schematic};
+use crate::wiring::router;
 
 fn p(x: f32, y: f32) -> Point {
     Point::new(x, y)
@@ -22,7 +22,32 @@ fn pin(id: &str, name: &str, pos: Point, dir: Direction, net: &str) -> Pin {
     }
 }
 
-/// The LED blink schematic in model form, with today's hand-authored routes.
+fn stub_pin(id: &str, name: &str, pos: Point, dir: Direction, net: &str) -> Pin {
+    Pin {
+        routed: false,
+        ..pin(id, name, pos, dir, net)
+    }
+}
+
+/// The series-resistor zigzag, in schematic units, from R1 pin 1 to pin 2.
+///
+/// This is part of the R1 symbol and is painted with the live signal stroke so
+/// the zig-zag still lights with the GPIO/LED net, but it is not a routed net
+/// segment and must not be treated as a body crossing.
+pub fn r1_zigzag() -> Vec<Point> {
+    vec![
+        p(157.0, 82.0),
+        p(162.0, 74.0),
+        p(170.0, 90.0),
+        p(178.0, 74.0),
+        p(186.0, 90.0),
+        p(194.0, 74.0),
+        p(202.0, 90.0),
+        p(207.0, 82.0),
+    ]
+}
+
+/// The LED blink schematic in model form, with generated orthogonal routes.
 pub fn board() -> Schematic {
     let mut schematic = Schematic {
         components: vec![
@@ -62,7 +87,9 @@ pub fn board() -> Schematic {
                 body: Rect::from_min_max(p(18.0, 210.0), p(96.0, 262.0)),
                 pins: vec![
                     pin("plus", "+", p(96.0, 224.0), Direction::East, "vdd"),
-                    pin("minus", "-", p(96.0, 252.0), Direction::East, "gnd"),
+                    // The minus pin is labelled GND under the box and connects by
+                    // name; only a perpendicular stub is drawn.
+                    stub_pin("minus", "-", p(96.0, 252.0), Direction::East, "gnd"),
                 ],
             },
             Component {
@@ -83,65 +110,22 @@ pub fn board() -> Schematic {
                 &[("u1", "gnd"), ("d1", "K"), ("psu", "minus"), ("gnd_sym", "pin")],
             ),
         ],
-        fixture_strokes: vec![
-            stroke(
-                "gpio8_to_led_a",
-                StrokeStyle::LiveSignal,
-                &["gpio8", "led_a"],
-                &[
-                    p(120.0, 82.0),
-                    p(157.0, 82.0),
-                    p(162.0, 74.0),
-                    p(170.0, 90.0),
-                    p(178.0, 74.0),
-                    p(186.0, 90.0),
-                    p(194.0, 74.0),
-                    p(202.0, 90.0),
-                    p(207.0, 82.0),
-                    p(267.0, 82.0),
-                ],
-                false,
-            ),
-            stroke(
-                "gnd_return",
-                StrokeStyle::Wire,
-                &["gnd"],
-                &[
-                    p(291.0, 82.0),
-                    p(382.0, 82.0),
-                    p(382.0, 154.0),
-                    p(142.0, 154.0),
-                    p(142.0, 133.0),
-                    p(120.0, 133.0),
-                ],
-                false,
-            ),
-            stroke(
-                "gnd_symbol_lead",
-                StrokeStyle::Wire,
-                &["gnd"],
-                &[p(222.0, 154.0), p(222.0, 174.0)],
-                false,
-            ),
-            stroke(
-                "vdd",
-                StrokeStyle::Power,
-                &["vdd"],
-                &[p(96.0, 224.0), p(8.0, 224.0), p(8.0, 64.0), p(18.0, 64.0)],
-                false,
-            ),
-            stroke(
-                "psu_minus",
-                StrokeStyle::Wire,
-                &["gnd"],
-                &[p(96.0, 252.0), p(96.0, 258.0)],
-                true,
-            ),
+        fixture_strokes: Vec::new(),
+        // Approximate 12 px monospace label boxes so routes stay out of text.
+        keepouts: vec![
+            Rect::from_min_max(p(18.0, 28.0), p(112.0, 40.0)),    // U1 / ESP32-C3
+            Rect::from_min_max(p(168.0, 28.0), p(196.0, 40.0)),   // R1
+            Rect::from_min_max(p(160.0, 47.0), p(204.0, 59.0)),   // 330 Ω
+            Rect::from_min_max(p(264.0, 28.0), p(288.0, 40.0)),   // D1
+            Rect::from_min_max(p(251.0, 100.0), p(265.0, 112.0)), // A
+            Rect::from_min_max(p(294.0, 100.0), p(308.0, 112.0)), // K
+            Rect::from_min_max(p(254.0, 119.0), p(304.0, 131.0)), // Red LED
+            Rect::from_min_max(p(211.0, 195.0), p(233.0, 207.0)), // GND under symbol
+            Rect::from_min_max(p(85.0, 260.0), p(107.0, 272.0)),  // GND under PSU
         ],
-        keepouts: Vec::new(),
     };
 
-    attach_routes(&mut schematic);
+    router::route(&mut schematic);
     schematic
 }
 
@@ -153,36 +137,5 @@ fn net(id: &str, name: &str, kind: NetKind, terminals: &[(&str, &str)]) -> Net {
         terminals: terminals.iter().map(|(c, p)| PinRef::new(*c, *p)).collect(),
         waypoints: Vec::new(),
         route: None,
-    }
-}
-
-fn stroke(id: &str, style: StrokeStyle, nets: &[&str], points: &[Point], line_segment: bool) -> FixtureStroke {
-    FixtureStroke {
-        id: id.into(),
-        style,
-        nets: nets.iter().map(|n| (*n).into()).collect(),
-        points: points.to_vec(),
-        line_segment,
-    }
-}
-
-fn attach_routes(schematic: &mut Schematic) {
-    let junction = p(222.0, 154.0);
-    for net in &mut schematic.nets {
-        let mut polylines = Vec::new();
-        for stroke in &schematic.fixture_strokes {
-            if stroke.nets.iter().any(|n| n == &net.id) {
-                polylines.push(stroke.points.clone());
-            }
-        }
-        let mut junctions = Vec::new();
-        if net.id == "gnd" {
-            junctions.push(junction);
-        }
-        net.route = Some(Route {
-            polylines,
-            junctions,
-            hops: Vec::new(),
-        });
     }
 }

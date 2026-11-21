@@ -14,7 +14,7 @@ pub use model::{
     Schematic, StrokeStyle,
 };
 
-pub use blink::board as blink_board;
+pub use blink::{board as blink_board, r1_zigzag};
 pub use golden::serialize;
 pub use invariants::check;
 pub use router::route;
@@ -31,7 +31,8 @@ mod tests {
         let board = blink_board();
         assert!(board.component("u1").is_some());
         assert!(board.net("gnd").is_some());
-        assert!(board.stroke("vdd").is_some());
+        assert!(board.net("vdd").and_then(|n| n.route.as_ref()).is_some());
+        assert!(board.stroke("vdd").is_none());
         let a = serialize(&board);
         let b = serialize(&blink_board());
         assert_eq!(a, b);
@@ -42,16 +43,21 @@ mod tests {
         let got = serialize(&blink_board());
         assert_eq!(
             got, BLINK_GOLDEN,
-            "blink fixture golden drifted; if the change is intended, update crates/of-ui/src/wiring/goldens/blink.routes.txt\n--- got ---\n{got}"
+            "blink route golden drifted; if the change is intended, update crates/of-ui/src/wiring/goldens/blink.routes.txt\n--- got ---\n{got}"
         );
     }
 
     #[test]
-    fn blink_invariants_are_documented() {
-        // Today's hand-authored blink paths violate some router conventions
-        // (the R1 zigzag is painted as part of the net, and the VDD/minus
-        // strokes go through or into the PSU body). The snapshot documents
-        // that; do not change the pixels to silence it.
+    fn blink_invariants_hold() {
+        // Generated blink routes must satisfy every router convention: no body
+        // crossings, no foreign-net overlap, degree-3 junctions only, and
+        // perpendicular stubs of at least one grid step.
+        let violations = check(&blink_board());
+        assert!(
+            violations.is_empty(),
+            "blink invariants failed:\n{}",
+            violations.iter().map(|v| v.line()).collect::<Vec<_>>().join("\n")
+        );
         let got = check(&blink_board())
             .iter()
             .map(|v| v.line())
@@ -60,8 +66,41 @@ mod tests {
         let got = if got.is_empty() { got } else { format!("{got}\n") };
         assert_eq!(
             got, BLINK_INVARIANTS,
-            "blink invariant snapshot drifted; if today's hand-authored paths still look the same, update crates/of-ui/src/wiring/goldens/blink.invariants.txt\n--- got ---\n{got}"
+            "blink invariant snapshot drifted; update crates/of-ui/src/wiring/goldens/blink.invariants.txt\n--- got ---\n{got}"
         );
+    }
+
+    #[test]
+    fn blink_router_is_deterministic() {
+        let a = serialize(&blink_board());
+        let b = serialize(&blink_board());
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn r1_zigzag_is_not_a_net_route() {
+        let board = blink_board();
+        let zigzag = super::r1_zigzag();
+        for net in &board.nets {
+            let Some(route) = &net.route else { continue };
+            for poly in &route.polylines {
+                for w in poly.windows(2) {
+                    for z in zigzag.windows(2) {
+                        // The zig-zag interior segments must not appear on a net.
+                        let interior = z[0] != *zigzag.first().unwrap() && z[1] != *zigzag.last().unwrap()
+                            || (z[0] != *zigzag.first().unwrap() && z[0] != *zigzag.last().unwrap());
+                        if !interior {
+                            continue;
+                        }
+                        if w[0].distance(z[0]) <= 1e-4 && w[1].distance(z[1]) <= 1e-4
+                            || w[0].distance(z[1]) <= 1e-4 && w[1].distance(z[0]) <= 1e-4
+                        {
+                            panic!("net {} reused R1 zigzag segment {}–{}", net.id, z[0].x, z[1].x);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -158,6 +197,7 @@ mod tests {
             net: Some(net.into()),
             routed: true,
         };
+        // Place four 16x16 bodies in a row so every net can run a street along y=24.
         let mut schematic = Schematic {
             components: vec![
                 Component {
