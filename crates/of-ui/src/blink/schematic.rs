@@ -5,6 +5,7 @@ use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
 use crate::schematic::{draw_psu, hover_tooltip};
 use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
+use crate::wiring::{self, StrokeStyle};
 
 pub(crate) fn show(
     ui: &mut Ui,
@@ -64,30 +65,42 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
         painter.text(point(x, y), align, name, FontId::monospace(12.0), color);
     };
 
-    let chip = Rect::from_min_max(point(18.0, 49.0), point(120.0, 149.0));
+    let board = wiring::blink_board();
+    let paint_stroke = |id: &str, stroke: Stroke| {
+        let s = board.stroke(id).expect("blink fixture stroke");
+        let pts: Vec<_> = s.points.iter().map(|p| point(p.x, p.y)).collect();
+        if s.line_segment {
+            painter.line_segment([pts[0], pts[1]], stroke);
+        } else {
+            painter.add(Shape::line(pts, stroke));
+        }
+    };
+    let stroke_paint = |id: &str| {
+        let s = board.stroke(id).expect("blink fixture stroke");
+        match s.style {
+            StrokeStyle::LiveSignal => signal,
+            StrokeStyle::Wire => wire,
+            StrokeStyle::Power => Stroke::new(1.7, TEAL),
+        }
+    };
+
+    let u1 = board.component("u1").expect("u1");
+    let chip = Rect::from_min_max(point(u1.body.min.x, u1.body.min.y), point(u1.body.max.x, u1.body.max.y));
     painter.rect_stroke(chip, 4.0, wire, StrokeKind::Inside);
     label(18.0, 34.0, Align2::LEFT_CENTER, "U1 / ESP32-C3", text);
     label(111.0, 82.0, Align2::RIGHT_CENTER, &format!("GPIO{GPIO}"), text);
     label(111.0, 133.0, Align2::RIGHT_CENTER, "GND", muted);
 
     // GPIO output to the resistor, then from the resistor to the LED anode.
-    line(
-        &[
-            (120.0, 82.0),
-            (157.0, 82.0),
-            (162.0, 74.0),
-            (170.0, 90.0),
-            (178.0, 74.0),
-            (186.0, 90.0),
-            (194.0, 74.0),
-            (202.0, 90.0),
-            (207.0, 82.0),
-            (267.0, 82.0),
-        ],
-        signal,
-    );
+    paint_stroke("gpio8_to_led_a", stroke_paint("gpio8_to_led_a"));
     label(182.0, 34.0, Align2::CENTER_CENTER, RESISTOR_REF, text);
-    label(182.0, 53.0, Align2::CENTER_CENTER, &format!("{R_SERIES:.0} Ω"), muted);
+    label(
+        182.0,
+        53.0,
+        Align2::CENTER_CENTER,
+        &format!("{R_SERIES:.0} \u{03a9}"),
+        muted,
+    );
 
     if on {
         painter.circle_filled(
@@ -114,19 +127,15 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
     label(279.0, 125.0, Align2::CENTER_CENTER, "Red LED", text);
 
     // The cathode and MCU ground pin share the return net.
-    line(
-        &[
-            (291.0, 82.0),
-            (382.0, 82.0),
-            (382.0, 154.0),
-            (142.0, 154.0),
-            (142.0, 133.0),
-            (120.0, 133.0),
-        ],
-        wire,
-    );
-    painter.circle_filled(point(222.0, 154.0), 3.0, muted);
-    line(&[(222.0, 154.0), (222.0, 174.0)], wire);
+    paint_stroke("gnd_return", stroke_paint("gnd_return"));
+    let gnd_j = board
+        .junctions()
+        .into_iter()
+        .find(|(net, _)| net == "gnd")
+        .map(|(_, p)| p)
+        .expect("gnd junction");
+    painter.circle_filled(point(gnd_j.x, gnd_j.y), 3.0, muted);
+    paint_stroke("gnd_symbol_lead", stroke_paint("gnd_symbol_lead"));
     for (y, half_width) in [(174.0, 11.0), (179.0, 7.0), (184.0, 3.0)] {
         line(&[(222.0 - half_width, y), (222.0 + half_width, y)], wire);
     }
@@ -134,9 +143,10 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
 
     // VDD pin on the left of the chip; existing pin labels stay put.
     label(27.0, 64.0, Align2::LEFT_CENTER, "VDD", text);
-    let (plus, psu) = draw_psu(
+    let psu = board.component("psu").expect("psu");
+    let (plus, psu_rect) = draw_psu(
         &painter,
-        point(18.0, 210.0),
+        point(psu.body.min.x, psu.body.min.y),
         supply.volts,
         supply.amps,
         supply.mode != supply::SupplyMode::Off,
@@ -144,29 +154,25 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
         false,
         muted,
     );
-    line(
-        &[(96.0, 224.0), (8.0, 224.0), (8.0, 64.0), (18.0, 64.0)],
-        Stroke::new(1.7, TEAL),
-    );
-    let minus = point(96.0, 252.0);
-    painter.line_segment([minus, point(96.0, 258.0)], wire);
+    paint_stroke("vdd", stroke_paint("vdd"));
+    paint_stroke("psu_minus", stroke_paint("psu_minus"));
     label(96.0, 266.0, Align2::CENTER_CENTER, "GND", muted);
     let _ = plus;
 
-    hover_tooltip(ui, chip, "u1", "U1 · ESP32-C3");
+    hover_tooltip(ui, chip, "u1", "U1 \u{00b7} ESP32-C3");
     hover_tooltip(
         ui,
         Rect::from_min_max(point(157.0, 70.0), point(207.0, 94.0)),
         "r1",
-        "R1 · 330 Ω",
+        "R1 \u{00b7} 330 \u{03a9}",
     );
     hover_tooltip(
         ui,
         Rect::from_min_max(point(255.0, 60.0), point(310.0, 130.0)),
         "d1",
-        "D1 · red LED 0603",
+        "D1 \u{00b7} red LED 0603",
     );
-    hover_tooltip(ui, psu, "psu", "Bench supply feeding the VDD rail");
+    hover_tooltip(ui, psu_rect, "psu", "Bench supply feeding the VDD rail");
 
     let probes = [
         ProbePoint {
