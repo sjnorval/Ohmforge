@@ -44,3 +44,4 @@ keepout 85,260 107,272
 keepout 144,166 172,178
 junction gnd 192,156
 junction gnd 222,156
+hop gpio9 130,156 h

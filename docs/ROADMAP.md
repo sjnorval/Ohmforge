@@ -113,7 +113,7 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
     - [x] Data model and blink fixtures (no visual change); golden geometry tests
     - [x] Orthogonal grid router (A*/Lee, stubs, T-junctions, body clearance); blink uses generated paths
     - [x] Port the pot-dimmer and push-button demos
-    - [ ] Crossing policy (avoid, then hop) and rip-up and reroute
+    - [x] Crossing policy (avoid, then hop) and rip-up and reroute
     - [ ] Optional 45° PCB-style mode (off by default)
     - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs)
     - [ ] Interactive trace re-edit mode in the schematic editor: manually re-route or adjust auto-generated traces (drag segments; move, add or remove waypoints/bends; re-run autoroute on a net); edits keep the same invariants (no body crossings, no foreign-net overlap, T-junctions)

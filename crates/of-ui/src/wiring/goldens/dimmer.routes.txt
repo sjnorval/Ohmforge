@@ -50,3 +50,6 @@ keepout 50,252 74,264
 keepout 8,16 400,50
 junction gnd 222,133
 junction vdd 62,152
+hop gpio2 128,133 h
+hop gpio2 128,152 h
+hop gnd 222,152 h

@@ -34,6 +34,7 @@ pub fn check(schematic: &Schematic) -> Vec<Violation> {
     out.extend(foreign_net_overlap(schematic));
     out.extend(junction_degrees(schematic));
     out.extend(pin_stubs(schematic));
+    out.extend(crossing_hops(schematic));
     out.sort_by(|a, b| a.code.cmp(&b.code).then(a.detail.cmp(&b.detail)));
     out
 }
@@ -316,7 +317,7 @@ fn junction_degrees(schematic: &Schematic) -> Vec<Violation> {
                 format!("degree-3 meeting at {} has no junction dot", fmt_pt(p)),
             ));
         }
-        if deg >= 4 {
+        if deg >= 4 && !is_foreign_crossing_point(schematic, p) {
             out.push(Violation::new(
                 "junction-four-way",
                 format!("meeting at {} has degree {deg}", fmt_pt(p)),
@@ -458,4 +459,203 @@ fn stub_from_pin(schematic: &Schematic, pos: Point, dir: Direction, net_id: &str
     } else {
         Stub::Missing
     }
+}
+
+fn is_foreign_crossing_point(schematic: &Schematic, p: Point) -> bool {
+    perpendicular_crossings(schematic)
+        .iter()
+        .any(|c| c.point.distance(p) <= EPS)
+}
+
+struct ForeignCrossing {
+    net_a: String,
+    net_b: String,
+    point: Point,
+    later: String,
+    later_horizontal: bool,
+}
+
+fn kind_rank(kind: crate::wiring::model::NetKind) -> u8 {
+    match kind {
+        crate::wiring::model::NetKind::Power => 0,
+        crate::wiring::model::NetKind::Ground => 1,
+        crate::wiring::model::NetKind::Signal => 2,
+    }
+}
+
+fn later_net(schematic: &Schematic, a: &str, b: &str) -> String {
+    let na = schematic.net(a);
+    let nb = schematic.net(b);
+    let rank = |n: Option<&crate::wiring::model::Net>, id: &str| {
+        n.map(|net| {
+            (
+                kind_rank(net.kind),
+                std::cmp::Reverse(net.terminals.len()),
+                id.to_string(),
+            )
+        })
+        .unwrap_or((3, std::cmp::Reverse(0), id.to_string()))
+    };
+    if rank(na, a) <= rank(nb, b) {
+        b.to_string()
+    } else {
+        a.to_string()
+    }
+}
+
+fn segment_horizontal(a: Point, b: Point) -> Option<bool> {
+    if (a.y - b.y).abs() <= EPS {
+        Some(true)
+    } else if (a.x - b.x).abs() <= EPS {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn ortho_intersection(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<Point> {
+    let a_h = (a0.y - a1.y).abs() <= EPS;
+    let a_v = (a0.x - a1.x).abs() <= EPS;
+    let b_h = (b0.y - b1.y).abs() <= EPS;
+    let b_v = (b0.x - b1.x).abs() <= EPS;
+    if a_h && b_v {
+        Some(Point::new(b0.x, a0.y))
+    } else if a_v && b_h {
+        Some(Point::new(a0.x, b0.y))
+    } else {
+        None
+    }
+}
+
+fn net_segments(schematic: &Schematic) -> Vec<(String, Point, Point)> {
+    let mut out = Vec::new();
+    for net in &schematic.nets {
+        let Some(route) = &net.route else { continue };
+        for poly in &route.polylines {
+            for w in poly.windows(2) {
+                out.push((net.id.clone(), w[0], w[1]));
+            }
+        }
+    }
+    out
+}
+
+fn perpendicular_crossings(schematic: &Schematic) -> Vec<ForeignCrossing> {
+    let segs = net_segments(schematic);
+    let mut out = Vec::new();
+    for i in 0..segs.len() {
+        for j in (i + 1)..segs.len() {
+            let (ia, a0, a1) = &segs[i];
+            let (ib, b0, b1) = &segs[j];
+            if ia == ib {
+                continue;
+            }
+            let Some(p) = ortho_intersection(*a0, *a1, *b0, *b1) else {
+                continue;
+            };
+            if !crate::wiring::hops::on_open_segment(p, *a0, *a1) || !crate::wiring::hops::on_open_segment(p, *b0, *b1)
+            {
+                continue;
+            }
+            let later = later_net(schematic, ia, ib);
+            let later_horizontal = if later == *ia {
+                segment_horizontal(*a0, *a1).unwrap_or(false)
+            } else {
+                segment_horizontal(*b0, *b1).unwrap_or(false)
+            };
+            if out.iter().any(|c: &ForeignCrossing| {
+                c.point.distance(p) <= EPS && {
+                    let mut ids = [c.net_a.as_str(), c.net_b.as_str()];
+                    ids.sort();
+                    let mut other = [ia.as_str(), ib.as_str()];
+                    other.sort();
+                    ids == other
+                }
+            }) {
+                continue;
+            }
+            out.push(ForeignCrossing {
+                net_a: ia.clone(),
+                net_b: ib.clone(),
+                point: p,
+                later,
+                later_horizontal,
+            });
+        }
+    }
+    out
+}
+
+fn crossing_hops(schematic: &Schematic) -> Vec<Violation> {
+    let mut out = Vec::new();
+    let crossings = perpendicular_crossings(schematic);
+    let mut hops: Vec<(String, crate::wiring::model::Hop)> = Vec::new();
+    for net in &schematic.nets {
+        if let Some(route) = &net.route {
+            for hop in &route.hops {
+                hops.push((net.id.clone(), *hop));
+            }
+        }
+    }
+    let declared = schematic.junctions();
+    for c in &crossings {
+        let here: Vec<&(String, crate::wiring::model::Hop)> =
+            hops.iter().filter(|(_, h)| h.over.distance(c.point) <= EPS).collect();
+        if here.is_empty() {
+            out.push(Violation::new(
+                "crossing-needs-hop",
+                format!(
+                    "foreign nets {} and {} cross at {} with no hop",
+                    c.net_a,
+                    c.net_b,
+                    fmt_pt(c.point)
+                ),
+            ));
+            continue;
+        }
+        if here.iter().any(|(n, _)| *n != c.later) {
+            out.push(Violation::new(
+                "hop-on-wrong-net",
+                format!(
+                    "crossing at {} should hop on later net {}, not {}",
+                    fmt_pt(c.point),
+                    c.later,
+                    here.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(",")
+                ),
+            ));
+        }
+        for (_, h) in &here {
+            if h.across_horizontal != !c.later_horizontal {
+                out.push(Violation::new(
+                    "hop-orientation",
+                    format!(
+                        "hop at {} on {} has across_horizontal={}, expected {}",
+                        fmt_pt(c.point),
+                        c.later,
+                        h.across_horizontal,
+                        !c.later_horizontal
+                    ),
+                ));
+            }
+        }
+    }
+    for (net, hop) in &hops {
+        let at_crossing = crossings.iter().any(|c| c.point.distance(hop.over) <= EPS);
+        if !at_crossing {
+            out.push(Violation::new(
+                "hop-without-crossing",
+                format!(
+                    "hop on {net} at {} is not at a perpendicular foreign crossing",
+                    fmt_pt(hop.over)
+                ),
+            ));
+        }
+        if declared.iter().any(|(_, q)| q.distance(hop.over) <= EPS) {
+            out.push(Violation::new(
+                "hop-at-junction",
+                format!("hop on {net} at {} sits on a junction dot", fmt_pt(hop.over)),
+            ));
+        }
+    }
+    out
 }
