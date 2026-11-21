@@ -44,7 +44,7 @@ fn fmt_pt(p: Point) -> String {
 
 fn body_crossings(schematic: &Schematic) -> Vec<Violation> {
     let mut out = Vec::new();
-    for stroke in &schematic.fixture_strokes {
+    for stroke in geometry_strokes(schematic) {
         for window in stroke.points.windows(2) {
             let a = window[0];
             let b = window[1];
@@ -53,7 +53,8 @@ fn body_crossings(schematic: &Schematic) -> Vec<Violation> {
                     out.push(Violation::new(
                         "body-crossing",
                         format!(
-                            "stroke {} segment {}–{} enters body {} (+ clearance {})",
+                            "{} {} segment {}–{} enters body {} (+ clearance {})",
+                            stroke.kind,
                             stroke.id,
                             fmt_pt(a),
                             fmt_pt(b),
@@ -68,10 +69,49 @@ fn body_crossings(schematic: &Schematic) -> Vec<Violation> {
     out
 }
 
+/// One polyline used by the invariant checks: a hand-authored fixture stroke,
+/// or a generated route polyline when the board has no fixtures.
+struct GeometryStroke {
+    kind: &'static str,
+    id: String,
+    nets: Vec<String>,
+    points: Vec<Point>,
+}
+
+fn geometry_strokes(schematic: &Schematic) -> Vec<GeometryStroke> {
+    if !schematic.fixture_strokes.is_empty() {
+        return schematic
+            .fixture_strokes
+            .iter()
+            .map(|s| GeometryStroke {
+                kind: "stroke",
+                id: s.id.clone(),
+                nets: s.nets.clone(),
+                points: s.points.clone(),
+            })
+            .collect();
+    }
+    let mut out = Vec::new();
+    for net in &schematic.nets {
+        let Some(route) = &net.route else {
+            continue;
+        };
+        for (i, poly) in route.polylines.iter().enumerate() {
+            out.push(GeometryStroke {
+                kind: "route",
+                id: format!("{}/{}", net.id, i),
+                nets: vec![net.id.clone()],
+                points: poly.clone(),
+            });
+        }
+    }
+    out
+}
+
 /// A segment may start or end at a pin of `comp`, but must not travel through
 /// the body interior (inflated by clearance, except the uninflated body is
 /// used at a pin so a stub can leave the outline).
-fn segment_hits_body(a: Point, b: Point, comp: &Component) -> bool {
+pub(crate) fn segment_hits_body(a: Point, b: Point, comp: &Component) -> bool {
     let a_pin = pin_at(comp, a);
     let b_pin = pin_at(comp, b);
     // A stub or arrival at a pin of this component may sit on the outline;
@@ -116,11 +156,16 @@ fn snap_to_boundary(p: Point, r: Rect) -> Point {
     }
 }
 
+/// True if segment `a`–`b` enters the interior of `r`, or an endpoint sits inside it.
+pub(crate) fn hits_rect(a: Point, b: Point, r: Rect) -> bool {
+    segment_enters_interior(a, b, r) || point_in_interior(a, r) || point_in_interior(b, r)
+}
+
 fn point_on_or_in(p: Point, r: Rect) -> bool {
     p.x + EPS >= r.min.x && p.x <= r.max.x + EPS && p.y + EPS >= r.min.y && p.y <= r.max.y + EPS
 }
 
-fn point_in_interior(p: Point, r: Rect) -> bool {
+pub(crate) fn point_in_interior(p: Point, r: Rect) -> bool {
     p.x > r.min.x + EPS && p.x < r.max.x - EPS && p.y > r.min.y + EPS && p.y < r.max.y - EPS
 }
 
@@ -177,7 +222,7 @@ fn clip(p: f32, q: f32, t0: &mut f32, t1: &mut f32) -> bool {
 
 fn foreign_net_overlap(schematic: &Schematic) -> Vec<Violation> {
     let mut out = Vec::new();
-    let strokes = &schematic.fixture_strokes;
+    let strokes = geometry_strokes(schematic);
     for i in 0..strokes.len() {
         for j in (i + 1)..strokes.len() {
             let a = &strokes[i];
@@ -191,7 +236,7 @@ fn foreign_net_overlap(schematic: &Schematic) -> Vec<Violation> {
                     if let Some((p, q)) = colinear_overlap(wa[0], wa[1], wb[0], wb[1]) {
                         out.push(Violation::new(
                             "foreign-overlap",
-                            format!("strokes {} and {} overlap {}–{}", a.id, b.id, fmt_pt(p), fmt_pt(q)),
+                            format!("{}s {} and {} overlap {}–{}", a.kind, a.id, b.id, fmt_pt(p), fmt_pt(q)),
                         ));
                     }
                 }
@@ -202,7 +247,7 @@ fn foreign_net_overlap(schematic: &Schematic) -> Vec<Violation> {
 }
 
 /// Inclusive overlap of two colinear segments, if the shared length is > EPS.
-fn colinear_overlap(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<(Point, Point)> {
+pub(crate) fn colinear_overlap(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<(Point, Point)> {
     let ax = (a1.x - a0.x).abs() <= EPS;
     let ay = (a1.y - a0.y).abs() <= EPS;
     let bx = (b1.x - b0.x).abs() <= EPS;
@@ -283,7 +328,7 @@ fn junction_degrees(schematic: &Schematic) -> Vec<Violation> {
 
 fn all_segments(schematic: &Schematic) -> Vec<(Point, Point)> {
     let mut out = Vec::new();
-    for stroke in &schematic.fixture_strokes {
+    for stroke in geometry_strokes(schematic) {
         for w in stroke.points.windows(2) {
             out.push((w[0], w[1]));
         }
@@ -374,7 +419,7 @@ fn stub_from_pin(schematic: &Schematic, pos: Point, dir: Direction, net_id: &str
     let (vx, vy) = dir.vector();
     let mut best: Option<f32> = None;
     let mut saw = false;
-    for stroke in &schematic.fixture_strokes {
+    for stroke in geometry_strokes(schematic) {
         if !stroke.nets.iter().any(|n| n == net_id) {
             continue;
         }

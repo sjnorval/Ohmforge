@@ -5,7 +5,7 @@ use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
 use crate::schematic::{draw_psu, hover_tooltip};
 use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
-use crate::wiring::{self, StrokeStyle};
+use crate::wiring::{self, Point};
 
 pub(crate) fn show(
     ui: &mut Ui,
@@ -66,21 +66,24 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
     };
 
     let board = wiring::blink_board();
-    let paint_stroke = |id: &str, stroke: Stroke| {
-        let s = board.stroke(id).expect("blink fixture stroke");
-        let pts: Vec<_> = s.points.iter().map(|p| point(p.x, p.y)).collect();
-        if s.line_segment {
-            painter.line_segment([pts[0], pts[1]], stroke);
+    let paint_poly = |pts: &[Point], stroke: Stroke| {
+        if pts.len() < 2 {
+            return;
+        }
+        let screen: Vec<_> = pts.iter().map(|p| point(p.x, p.y)).collect();
+        if screen.len() == 2 {
+            painter.line_segment([screen[0], screen[1]], stroke);
         } else {
-            painter.add(Shape::line(pts, stroke));
+            painter.add(Shape::line(screen, stroke));
         }
     };
-    let stroke_paint = |id: &str| {
-        let s = board.stroke(id).expect("blink fixture stroke");
-        match s.style {
-            StrokeStyle::LiveSignal => signal,
-            StrokeStyle::Wire => wire,
-            StrokeStyle::Power => Stroke::new(1.7, TEAL),
+    let orient = |pts: &[Point], start: Point| -> Vec<Point> {
+        if pts.first().is_some_and(|p| p.distance(start) <= 1e-4) {
+            pts.to_vec()
+        } else if pts.last().is_some_and(|p| p.distance(start) <= 1e-4) {
+            pts.iter().copied().rev().collect()
+        } else {
+            pts.to_vec()
         }
     };
 
@@ -91,8 +94,34 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
     label(111.0, 82.0, Align2::RIGHT_CENTER, &format!("GPIO{GPIO}"), text);
     label(111.0, 133.0, Align2::RIGHT_CENTER, "GND", muted);
 
-    // GPIO output to the resistor, then from the resistor to the LED anode.
-    paint_stroke("gpio8_to_led_a", stroke_paint("gpio8_to_led_a"));
+    // GPIO output to the resistor, the R1 symbol zigzag, then the LED anode.
+    // Painted as one Shape::line so the historical caps and joins stay put.
+    let gpio8_pin = Point::new(120.0, 82.0);
+    let r1_p1 = Point::new(157.0, 82.0);
+    let r1_p2 = Point::new(207.0, 82.0);
+    let mut signal_pts: Vec<Point> = Vec::new();
+    if let Some(route) = board.net("gpio8").and_then(|n| n.route.as_ref())
+        && let Some(poly) = route.polylines.first()
+    {
+        signal_pts.extend(orient(poly, gpio8_pin));
+    }
+    let zigzag = wiring::r1_zigzag();
+    if signal_pts.last().is_some_and(|p| p.distance(r1_p1) <= 1e-4) {
+        signal_pts.extend(zigzag.iter().copied().skip(1));
+    } else {
+        signal_pts.extend(zigzag.iter().copied());
+    }
+    if let Some(route) = board.net("led_a").and_then(|n| n.route.as_ref())
+        && let Some(poly) = route.polylines.first()
+    {
+        let led = orient(poly, r1_p2);
+        if signal_pts.last().is_some_and(|p| p.distance(r1_p2) <= 1e-4) {
+            signal_pts.extend(led.into_iter().skip(1));
+        } else {
+            signal_pts.extend(led);
+        }
+    }
+    paint_poly(&signal_pts, signal);
     label(182.0, 34.0, Align2::CENTER_CENTER, RESISTOR_REF, text);
     label(
         182.0,
@@ -126,16 +155,21 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
     label(301.0, 106.0, Align2::CENTER_CENTER, "K", muted);
     label(279.0, 125.0, Align2::CENTER_CENTER, "Red LED", text);
 
-    // The cathode and MCU ground pin share the return net.
-    paint_stroke("gnd_return", stroke_paint("gnd_return"));
-    let gnd_j = board
-        .junctions()
-        .into_iter()
-        .find(|(net, _)| net == "gnd")
-        .map(|(_, p)| p)
-        .expect("gnd junction");
-    painter.circle_filled(point(gnd_j.x, gnd_j.y), 3.0, muted);
-    paint_stroke("gnd_symbol_lead", stroke_paint("gnd_symbol_lead"));
+    // The cathode and MCU ground pin share the return net. The PSU minus stub
+    // is painted later, after the supply symbol, so it sits on top of the box.
+    let minus = Point::new(96.0, 252.0);
+    let gnd_route = board.net("gnd").and_then(|n| n.route.as_ref());
+    if let Some(route) = gnd_route {
+        for poly in &route.polylines {
+            let is_minus_stub = poly.iter().any(|p| p.distance(minus) <= 1e-4);
+            if !is_minus_stub {
+                paint_poly(poly, wire);
+            }
+        }
+        for p in &route.junctions {
+            painter.circle_filled(point(p.x, p.y), 3.0, muted);
+        }
+    }
     for (y, half_width) in [(174.0, 11.0), (179.0, 7.0), (184.0, 3.0)] {
         line(&[(222.0 - half_width, y), (222.0 + half_width, y)], wire);
     }
@@ -154,8 +188,18 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
         false,
         muted,
     );
-    paint_stroke("vdd", stroke_paint("vdd"));
-    paint_stroke("psu_minus", stroke_paint("psu_minus"));
+    if let Some(route) = board.net("vdd").and_then(|n| n.route.as_ref()) {
+        for poly in &route.polylines {
+            paint_poly(poly, Stroke::new(1.7, TEAL));
+        }
+    }
+    if let Some(route) = gnd_route {
+        for poly in &route.polylines {
+            if poly.iter().any(|p| p.distance(minus) <= 1e-4) {
+                paint_poly(poly, wire);
+            }
+        }
+    }
     label(96.0, 266.0, Align2::CENTER_CENTER, "GND", muted);
     let _ = plus;
 
