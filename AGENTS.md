@@ -42,7 +42,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |
-| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, bounded current-scope ring, pot slider, clickable SW1 with seeded bounce, bench PSU whose Vset is tracked by GPIO V_IH/V_IL, virtual V/A meters, serial monitor for UART0 with hex view and find) |
+| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, bench PSU whose Vset is tracked by GPIO V_IH/V_IL, virtual V/A meters, serial monitor for UART0 with hex view and find) |
 | `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui demo picker |
 | `of-web` | WASM entry point | Empty |
 | `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD) |
