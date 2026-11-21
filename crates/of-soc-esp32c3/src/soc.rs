@@ -416,6 +416,14 @@ impl Esp32c3 {
         &self.edges
     }
 
+    /// Drop the first `n` recorded edges (already forwarded by the engine).
+    pub fn drain_pin_edges(&mut self, n: usize) {
+        let n = n.min(self.edges.len());
+        if n > 0 {
+            self.edges.drain(..n);
+        }
+    }
+
     /// Remove and return the pin edges recorded so far.
     pub fn take_pin_edges(&mut self) -> Vec<PinEdge> {
         std::mem::take(&mut self.edges)

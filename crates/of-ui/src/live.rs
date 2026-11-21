@@ -463,34 +463,93 @@ mod tests {
         );
     }
 
+    fn skip_without_rom(e: &impl std::fmt::Display) -> bool {
+        let msg = e.to_string();
+        if msg.contains("fetch-esp-rom-elfs") {
+            assert!(
+                std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
+                "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {msg}"
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    fn report_counters(name: &str, before: crate::stats::PerfSnapshot, after: crate::stats::PerfSnapshot, wall: f64) {
+        let d = before.delta(after);
+        let rt = d.time / wall.max(1e-9);
+        eprintln!(
+            "RT {name}: {:.3} s sim in {wall:.3} s wall ({rt:.3}x realtime); analog accepted={} newton={} fact={} lte_rej={} bp={}; hart minstret={} mcycle={}; samples={}",
+            d.time,
+            d.accepted,
+            d.newton_iterations,
+            d.factorisations,
+            d.rejected_lte,
+            d.breakpoints,
+            d.minstret,
+            d.mcycle,
+            d.samples
+        );
+    }
+
     #[test]
     fn realtime_capacity_report() {
         report("blink 20 ms", 0.020, || {
             crate::blink::Blink::new().unwrap().advance(0.020).unwrap();
         });
-        for (label, kind, span) in [
-            ("dimmer 10 ms", crate::adc_pwm::PwmKind::Dimmer, 0.010),
-            ("fade 10 ms", crate::adc_pwm::PwmKind::Fade, 0.010),
+        const SPAN: f64 = 0.100;
+        let mut blink = crate::blink::Blink::new().unwrap();
+        let b0 = blink.perf_snapshot();
+        let t0 = Instant::now();
+        blink.advance(blink.time() + SPAN).unwrap();
+        report_counters("blink 100 ms", b0, blink.perf_snapshot(), t0.elapsed().as_secs_f64());
+
+        for (label, kind) in [
+            ("dimmer 100 ms", crate::adc_pwm::PwmKind::Dimmer),
+            ("fade 100 ms", crate::adc_pwm::PwmKind::Fade),
         ] {
             match crate::adc_pwm::PwmSim::new(kind, 0.5) {
-                Ok(mut sim) => report(label, span, || sim.advance(span).unwrap()),
-                Err(e) if e.to_string().contains("fetch-esp-rom-elfs") => {
-                    assert!(
-                        std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
-                        "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {e}"
-                    );
+                Ok(mut sim) => {
+                    let s0 = sim.perf_snapshot();
+                    let t0 = Instant::now();
+                    sim.advance(sim.time() + SPAN).unwrap();
+                    report_counters(label, s0, sim.perf_snapshot(), t0.elapsed().as_secs_f64());
                 }
+                Err(e) if skip_without_rom(&e) => {}
                 Err(e) => panic!("{e}"),
             }
         }
-        match crate::button::ButtonSim::new(crate::button::ButtonKind::Poll) {
-            Ok(mut sim) => report("button-poll 10 ms", 0.010, || sim.advance(0.010).unwrap()),
-            Err(e) if e.to_string().contains("fetch-esp-rom-elfs") => {
-                assert!(
-                    std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
-                    "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {e}"
-                );
+        for (label, kind) in [
+            ("button-poll 100 ms", crate::button::ButtonKind::Poll),
+            ("button-irq 100 ms", crate::button::ButtonKind::Irq),
+        ] {
+            match crate::button::ButtonSim::new(kind) {
+                Ok(mut sim) => {
+                    let s0 = sim.perf_snapshot();
+                    let t0 = Instant::now();
+                    sim.advance(sim.time() + SPAN).unwrap();
+                    report_counters(label, s0, sim.perf_snapshot(), t0.elapsed().as_secs_f64());
+                }
+                Err(e) if skip_without_rom(&e) => {}
+                Err(e) => panic!("{e}"),
             }
+        }
+    }
+
+    #[test]
+    fn long_run_keeps_the_scope_bounded() {
+        // button-irq sleeps in wfi, so several simulated minutes are cheap
+        // after the analog hold optimisation.
+        match crate::button::ButtonSim::new(crate::button::ButtonKind::Irq) {
+            Ok(mut sim) => {
+                let cap = sim.trace_capacity();
+                sim.advance(sim.time() + 180.0).unwrap();
+                let n = sim.trace().len();
+                assert!(n <= cap, "trace grew past the ring capacity: {n} > {cap}");
+                assert!(n > 8, "trace should still hold a window of samples, got {n}");
+            }
+            Err(e) if skip_without_rom(&e) => {}
             Err(e) => panic!("{e}"),
         }
     }

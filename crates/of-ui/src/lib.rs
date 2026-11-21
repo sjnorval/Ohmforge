@@ -24,6 +24,8 @@ mod rom;
 mod schematic;
 #[cfg(feature = "gui")]
 mod serial;
+#[cfg(all(feature = "gui", test))]
+mod stats;
 #[cfg(feature = "gui")]
 mod supply;
 #[cfg(feature = "gui")]
