@@ -109,6 +109,13 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
   - [x] Read-only desktop blink demo (`of-ui` `BlinkDemo`, `cargo run -p of-app --features gui`): bundled blinky co-simulated with R1 330 Ω and a red LED, the schematic LED lit from the simulated current, an LED current trace and UART0 output. Not the editor or the real oscilloscope (GPU waveform path, decision d2)
   - [x] Live desktop playback (worker thread, realtime speed control, live pot/button, scrolling scope, clickable SW1, tooltips, configurable bench PSU on the VDD rail, virtual voltmeter/ammeter) on `main` (#27). Window-tied scope retention, 1-2-5 time/div zoom (10 µs/div to 1 s/div) and playback down to 1e-6× are in this PR. The analog solver holds a settled DC solution instead of re-solving every slice, and the hart caches decoded instructions (branch `p2-perf`). 1× realtime is still not reached on the busy demos (blink / dimmer / fade / button-poll). GPIO thresholds track live Vset, and clickable SW1 bounces with the firmware-test train (branch `p2-honest-io`).
   - [~] Serial monitor: lean console in `of-instruments` / `of-ui` (TX log, Send delivers to UART0 RX at the configured baud when attached; hex view and find in this PR). Soft-front-panel hosting still to do (d7)
+  - [ ] Schematic wire routing (design: [`docs/design/wire-routing.md`](design/wire-routing.md); keeps the existing schematic look). The P3 breadboard view and KiCad export consume the same paths.
+    - [ ] Data model and blink fixtures (no visual change); golden geometry tests
+    - [ ] Orthogonal grid router (A*/Lee, stubs, T-junctions, body clearance); blink uses generated paths
+    - [ ] Port the pot-dimmer and push-button demos
+    - [ ] Crossing policy (avoid, then hop) and rip-up and reroute
+    - [ ] Optional 45° PCB-style mode (off by default)
+    - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs)
 - [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
 - [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer, fade and push-button demos; Arduino and ESP-IDF builds still to do)
 
@@ -140,11 +147,11 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 
 - [ ] Classic ESP32 (Xtensa LX6) through a QEMU sidecar process (`of-cpu-qemu-ipc`), kept out of process for licence and stability reasons
 - [ ] Peripherals: I2C, SPI, RMT, DAC (C3 and classic ESP32)
-- [ ] Breadboard view alongside the schematic editor
+- [ ] Breadboard view alongside the schematic editor (uses the same routed net paths as the schematic; [`docs/design/wire-routing.md`](design/wire-routing.md))
 - [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour and tests (checklist with priorities and simulator dependencies: [`COMPONENTS.md`](COMPONENTS.md))
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
-- [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export
+- [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (exported wires use the same routed paths)
 - [ ] Release 0.2
 
 ## P4 Own Xtensa core and web (weeks 40 to 60), exit 0.3: classic ESP32 in the browser

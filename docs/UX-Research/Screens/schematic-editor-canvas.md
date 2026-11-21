@@ -11,7 +11,7 @@ tags: [screen-spec, schematic-editor, canvas, interaction, snap-to-grid]
 
 # Schematic Canvas — Interaction Model Spec
 
-> Interaction model for the P2 schematic editor canvas. Grounded in `d1` and the research (Synergy Codes, 2026). Visual language is the designer's next step; this is the **behaviour** spec so the canvas is shippable and electrically correct from day one.
+> Interaction model for the P2 schematic editor canvas. Grounded in `d1` and the research (Synergy Codes, 2026). Visual language is the designer's next step; this is the **behaviour** spec so the canvas is shippable and electrically correct from day one. Routing algorithm and phased implementation: [`docs/design/wire-routing.md`](../../design/wire-routing.md).
 
 ---
 

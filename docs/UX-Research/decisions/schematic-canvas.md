@@ -35,4 +35,4 @@ Build the schematic editor as a **grid-disciplined, first-class-nets canvas** in
 
 ## Status / next
 
-Implement in EVT: snapping, first-class nets, implicit power nets (VCC/GND), ordered orthogonal routing, juncture cleanup, branch/merge-back, ERC (power rail, output-output, unconnected required inputs). Leave hierarchy + ERC depth for later phases.
+Implement in EVT: snapping, first-class nets, implicit power nets (VCC/GND), ordered orthogonal routing, juncture cleanup, branch/merge-back, ERC (power rail, output-output, unconnected required inputs). Leave hierarchy + ERC depth for later phases. Routing algorithm, data model and phased PRs: [`docs/design/wire-routing.md`](../../design/wire-routing.md).
