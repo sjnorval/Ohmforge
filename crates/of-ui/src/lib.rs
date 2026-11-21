@@ -22,6 +22,8 @@ mod meters_ui;
 #[cfg(feature = "gui")]
 mod pins;
 #[cfg(feature = "gui")]
+pub mod prefs;
+#[cfg(feature = "gui")]
 mod rom;
 #[cfg(feature = "gui")]
 mod schematic;

@@ -46,6 +46,7 @@ pub struct OhmforgeDemo {
     time_div: f64,
     scope_hold: bool,
     held_scope: Option<HeldScope>,
+    show_startup_animation: bool,
 }
 
 struct HeldScope {
@@ -84,6 +85,7 @@ impl OhmforgeDemo {
             time_div: DEFAULT_TIME_DIV,
             scope_hold: false,
             held_scope: None,
+            show_startup_animation: crate::prefs::load().show_startup_animation,
         }
     }
 
@@ -221,7 +223,7 @@ impl OhmforgeDemo {
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.heading(RichText::new(self.kind.title()).size(30.0).strong());
                 ui.add_space(12.0);
                 let mut kind = self.kind;
@@ -240,6 +242,17 @@ impl OhmforgeDemo {
                     });
                 if kind != self.kind {
                     self.select(kind);
+                }
+                ui.add_space(12.0);
+                let mut show = self.show_startup_animation;
+                if ui.checkbox(&mut show, "Show startup animation").changed() {
+                    self.show_startup_animation = show;
+                    let prefs = crate::prefs::AppPrefs {
+                        show_startup_animation: show,
+                    };
+                    if let Err(err) = crate::prefs::save(&prefs) {
+                        eprintln!("Ohmforge preferences: {err}");
+                    }
                 }
             });
             ui.add_space(4.0);

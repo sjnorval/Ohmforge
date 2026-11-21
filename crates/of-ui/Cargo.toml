@@ -23,6 +23,8 @@ of-firmware = { workspace = true, optional = true }
 of-parts = { workspace = true, optional = true }
 of-soc-esp32c3 = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
 
 [features]
 gui = [
@@ -34,4 +36,6 @@ gui = [
     "dep:of-parts",
     "dep:of-soc-esp32c3",
     "dep:image",
+    "dep:serde",
+    "dep:toml",
 ]
