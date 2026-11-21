@@ -103,6 +103,7 @@ Small, reviewable PRs. None of the first five starts editor chrome (palette, und
 4. **Crossing policy and rip-up.** Avoid crossings, then hop; rip-up and reroute when a net is blocked; tests for no foreign-net overlap and no body crossings on denser boards.
 5. **Optional 45° mode**, off by default, so schematics stay Manhattan and a later PCB-style view can opt in.
 6. **Waypoints and click-to-wire**, as a slice of the P2 schematic editor (place, wire, probe). This is where user edits and saved routes appear.
+7. **Interactive trace re-edit mode**, in the schematic editor: drag segments, edit waypoints and bends, and re-run autoroute on a net, while keeping the routing invariants.
 
 ## 8. Roadmap placement
 

@@ -116,6 +116,7 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
     - [ ] Crossing policy (avoid, then hop) and rip-up and reroute
     - [ ] Optional 45° PCB-style mode (off by default)
     - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs)
+    - [ ] Interactive trace re-edit mode in the schematic editor: manually re-route or adjust auto-generated traces (drag segments; move, add or remove waypoints/bends; re-run autoroute on a net); edits keep the same invariants (no body crossings, no foreign-net overlap, T-junctions)
 - [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
 - [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer, fade and push-button demos; Arduino and ESP-IDF builds still to do)
 
@@ -152,6 +153,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
 - [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (exported wires use the same routed paths)
+- [ ] Explore compatibility with PCB fabrication services (JLCPCB, PCBWay, OSH Park and similar): export of board designs (Gerber/drill, BOM and pick-and-place/CPL for assembly), likely via the KiCad export
 - [ ] Release 0.2
 
 ## P4 Own Xtensa core and web (weeks 40 to 60), exit 0.3: classic ESP32 in the browser
