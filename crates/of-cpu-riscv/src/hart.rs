@@ -245,6 +245,7 @@ pub struct Hart {
     breakpoints: BTreeSet<u32>,
     /// Set by a load the bus deferred, so `step` does not trap.
     deferred: bool,
+    dcache: DecodeCache,
 }
 
 impl Hart {
@@ -266,6 +267,7 @@ impl Hart {
             period_ps,
             breakpoints: BTreeSet::new(),
             deferred: false,
+            dcache: DecodeCache::new(),
         }
     }
 
@@ -536,15 +538,24 @@ impl Hart {
         let (raw, len) = self.fetch(bus, pc).map_err(no_cycles)?;
         let mut wait = bus.wait_states(pc, AccessKind::Fetch);
         let illegal = (Exception::IllegalInstruction, raw, 0);
-        let word = if len == 2 {
-            if !self.config.extensions.c {
-                return Err(illegal);
-            }
-            compressed::expand(raw as u16).ok_or(illegal)?
+        let (_word, instr) = if let Some((craw, clen, word, instr)) = self.dcache.lookup(pc)
+            && craw == raw
+            && clen == len
+        {
+            (word, instr)
         } else {
-            raw
+            let word = if len == 2 {
+                if !self.config.extensions.c {
+                    return Err(illegal);
+                }
+                compressed::expand(raw as u16).ok_or(illegal)?
+            } else {
+                raw
+            };
+            let instr = decode(word).ok_or(illegal)?;
+            self.dcache.insert(pc, raw, len, word, instr);
+            (word, instr)
         };
-        let instr = decode(word).ok_or(illegal)?;
         let ext = self.config.extensions;
         match instr {
             Instr::MulDiv { .. } if !ext.m => return Err(illegal),
@@ -756,6 +767,7 @@ impl Hart {
                     StoreOp::Sw => Size::Word,
                 };
                 flow.wait = self.store(bus, addr, size, self.x(rs2), AccessKind::Store)?;
+                self.dcache.invalidate();
             }
             Instr::OpImm { op, rd, rs1, imm } => {
                 let v = alu(op, self.x(rs1), imm as u32);
@@ -790,6 +802,7 @@ impl Hart {
                         if self.reservation == Some(addr) {
                             flow.wait = self.store(bus, addr, Size::Word, self.x(rs2), AccessKind::Atomic)?;
                             self.wr(rd, 0);
+                            self.dcache.invalidate();
                         } else {
                             self.wr(rd, 1);
                         }
@@ -813,11 +826,13 @@ impl Hart {
                         let w2 = self.store(bus, addr, Size::Word, new, AccessKind::Atomic)?;
                         self.wr(rd, old);
                         flow.wait = w1 + w2;
+                        self.dcache.invalidate();
                     }
                 }
             }
             Instr::Csr { op, rd, csr, src } => self.csr_op(bus, op, rd, csr, src, raw)?,
-            Instr::Fence { .. } | Instr::FenceI => {} // no caches or reordering modelled yet
+            Instr::Fence { .. } => {}
+            Instr::FenceI => self.dcache.invalidate(),
             Instr::Ecall => return Err((Exception::EcallFromM, 0)),
             Instr::Ebreak => {
                 if self.config.ebreak == EbreakAction::Trap {
@@ -936,5 +951,74 @@ pub fn muldiv(op: MulOp, a: u32, b: u32) -> u32 {
             }
         }
         MulOp::Remu => a.checked_rem(b).unwrap_or(a),
+    }
+}
+
+/// Direct-mapped decode cache, invalidated by `fence.i` and stores (including
+/// stores to instruction memory). The fetch itself still goes to the bus so
+/// wait-states and access faults stay exact.
+const DECODE_CACHE_LINES: usize = 1024;
+
+#[derive(Clone, Copy, Debug)]
+struct DecodeSlot {
+    epoch: u32,
+    pc: u32,
+    raw: u32,
+    len: u32,
+    word: u32,
+    instr: Instr,
+}
+
+#[derive(Clone, Debug)]
+struct DecodeCache {
+    epoch: u32,
+    slots: Box<[DecodeSlot]>,
+}
+
+impl DecodeCache {
+    fn new() -> Self {
+        let dummy = DecodeSlot {
+            epoch: 0,
+            pc: 0,
+            raw: 0,
+            len: 0,
+            word: 0,
+            instr: Instr::Lui { rd: 0, imm: 0 },
+        };
+        Self {
+            epoch: 1,
+            slots: vec![dummy; DECODE_CACHE_LINES].into_boxed_slice(),
+        }
+    }
+
+    fn invalidate(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            for s in self.slots.iter_mut() {
+                s.epoch = 0;
+            }
+            self.epoch = 1;
+        }
+    }
+
+    fn lookup(&self, pc: u32) -> Option<(u32, u32, u32, Instr)> {
+        let s = &self.slots[((pc >> 1) as usize) & (DECODE_CACHE_LINES - 1)];
+        if s.epoch == self.epoch && s.pc == pc {
+            Some((s.raw, s.len, s.word, s.instr))
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, pc: u32, raw: u32, len: u32, word: u32, instr: Instr) {
+        let i = ((pc >> 1) as usize) & (DECODE_CACHE_LINES - 1);
+        self.slots[i] = DecodeSlot {
+            epoch: self.epoch,
+            pc,
+            raw,
+            len,
+            word,
+            instr,
+        };
     }
 }
