@@ -2,9 +2,11 @@
 //!
 //! Without the `gui` feature this prints a notice; build with
 //! `cargo run -p of-app --features gui` for the egui window.
+//! Pass `--no-splash` or set `OF_NO_SPLASH=1` to skip the load screen.
 
 #[cfg(feature = "gui")]
 fn main() -> eframe::Result<()> {
+    let no_splash = std::env::args().any(|arg| arg == "--no-splash") || of_ui::splash::blocked_by_env();
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_inner_size([980.0, 720.0])
         .with_min_inner_size([560.0, 620.0]);
@@ -19,7 +21,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Ohmforge",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             use eframe::egui::{Color32, Theme, ThemePreference, Visuals};
 
             cc.egui_ctx.set_theme(ThemePreference::Dark);
@@ -30,21 +32,73 @@ fn main() -> eframe::Result<()> {
                     ..Visuals::dark()
                 },
             );
-            Ok(Box::new(App(of_ui::OhmforgeDemo::new())))
+            Ok(Box::new(App::new(no_splash)))
         }),
     )
 }
 
 #[cfg(feature = "gui")]
-struct App(of_ui::OhmforgeDemo);
+struct App {
+    splash: Option<of_ui::splash::SplashView>,
+    demo: Option<of_ui::OhmforgeDemo>,
+}
+
+#[cfg(feature = "gui")]
+impl App {
+    fn new(no_splash: bool) -> Self {
+        if no_splash {
+            return Self {
+                splash: None,
+                demo: Some(of_ui::OhmforgeDemo::new()),
+            };
+        }
+        match of_ui::splash::SplashView::load() {
+            Ok(splash) => Self {
+                splash: Some(splash),
+                demo: None,
+            },
+            Err(err) => {
+                eprintln!("Ohmforge splash: {err}");
+                Self {
+                    splash: None,
+                    demo: Some(of_ui::OhmforgeDemo::new()),
+                }
+            }
+        }
+    }
+}
 
 #[cfg(feature = "gui")]
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
-        let frame = eframe::egui::Frame::central_panel(ui.style()).inner_margin(eframe::egui::Margin::same(20));
-        eframe::egui::CentralPanel::default()
-            .frame(frame)
-            .show(ui, |ui| self.0.ui(ui));
+        let start_demo = self.demo.is_none() && self.splash.as_ref().is_some_and(|splash| splash.has_painted());
+        if start_demo {
+            self.demo = Some(of_ui::OhmforgeDemo::new());
+        }
+
+        let show_demo = self.splash.as_ref().is_none_or(|splash| !splash.is_covering());
+        if show_demo {
+            if self.demo.is_none() {
+                self.demo = Some(of_ui::OhmforgeDemo::new());
+            }
+            let frame = eframe::egui::Frame::central_panel(ui.style()).inner_margin(eframe::egui::Margin::same(20));
+            eframe::egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+                if let Some(demo) = &mut self.demo {
+                    demo.ui(ui);
+                }
+            });
+        } else {
+            eframe::egui::CentralPanel::default()
+                .frame(eframe::egui::Frame::NONE.fill(eframe::egui::Color32::BLACK))
+                .show(ui, |_| {});
+        }
+
+        if let Some(splash) = &mut self.splash {
+            splash.show(ui.ctx(), self.demo.is_some());
+            if !splash.is_active() {
+                self.splash = None;
+            }
+        }
     }
 }
 

@@ -1218,6 +1218,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2158,6 +2160,7 @@ name = "of-ui"
 version = "0.0.1"
 dependencies = [
  "egui",
+ "image",
  "of-analog",
  "of-bom",
  "of-components",
