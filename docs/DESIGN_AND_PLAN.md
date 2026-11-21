@@ -321,6 +321,8 @@ artwork = "CC-BY-SA-4.0"
 | Power profiler | Current over time per rail, sleep-mode breakdown, battery-life estimate |
 | Debugger panel | Registers, disassembly, FreeRTOS task list, peripheral register viewer |
 
+Schematic net routing for the editor (and for replacing the hand-authored demo polylines) is specified in [`docs/design/wire-routing.md`](design/wire-routing.md), under decision d1.
+
 ---
 
 ## 10. Real-world realism
