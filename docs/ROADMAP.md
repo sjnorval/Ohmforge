@@ -110,9 +110,9 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
   - [x] Live desktop playback (worker thread, realtime speed control, live pot/button, scrolling scope, clickable SW1, tooltips, configurable bench PSU on the VDD rail, virtual voltmeter/ammeter) on `main` (#27). Window-tied scope retention, 1-2-5 time/div zoom (10 µs/div to 1 s/div) and playback down to 1e-6× are in this PR. The analog solver holds a settled DC solution instead of re-solving every slice, and the hart caches decoded instructions (branch `p2-perf`). 1× realtime is still not reached on the busy demos (blink / dimmer / fade / button-poll). GPIO thresholds track live Vset, and clickable SW1 bounces with the firmware-test train (branch `p2-honest-io`).
   - [~] Serial monitor: lean console in `of-instruments` / `of-ui` (TX log, Send delivers to UART0 RX at the configured baud when attached; hex view and find in this PR). Soft-front-panel hosting still to do (d7)
   - [ ] Schematic wire routing (design: [`docs/design/wire-routing.md`](design/wire-routing.md); keeps the existing schematic look). The P3 breadboard view and KiCad export consume the same paths.
-    - [ ] Data model and blink fixtures (no visual change); golden geometry tests
-    - [ ] Orthogonal grid router (A*/Lee, stubs, T-junctions, body clearance); blink uses generated paths
-    - [ ] Port the pot-dimmer and push-button demos
+    - [x] Data model and blink fixtures (no visual change); golden geometry tests
+    - [x] Orthogonal grid router (A*/Lee, stubs, T-junctions, body clearance); blink uses generated paths
+    - [x] Port the pot-dimmer and push-button demos
     - [ ] Crossing policy (avoid, then hop) and rip-up and reroute
     - [ ] Optional 45° PCB-style mode (off by default)
     - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs)

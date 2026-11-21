@@ -5,8 +5,9 @@
 //! algorithm once a trunk exists) connects terminals with a unit step cost, a
 //! heavy bend penalty, and a surcharge on tracks that stab a symbol so nets
 //! prefer the streets between bodies. Existing same-net trunk cells are
-//! sources at cost zero (trunk reuse). Foreign-net edges and crossings are
-//! blocked; hops and rip-up are left to a later PR.
+//! sources at cost zero (trunk reuse). Foreign-net colinear overlap is
+//! blocked. Perpendicular crossings are allowed at a high cost so the pot
+//! and button boards can pass a rail; hop glyphs and rip-up come later.
 //!
 //! Nets are routed in a fixed order: power, then ground, then remaining nets
 //! by descending fanout and a stable name order. The same parts, pins, nets
@@ -38,6 +39,10 @@ const BEND_PENALTY: i64 = 8 * GRID_Q as i64;
 /// the router prefers the streets between symbols (for example the GND return
 /// under the chip rather than a tight run through the LED labels).
 const OFF_STREET: i64 = 2;
+/// A perpendicular foreign-net crossing costs 20 grid steps, so a short
+/// path that must cross a rail is preferred to looping around the board,
+/// while blink-style routes that never need a crossing stay unchanged.
+const CROSS_PENALTY: i64 = 20 * GRID_Q as i64;
 
 fn q(v: f32) -> i32 {
     (v * Q as f32).round() as i32
@@ -608,6 +613,9 @@ fn astar(
             if heading != Heading::None && heading != dir {
                 ng += BEND_PENALTY;
             }
+            if foreign_crossing(edge_a, edge_b, foreign) {
+                ng += CROSS_PENALTY;
+            }
             if ng < *g_score.get(&neigh).unwrap_or(&i64::MAX) {
                 g_score.insert(neigh, ng);
                 came.insert(neigh, cell);
@@ -716,11 +724,15 @@ fn edge_blocked(
         }
     }
     for &(fa, fb) in foreign {
-        if colinear_overlap(a, b, fa, fb).is_some() || proper_cross_or_touch(a, b, fa, fb) {
+        if colinear_overlap(a, b, fa, fb).is_some() {
             return true;
         }
     }
     false
+}
+
+fn foreign_crossing(a: Point, b: Point, foreign: &[(Point, Point)]) -> bool {
+    foreign.iter().any(|&(fa, fb)| proper_cross_or_touch(a, b, fa, fb))
 }
 
 fn proper_cross_or_touch(a0: Point, a1: Point, b0: Point, b1: Point) -> bool {
