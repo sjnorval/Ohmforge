@@ -345,6 +345,7 @@ impl SocBus {
             self.rtc_cntl.next_event(),
             self.ledc.next_event(),
             self.saradc.next_event(),
+            self.uart0.next_event(uart::APB_HZ),
         ]
         .into_iter()
         .flatten()
@@ -355,6 +356,7 @@ impl SocBus {
         self.systimer.advance(now);
         self.ledc.advance(now);
         self.saradc.advance(now);
+        self.uart0.advance(now, uart::APB_HZ);
         let mut resets = Vec::new();
         for (g, timg) in (0u8..).zip(&mut self.timg) {
             if let Some((at, kind)) = timg.advance(now) {
@@ -414,7 +416,8 @@ impl SocBus {
             | st(u32::from(self.ledc.irq()), source::LEDC)
             | st(u32::from(self.saradc.irq()), source::APB_ADC)
             | st(u32::from(gpio_cpu), source::GPIO)
-            | st(u32::from(gpio_nmi), source::GPIO_NMI);
+            | st(u32::from(gpio_nmi), source::GPIO_NMI)
+            | st(u32::from(self.uart0.irq()), source::UART0);
         self.intmatrix.set_sources(levels);
     }
 
@@ -735,6 +738,31 @@ mod tests {
             u32::from(b'x')
         );
         assert_eq!(b.read(0x6000_001c, Size::Word, AccessKind::Load).unwrap() & 0x3ff, 0);
+    }
+
+    #[test]
+    fn uart_rx_arrives_at_baud_and_raises_the_matrix_source() {
+        let mut b = SocBus::new();
+        // 115 200 baud, 8N1: one frame is 10 / 115200 s.
+        b.uart0.write(uart::reg::CLK_CONF, 0x0370_0000).unwrap();
+        b.uart0.write(uart::reg::CLKDIV, 3 << 20 | 347).unwrap();
+        b.uart0.write(uart::reg::CONF1, 0).unwrap(); // full when count > 0
+        b.uart0.write(uart::reg::INT_ENA, uart::RXFIFO_FULL).unwrap();
+        // Route UART0 (source 21) to CPU line 4, priority 2, enable it.
+        b.write(0x600c_2000 + 4 * 21, Size::Word, 4, AccessKind::Store).unwrap();
+        b.write(0x600c_2114 + 4 * 4, Size::Word, 2, AccessKind::Store).unwrap();
+        b.write(0x600c_2104, Size::Word, 1 << 4, AccessKind::Store).unwrap();
+
+        let frame = b.uart0.frame_time(uart::APB_HZ).unwrap();
+        b.uart0.queue_rx(SimTime::ZERO, b"Hi", uart::APB_HZ);
+        b.settle(SimTime::from_us(1));
+        assert_eq!(b.uart0.read(uart::reg::STATUS).unwrap() & 0x3ff, 0);
+        assert_eq!(b.cpu_lines(), 0);
+        b.settle(frame);
+        assert_eq!(b.uart0.read(uart::reg::STATUS).unwrap() & 0x3ff, 1);
+        assert_eq!(b.cpu_lines(), 1 << 4, "UART0 RXFIFO_FULL should reach the CPU");
+        b.settle(frame.saturating_add(frame));
+        assert_eq!(b.uart0.read(uart::reg::STATUS).unwrap() & 0x3ff, 2);
     }
 
     #[test]
