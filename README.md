@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/sjnorval/Ohmforge/actions/workflows/ci.yml"><img src="https://github.com/sjnorval/Ohmforge/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue" alt="Licence: AGPL-3.0-or-later"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-AGPL--3.0--or-later-blue" alt="Licence: AGPL-3.0-or-later"></a>
 </p>
 
 An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
@@ -42,7 +42,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-web` | WASM entry point |
 | `of-cli` | `ohmforge` headless runner |
 
-Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo and icons), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
+Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo, icons, and [startup animation concepts](assets/startup/README.md)), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
 
 ## Building
 
