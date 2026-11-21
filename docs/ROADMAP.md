@@ -90,7 +90,7 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
 - [ ] C3 memory map, interrupt matrix, systimer, timer groups, UART
   - [x] Memory map (ROM, SRAM IRAM/DRAM alias, flash cache windows, RTC fast, peripheral dispatch with read-back for unmodelled registers)
   - [x] SYSTIMER: two units (load, work enable), three comparators in target and period mode, interrupts (52-bit wrap and stall-on-CPU-halt not modelled)
-  - [~] UART0 TX capture, configuration registers with reset values and the configured baud rate (#21); instant RX FIFO (`push_uart_rx`, `STATUS.RXFIFO_CNT`); baud timing and RX interrupts still to do
+  - [x] UART0 TX capture, configuration registers with reset values and the configured baud rate (#21); RX FIFO (`push_uart_rx`); baud-timed RX (one frame per byte at the configured baud) and RX interrupts (`RXFIFO_FULL`, `RXFIFO_TOUT`, `RXFIFO_OVF`, `INT_RAW`/`INT_ST`/`INT_ENA`/`INT_CLR`) in this PR. The SoC TX log is capped at 64 KiB
   - [x] Interrupt matrix and CPU interrupt controller (62 sources, 31 lines, priority, threshold, edge/level, clear), traps into vectored `mtvec`
   - [x] Timer groups TIMG0/1 (timer 0 with divider, auto-reload alarm, load), MWDT, RTC WDT and super watchdog (stages, feed, write protection, flash-boot protection; resets reboot the loaded image); timer-interrupt firmware `firmware/esp32c3-timer-irq` (`tests/timer_irq.rs`)
 - [ ] GPIO/IOMUX with electrical pin model (drive strength, thresholds, pulls)
@@ -107,8 +107,8 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
   - [x] Stop before input reads so GPIO/ADC reads see the analog value at that instant: GPIO (#22: `Bus::defer_load`, lazy `wfi` woken at the input event; a busy core may take a pin interrupt up to one slice late, bounded by `Esp32c3Engine::set_max_lead`); ADC (#24: the engine stops at the conversion start and the analog engine answers with the node voltage at that instant)
 - [ ] egui schematic editor (place, wire, probe), oscilloscope, logic analyser with UART decode, serial monitor
   - [x] Read-only desktop blink demo (`of-ui` `BlinkDemo`, `cargo run -p of-app --features gui`): bundled blinky co-simulated with R1 330 Ω and a red LED, the schematic LED lit from the simulated current, an LED current trace and UART0 output. Not the editor or the real oscilloscope (GPU waveform path, decision d2)
-  - [x] Live desktop playback (worker thread, realtime speed control, live pot/button, scrolling scope, clickable SW1, tooltips, configurable bench PSU on the VDD rail, virtual voltmeter/ammeter) on `main` (#27). The scope is a fixed-capacity ring (default 0.16 s window). The analog solver holds a settled DC solution instead of re-solving every slice, and the hart caches decoded instructions (branch `p2-perf`). 1× realtime is still not reached on the busy demos (blink / dimmer / fade / button-poll). GPIO thresholds track live Vset, and clickable SW1 bounces with the firmware-test train (this PR).
-  - [~] Serial monitor: lean console in `of-instruments` / `of-ui` (TX log, Send delivers to UART0 RX when attached); hex/find, baud-timed RX/interrupts, and soft-front-panel hosting still to do (d7)
+  - [x] Live desktop playback (worker thread, realtime speed control, live pot/button, scrolling scope, clickable SW1, tooltips, configurable bench PSU on the VDD rail, virtual voltmeter/ammeter) on `main` (#27). The scope is a fixed-capacity ring (default 0.16 s window). The analog solver holds a settled DC solution instead of re-solving every slice, and the hart caches decoded instructions (branch `p2-perf`). 1× realtime is still not reached on the busy demos (blink / dimmer / fade / button-poll). GPIO thresholds track live Vset, and clickable SW1 bounces with the firmware-test train (branch `p2-honest-io`).
+  - [~] Serial monitor: lean console in `of-instruments` / `of-ui` (TX log, Send delivers to UART0 RX at the configured baud when attached; hex view and find in this PR). Soft-front-panel hosting still to do (d7)
 - [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
 - [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer, fade and push-button demos; Arduino and ESP-IDF builds still to do)
 
@@ -132,7 +132,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [x] RC filter, LED with series resistor, transistor switch, AMS1117 regulator within 1 % of ngspice
 - [ ] Oscilloscope, logic analyser with UART decode, multimeter probe, serial monitor
   - [x] Virtual voltmeter/ammeter on the live schematic (click two probe points; non-disturbing ammeter on a unique branch) on `main` (#27)
-  - [~] Serial monitor: lean console (TX log, Send delivers to UART0 RX when attached); hex/find, baud-timed RX/interrupts, and d5 shell hosting still to do (d7)
+  - [~] Serial monitor: lean console (TX log, Send delivers to UART0 RX at the configured baud when attached; hex view and find in this PR). d5 shell hosting still to do (d7)
 - [ ] BOM CSV export with MPNs, supplier links and ZAR cost, plus build checklist
 - [ ] Desktop builds on Windows, macOS, Linux; deterministic headless runs in CI
 
