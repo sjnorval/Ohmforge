@@ -5,6 +5,7 @@ use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
 use crate::schematic::{draw_psu, hover_tooltip};
 use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
+use crate::wiring::{self, Point};
 
 pub(crate) fn show(
     ui: &mut Ui,
@@ -71,6 +72,33 @@ fn draw(
         painter.text(point(x, y), align, name, FontId::monospace(12.0), color);
     };
 
+    let board = if let Some(pos) = position {
+        wiring::dimmer_board_at(pos)
+    } else {
+        wiring::fade_board()
+    };
+    let paint_poly = |pts: &[Point], stroke: Stroke| {
+        if pts.len() < 2 {
+            return;
+        }
+        let screen: Vec<_> = pts.iter().map(|p| point(p.x, p.y)).collect();
+        if screen.len() == 2 {
+            painter.line_segment([screen[0], screen[1]], stroke);
+        } else {
+            painter.add(Shape::line(screen, stroke));
+        }
+    };
+    let orient = |pts: &[Point], start: Point| -> Vec<Point> {
+        if pts.first().is_some_and(|p| p.distance(start) <= 1e-4) {
+            pts.to_vec()
+        } else if pts.last().is_some_and(|p| p.distance(start) <= 1e-4) {
+            pts.iter().copied().rev().collect()
+        } else {
+            pts.to_vec()
+        }
+    };
+
+    // Painted chip stays the original size; the dimmer routing body is inset.
     let chip = Rect::from_min_max(point(18.0, 49.0), point(120.0, 149.0));
     painter.rect_stroke(chip, 4.0, wire, StrokeKind::Inside);
     label(18.0, 34.0, Align2::LEFT_CENTER, "U1 / ESP32-C3", text);
@@ -80,22 +108,34 @@ fn draw(
     }
     label(111.0, 133.0, Align2::RIGHT_CENTER, "GND", muted);
 
-    // GPIO8 to the resistor, then to the LED anode.
-    line(
-        &[
-            (120.0, 82.0),
-            (157.0, 82.0),
-            (162.0, 74.0),
-            (170.0, 90.0),
-            (178.0, 74.0),
-            (186.0, 90.0),
-            (194.0, 74.0),
-            (202.0, 90.0),
-            (207.0, 82.0),
-            (267.0, 82.0),
-        ],
-        signal,
-    );
+    // GPIO8 to the resistor, the R2 zigzag, then the LED anode.
+    // Painted as one Shape::line so the historical caps and joins stay put.
+    let gpio8_pin = Point::new(120.0, 82.0);
+    let r2_p1 = Point::new(157.0, 82.0);
+    let r2_p2 = Point::new(207.0, 82.0);
+    let mut signal_pts: Vec<Point> = Vec::new();
+    if let Some(route) = board.net("gpio8").and_then(|n| n.route.as_ref())
+        && let Some(poly) = route.polylines.first()
+    {
+        signal_pts.extend(orient(poly, gpio8_pin));
+    }
+    let zigzag = wiring::r1_zigzag();
+    if signal_pts.last().is_some_and(|p| p.distance(r2_p1) <= 1e-4) {
+        signal_pts.extend(zigzag.iter().copied().skip(1));
+    } else {
+        signal_pts.extend(zigzag.iter().copied());
+    }
+    if let Some(route) = board.net("led_a").and_then(|n| n.route.as_ref())
+        && let Some(poly) = route.polylines.first()
+    {
+        let led = orient(poly, r2_p2);
+        if signal_pts.last().is_some_and(|p| p.distance(r2_p2) <= 1e-4) {
+            signal_pts.extend(led.into_iter().skip(1));
+        } else {
+            signal_pts.extend(led);
+        }
+    }
+    paint_poly(&signal_pts, signal);
     label(182.0, 34.0, Align2::CENTER_CENTER, RESISTOR_REF, text);
     label(182.0, 53.0, Align2::CENTER_CENTER, "330 Ω", muted);
 
@@ -122,19 +162,23 @@ fn draw(
     label(301.0, 106.0, Align2::CENTER_CENTER, "K", muted);
     label(279.0, 125.0, Align2::CENTER_CENTER, "Red LED", text);
 
-    line(
-        &[
-            (291.0, 82.0),
-            (382.0, 82.0),
-            (382.0, 154.0),
-            (142.0, 154.0),
-            (142.0, 133.0),
-            (120.0, 133.0),
-        ],
-        wire,
-    );
-    painter.circle_filled(point(222.0, 154.0), 3.0, muted);
-    line(&[(222.0, 154.0), (222.0, 174.0)], wire);
+    let minus = if position.is_some() {
+        Point::new(300.0, 210.0)
+    } else {
+        Point::new(96.0, 252.0)
+    };
+    let gnd_route = board.net("gnd").and_then(|n| n.route.as_ref());
+    if let Some(route) = gnd_route {
+        for poly in &route.polylines {
+            let is_minus_stub = poly.iter().any(|p| p.distance(minus) <= 1e-4);
+            if !is_minus_stub {
+                paint_poly(poly, wire);
+            }
+        }
+        for p in &route.junctions {
+            painter.circle_filled(point(p.x, p.y), 3.0, muted);
+        }
+    }
     for (y, half_width) in [(174.0, 11.0), (179.0, 7.0), (184.0, 3.0)] {
         line(&[(222.0 - half_width, y), (222.0 + half_width, y)], wire);
     }
@@ -144,11 +188,7 @@ fn draw(
         // Track between 3.3 V (top) and ground (bottom); the wiper slides with position.
         let track = Rect::from_min_max(point(52.0, 168.0), point(72.0, 228.0));
         painter.rect_stroke(track, 2.0, wire, StrokeKind::Outside);
-        line(&[(62.0, 168.0), (62.0, 154.0)], wire);
-        // 3.3 V rail to the top of the track (shown as a short stub and label).
-        line(&[(62.0, 168.0), (62.0, 158.0), (28.0, 158.0)], wire);
         label(26.0, 158.0, Align2::RIGHT_CENTER, "VDD", text);
-        line(&[(62.0, 228.0), (62.0, 238.0)], wire);
         label(62.0, 258.0, Align2::CENTER_CENTER, "GND", muted);
         label(52.0, 178.0, Align2::RIGHT_CENTER, "3", muted);
         label(52.0, 220.0, Align2::RIGHT_CENTER, "1", muted);
@@ -157,10 +197,6 @@ fn draw(
         let wiper = point(72.0, wy);
         painter.line_segment([point(52.0, wy), point(86.0, wy)], Stroke::new(2.0, TEAL));
         painter.circle_filled(wiper, 4.0, TEAL);
-        line(
-            &[(86.0, wy), (132.0, wy), (132.0, 112.0), (120.0, 112.0)],
-            Stroke::new(1.7, TEAL),
-        );
         label(98.0, 238.0, Align2::CENTER_CENTER, POT_REF, text);
         label(98.0, 168.0, Align2::LEFT_CENTER, "10 kΩ", muted);
         hover_tooltip(
@@ -188,28 +224,28 @@ fn draw(
         plus_left,
         muted,
     );
-    if position.is_some() {
-        // Plus on the left of the PSU feeds the existing VDD stub at the pot.
-        painter.add(Shape::line(
-            vec![plus, point(300.0, 158.0), point(28.0, 158.0)],
-            Stroke::new(1.7, TEAL),
-        ));
-        painter.add(Shape::line(
-            vec![point(8.0, 158.0), point(8.0, 64.0), point(18.0, 64.0)],
-            Stroke::new(1.7, TEAL),
-        ));
-    } else {
-        painter.add(Shape::line(
-            vec![
-                plus,
-                point(96.0, 224.0),
-                point(8.0, 224.0),
-                point(8.0, 64.0),
-                point(18.0, 64.0),
-            ],
-            Stroke::new(1.7, TEAL),
-        ));
-        painter.line_segment([point(96.0, 252.0), point(96.0, 258.0)], wire);
+    if let Some(route) = board.net("vdd").and_then(|n| n.route.as_ref()) {
+        for poly in &route.polylines {
+            paint_poly(poly, Stroke::new(1.7, TEAL));
+        }
+    }
+    if let Some(route) = board.net("gpio2").and_then(|n| n.route.as_ref()) {
+        for poly in &route.polylines {
+            paint_poly(poly, Stroke::new(1.7, TEAL));
+        }
+    }
+    if let Some(route) = gnd_route {
+        for poly in &route.polylines {
+            if poly.iter().any(|p| p.distance(minus) <= 1e-4) {
+                // Dimmer: the minus pin is name-connected only (no visible stub).
+                if position.is_none() {
+                    paint_poly(poly, wire);
+                }
+            }
+        }
+    }
+    let _ = plus;
+    if position.is_none() {
         label(96.0, 266.0, Align2::CENTER_CENTER, "GND", muted);
     }
     hover_tooltip(ui, chip, "u1", "U1 · ESP32-C3");
