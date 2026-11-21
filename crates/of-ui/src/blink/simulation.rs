@@ -186,7 +186,7 @@ impl Blink {
             .baud(APB_HZ)
     }
 
-    /// Push host bytes into UART0's RX FIFO.
+    /// Queue host bytes for UART0 RX; they arrive at the configured baud.
     pub(crate) fn push_uart_rx(&mut self, bytes: &[u8]) {
         if bytes.is_empty() {
             return;
@@ -309,6 +309,9 @@ mod tests {
     fn push_uart_rx_is_readable_from_fifo() {
         let mut sim = Blink::new().unwrap();
         sim.push_uart_rx(b"Z");
+        // 8N1 at a typical baud is ~87 µs per byte; wait a couple of frames.
+        let baud = sim.uart_baud().unwrap_or(115_200.0).max(1.0);
+        sim.advance(sim.time() + 20.0 / baud).unwrap();
         let engine = sim
             .kernel
             .engine_as::<Esp32c3Engine>(sim.cpu)
