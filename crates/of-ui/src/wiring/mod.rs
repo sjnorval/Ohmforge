@@ -7,6 +7,7 @@ mod blink;
 mod button;
 mod dimmer;
 mod golden;
+mod hops;
 mod invariants;
 mod model;
 mod router;
@@ -20,13 +21,15 @@ pub use blink::{board as blink_board, r1_zigzag};
 pub use button::board as button_board;
 pub use dimmer::{board as dimmer_board, board_at as dimmer_board_at, fade_board};
 pub use golden::serialize;
+pub use hops::poly_with_hops;
 pub use invariants::check;
 pub use router::route;
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Hop, Point, StrokeStyle, blink_board, button_board, check, dimmer_board, dimmer_board_at, fade_board, serialize,
+        Hop, Point, StrokeStyle, blink_board, button_board, check, dimmer_board, dimmer_board_at, fade_board,
+        poly_with_hops, serialize,
     };
 
     const BLINK_GOLDEN: &str = include_str!("goldens/blink.routes.txt");
@@ -117,7 +120,7 @@ mod tests {
 
     #[test]
     fn hop_round_trip_fields_are_preserved() {
-        // Hops are unused on the blink fixture; keep the type live and comparable.
+        // Hop fields are part of the golden serialisation and the paint helper.
         let hop = Hop {
             over: Point::new(10.0, 20.0),
             across_horizontal: true,
@@ -449,5 +452,87 @@ mod tests {
     #[test]
     fn button_router_is_deterministic() {
         assert_eq!(serialize(&button_board()), serialize(&button_board()));
+    }
+
+    fn hops_on(board: &super::Schematic, net_id: &str) -> Vec<Point> {
+        board
+            .net(net_id)
+            .and_then(|n| n.route.as_ref())
+            .map(|r| r.hops.iter().map(|h| h.over).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn hop_at_every_crossing_and_none_at_junctions() {
+        for (name, board) in [
+            ("blink", blink_board()),
+            ("fade", fade_board()),
+            ("dimmer", dimmer_board()),
+            ("button", button_board()),
+        ] {
+            let v = check(&board);
+            assert!(
+                v.is_empty(),
+                "{name} invariants failed:\n{}",
+                v.iter().map(|x| x.line()).collect::<Vec<_>>().join("\n")
+            );
+            let junctions: Vec<_> = board.junctions().into_iter().map(|(_, p)| p).collect();
+            for net in &board.nets {
+                let Some(route) = &net.route else { continue };
+                for hop in &route.hops {
+                    assert!(
+                        !junctions.iter().any(|j| j.distance(hop.over) <= 1e-4),
+                        "{name} hop on {} at ({}, {}) sits on a junction",
+                        net.id,
+                        hop.over.x,
+                        hop.over.y
+                    );
+                }
+            }
+        }
+        let dimmer = dimmer_board();
+        let gpio2_hops = hops_on(&dimmer, "gpio2");
+        assert_eq!(
+            gpio2_hops.len(),
+            2,
+            "dimmer gpio2 should hop over VDD and GND, hops={gpio2_hops:?}"
+        );
+        assert!(hops_on(&dimmer, "vdd").is_empty());
+        // The GND symbol drop at x=222 crosses the VDD rail at y=152.
+        assert_eq!(
+            hops_on(&dimmer, "gnd").len(),
+            1,
+            "dimmer gnd hops={:?}",
+            hops_on(&dimmer, "gnd")
+        );
+        let button = button_board();
+        let gpio9_hops = hops_on(&button, "gpio9");
+        assert_eq!(
+            gpio9_hops.len(),
+            1,
+            "button gpio9 should hop over GND, hops={gpio9_hops:?}"
+        );
+        assert!(hops_on(&button, "gnd").is_empty());
+        assert!(hops_on(&blink_board(), "gnd").is_empty());
+        assert!(hops_on(&fade_board(), "vdd").is_empty());
+    }
+
+    #[test]
+    fn hop_arc_splits_a_vertical_wire() {
+        let hop = Hop {
+            over: Point::new(10.0, 20.0),
+            across_horizontal: true,
+        };
+        let pieces = poly_with_hops(&[Point::new(10.0, 0.0), Point::new(10.0, 40.0)], &[hop]);
+        assert!(
+            pieces.len() >= 3,
+            "expected approach, arc, depart, got {}",
+            pieces.len()
+        );
+        let arc = &pieces[1];
+        assert!(arc.len() >= 3);
+        // Vertical hop bulges east of the crossing.
+        assert!(arc.iter().any(|p| p.x > 10.0 + 1.0));
+        assert!(arc.iter().all(|p| p.x >= 10.0 - 1e-3));
     }
 }

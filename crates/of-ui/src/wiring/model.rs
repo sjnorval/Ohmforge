@@ -160,7 +160,10 @@ impl PinRef {
     }
 }
 
-/// A hop/bridge where two foreign nets cross at a point. Unused on the blink fixture.
+/// A hop/bridge where two foreign nets cross at a point.
+///
+/// The later-routed net hops. `across_horizontal` is true when the crossed
+/// wire is horizontal, so the hop is a vertical semicircle bulging east.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hop {
     pub over: Point,
