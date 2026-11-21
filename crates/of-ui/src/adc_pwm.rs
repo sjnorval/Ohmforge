@@ -2,7 +2,6 @@
 
 mod schematic;
 
-use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::OnceLock;
 
@@ -16,7 +15,7 @@ use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace;
+use crate::trace::{self, TraceBuf};
 
 pub(super) use schematic::show as show_schematic;
 
@@ -102,7 +101,7 @@ pub(crate) struct PwmSim {
     /// Kernel time at which the circuit was connected.
     origin: SimTime,
     /// Instantaneous LED current samples (t relative to `origin`, mA).
-    samples: VecDeque<(f64, f64)>,
+    samples: TraceBuf,
     supply: SupplySettings,
     supply_mode: SupplyMode,
     supply_status: SupplyStatus,
@@ -200,7 +199,7 @@ impl PwmSim {
             board,
             position,
             origin,
-            samples: VecDeque::new(),
+            samples: TraceBuf::default_scope(),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
             supply_status: SupplyStatus::default(),
@@ -235,14 +234,14 @@ impl PwmSim {
             }
             self.record_sample()?;
         }
-        self.trim();
         Ok(())
     }
 
     fn record_sample(&mut self) -> Result<(), Box<dyn Error>> {
         let t = self.time();
         let ma = self.instant_ma()?;
-        self.samples.push_back((t, ma));
+        self.samples.push(t, ma);
+        self.recycle_edges();
         let status = {
             let analog = self
                 .kernel
@@ -255,10 +254,9 @@ impl PwmSim {
         Ok(())
     }
 
-    fn trim(&mut self) {
-        let t = self.time();
-        while self.samples.len() > 1 && t - self.samples[0].0 > trace::TRACE_WINDOW {
-            self.samples.pop_front();
+    fn recycle_edges(&mut self) {
+        if let Some(cpu) = self.kernel.engine_as::<Esp32c3Engine>(self.cpu) {
+            cpu.recycle_consumed_edges();
         }
     }
 
@@ -338,7 +336,7 @@ impl PwmSim {
     }
 
     pub(super) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
-        let pts: Vec<_> = self.samples.iter().copied().collect();
+        let pts: Vec<_> = self.samples.to_vec();
         // Instantaneous LED current (mA); 0.5 mA counts as on.
         trace::pwm_duty_freq(&pts, self.time(), 0.5)
     }
@@ -402,15 +400,18 @@ impl PwmSim {
         meters::add_psu(&mut out, self.supply_status.amps);
         out
     }
+
+    #[cfg(test)]
+    pub(crate) fn perf_snapshot(&mut self) -> crate::stats::PerfSnapshot {
+        let time = self.time();
+        let samples = self.samples.len();
+        crate::stats::PerfSnapshot::from_kernel(&mut self.kernel, self.cpu, self.analog, time, samples)
+    }
 }
 
-fn average_window(samples: &VecDeque<(f64, f64)>, t: f64, window: f64) -> f64 {
+fn average_window(samples: &TraceBuf, t: f64, window: f64) -> f64 {
     let start = t - window;
-    let pts: Vec<(f64, f64)> = samples
-        .iter()
-        .copied()
-        .filter(|(tt, _)| *tt >= start && *tt <= t)
-        .collect();
+    let pts: Vec<(f64, f64)> = samples.iter().filter(|(tt, _)| *tt >= start && *tt <= t).collect();
     match pts.len() {
         0 => 0.0,
         1 => pts[0].1,

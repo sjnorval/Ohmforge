@@ -42,7 +42,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |
-| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Demo picker: LED blink, pot dimmer and LED fade (schematic, averaged LED, current trace, pot slider, serial monitor for UART0) |
+| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, bounded current-scope ring, pot slider, clickable SW1, configurable bench PSU, virtual V/A meters, serial monitor for UART0) |
 | `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui demo picker |
 | `of-web` | WASM entry point | Empty |
 | `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD) |
@@ -130,7 +130,7 @@ bash firmware/esp32c3-xip-blinky/build.sh
 cargo run -p of-cli -- --version
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv
-cargo run -p of-app --features gui      # desktop app: LED blink, pot dimmer and LED fade (click Play)
+cargo run -p of-app --features gui      # desktop app: blink, dimmer, fade and push-button (click Play)
 ```
 
 Run all of these before proposing a commit; they mirror `.github/workflows/ci.yml`. **Load the MSVC Build Tools environment first** (see section 9), otherwise linking fails.

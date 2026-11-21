@@ -193,6 +193,7 @@ impl AnalogEngine {
 
     /// Set a device's run-time parameter now (a discontinuity).
     pub fn set(&mut self, device: &str, param: &str, value: f64) -> Result<(), EngineApiError> {
+        let before = self.ckt.device(device).and_then(|d| d.get_param(param));
         let d = self
             .ckt
             .device_mut(device)
@@ -200,8 +201,16 @@ impl AnalogEngine {
         if !d.set_param(param, value) {
             return Err(EngineApiError::UnknownParam(device.to_owned(), param.to_owned()));
         }
-        self.changed = true;
+        let after = d.get_param(param);
+        if before != after {
+            self.changed = true;
+        }
         Ok(())
+    }
+
+    /// The last accepted analog step left a flat DC solution.
+    pub fn is_quiescent(&self) -> bool {
+        self.st.quiescent && !self.changed
     }
 
     /// Apply `changes` whenever an event with `code` arrives.
@@ -299,6 +308,11 @@ impl Engine for AnalogEngine {
             self.st.discontinuity(&self.ckt);
         }
         let target = limit.as_secs_f64();
+        if self.st.can_hold(&self.ckt, target) {
+            self.st.hold_to(target);
+            self.time = limit;
+            return Ok(limit);
+        }
         let active: Vec<(usize, Crossing)> = self
             .watches
             .iter()
@@ -339,5 +353,97 @@ impl Engine for AnalogEngine {
             self.set(&c.device, &c.param, c.value).map_err(|e| self.error(e))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use of_core::{Kernel, SimTime};
+
+    use super::{AnalogEngine, EngineConfig};
+    use crate::analysis::Options;
+    use crate::circuit::{Circuit, GROUND};
+    use crate::devices::{Capacitor, PinDriver, Resistor, SourceValue, VoltageSource};
+
+    fn dc_divider() -> AnalogEngine {
+        let mut ckt = Circuit::new();
+        let n1 = ckt.node("out");
+        ckt.add(VoltageSource::new("v1", n1, GROUND, SourceValue::dc(1.0)))
+            .unwrap();
+        ckt.add(Resistor::new("r1", n1, GROUND, 1_000.0)).unwrap();
+        AnalogEngine::new(
+            "analog",
+            ckt,
+            Options::default(),
+            EngineConfig {
+                max_step: 5e-6,
+                record: false,
+                ..EngineConfig::default()
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn set_same_value_is_not_a_discontinuity() {
+        let mut k = Kernel::new(SimTime::from_us(50));
+        let id = k.add_engine(Box::new(dc_divider()));
+        k.run_until(SimTime::from_us(100)).unwrap();
+        let before = k.engine_as::<AnalogEngine>(id).unwrap().stats().accepted;
+        k.engine_as::<AnalogEngine>(id).unwrap().set("v1", "dc", 1.0).unwrap();
+        k.run_until(SimTime::from_us(200)).unwrap();
+        let eng = k.engine_as::<AnalogEngine>(id).unwrap();
+        let after = eng.stats().accepted;
+        let v = eng.value("v(out)").unwrap();
+        assert_eq!(after, before, "no-op set caused {} extra analog steps", after - before);
+        assert!((v - 1.0).abs() < 1e-9, "{v}");
+    }
+
+    #[test]
+    fn quiescent_dc_network_holds_across_tiny_slices() {
+        let mut k = Kernel::new(SimTime::from_ns(50));
+        let id = k.add_engine(Box::new(dc_divider()));
+        k.run_until(SimTime::from_us(100)).unwrap();
+        let eng = k.engine_as::<AnalogEngine>(id).unwrap();
+        let accepted = eng.stats().accepted;
+        let v = eng.value("v(out)").unwrap();
+        assert!((v - 1.0).abs() < 1e-9, "{v}");
+        assert!(
+            accepted <= 2,
+            "expected a DC hold, took {accepted} analog steps in 100 µs"
+        );
+        assert!(eng.is_quiescent());
+    }
+
+    #[test]
+    fn charging_capacitor_is_not_held() {
+        let mut ckt = Circuit::new();
+        let out = ckt.node("out");
+        // tau = 50 Ω × 1 µF = 50 µs, so 20 µs is mid-charge and 400 µs is settled.
+        ckt.add(PinDriver::new("drv", out, GROUND, 0.0, 50.0)).unwrap();
+        ckt.add(Capacitor::new("c1", out, GROUND, 1e-6, None)).unwrap();
+        let mut eng = AnalogEngine::new(
+            "analog",
+            ckt,
+            Options::default(),
+            EngineConfig {
+                max_step: 5e-6,
+                record: false,
+                ..EngineConfig::default()
+            },
+        )
+        .unwrap();
+        eng.set("drv", "v", 1.0).unwrap();
+        let mut k = Kernel::new(SimTime::from_us(50));
+        let id = k.add_engine(Box::new(eng));
+        k.run_until(SimTime::from_us(20)).unwrap();
+        let mid = k.engine_as::<AnalogEngine>(id).unwrap().value("v(out)").unwrap();
+        assert!(mid > 0.1 && mid < 0.95, "cap should still be charging, got {mid} V");
+        k.run_until(SimTime::from_us(400)).unwrap();
+        let eng = k.engine_as::<AnalogEngine>(id).unwrap();
+        let end = eng.value("v(out)").unwrap();
+        let accepted = eng.stats().accepted;
+        assert!((end - 1.0).abs() < 1e-3, "cap should have settled, got {end} V");
+        assert!(accepted > 5, "charging cap was skipped ({accepted} steps)");
     }
 }

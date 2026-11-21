@@ -154,6 +154,9 @@ pub(crate) struct Stepper {
     bp: f64,
     horizon: f64,
     pub stats: TranStats,
+    /// Last accepted step left the solution flat enough that the engine can
+    /// jump time without re-solving until a parameter or breakpoint changes.
+    pub quiescent: bool,
 }
 
 impl std::fmt::Debug for Point {
@@ -221,6 +224,8 @@ impl Stepper {
             bp: horizon,
             horizon,
             stats: TranStats::default(),
+            // The operating point is a DC solution.
+            quiescent: true,
         };
         st.bp = st.next_bp(ckt);
         Ok(st)
@@ -248,6 +253,37 @@ impl Stepper {
         self.order = 1;
         self.h = (0.1 * self.h).max(10.0 * self.h_min);
         self.bp = self.next_bp(ckt);
+        self.quiescent = false;
+    }
+
+    /// The solution is flat and nothing is due before `target`, so the engine
+    /// may jump time without taking Newton steps.
+    pub fn can_hold(&self, ckt: &Circuit, target: f64) -> bool {
+        self.quiescent
+            && self.next_bp(ckt) > target - self.h_min
+            && !ckt.devices().any(|d| d.is_changing(self.t, &self.tran))
+    }
+
+    /// Advance time to `target` keeping the current solution (a DC hold).
+    pub fn hold_to(&mut self, target: f64) {
+        if target <= self.t {
+            return;
+        }
+        self.t = target;
+        if let Some(last) = self.hist.back_mut()
+            && (target - last.t) < self.h_min
+        {
+            last.t = target;
+        } else {
+            self.hist.push_back(Point {
+                t: self.t,
+                x: self.x.clone(),
+                q: self.states.now.clone(),
+            });
+            while self.hist.len() > 4 {
+                self.hist.pop_front();
+            }
+        }
     }
 
     /// Take one accepted step, never beyond `target` (which must be after
@@ -361,10 +397,19 @@ impl Stepper {
             }
 
             // Accept.
+            let quiet = fired.is_none() && !hit && {
+                let dt = (t_new - t).max(self.h_min);
+                let mut max_dx: f64 = 0.0;
+                for (a, b) in self.x.iter().zip(self.x_new.iter()) {
+                    max_dx = max_dx.max((b - a).abs());
+                }
+                max_dx / dt * self.max_step <= opts.vntol
+            };
             self.t = t_new;
             self.states.rotate();
             self.x.copy_from_slice(&self.x_new);
             self.stats.accepted += 1;
+            self.quiescent = quiet;
             self.h_prev = h;
             let mut h_next = (2.0 * h).min(h_lte);
             let end = if hit {

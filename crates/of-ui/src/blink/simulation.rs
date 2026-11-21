@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::error::Error;
 
 use of_analog::{AnalogEngine, EngineConfig, Options};
@@ -11,7 +10,7 @@ use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte};
 use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace::{self, SAMPLE_STEP, TRACE_WINDOW};
+use crate::trace::{self, SAMPLE_STEP, TraceBuf};
 
 #[cfg(test)]
 pub(crate) const LED_ON_MA: f64 = 1.0;
@@ -32,7 +31,7 @@ pub(crate) struct Blink {
     kernel: Kernel,
     cpu: EngineId,
     analog: EngineId,
-    samples: VecDeque<(f64, f64)>,
+    samples: TraceBuf,
     supply: SupplySettings,
     supply_mode: SupplyMode,
     supply_status: SupplyStatus,
@@ -92,7 +91,7 @@ impl Blink {
             kernel,
             cpu,
             analog: analog_id,
-            samples: VecDeque::new(),
+            samples: TraceBuf::default_scope(),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
             supply_status: SupplyStatus::default(),
@@ -115,14 +114,14 @@ impl Blink {
             }
             self.record_sample()?;
         }
-        self.trim();
         Ok(())
     }
 
     fn record_sample(&mut self) -> Result<(), Box<dyn Error>> {
         let t = self.time();
         let ma = self.instant_ma()?;
-        self.samples.push_back((t, ma));
+        self.samples.push(t, ma);
+        self.recycle_edges();
         let status = {
             let analog = self
                 .kernel
@@ -133,13 +132,6 @@ impl Blink {
         self.supply_mode = status.mode;
         self.supply_status = status;
         Ok(())
-    }
-
-    fn trim(&mut self) {
-        let t = self.time();
-        while self.samples.len() > 1 && t - self.samples[0].0 > TRACE_WINDOW {
-            self.samples.pop_front();
-        }
     }
 
     pub(crate) fn time(&self) -> f64 {
@@ -206,6 +198,12 @@ impl Blink {
             .push_uart_rx(bytes);
     }
 
+    fn recycle_edges(&mut self) {
+        if let Some(cpu) = self.kernel.engine_as::<Esp32c3Engine>(self.cpu) {
+            cpu.recycle_consumed_edges();
+        }
+    }
+
     fn analog(&mut self) -> Result<&AnalogEngine, Box<dyn Error>> {
         self.kernel
             .engine_as::<AnalogEngine>(self.analog)
@@ -226,16 +224,15 @@ impl Blink {
 
     /// Time-averaged LED current over the last 2 ms, for display only.
     pub(crate) fn average_ma(&self) -> f64 {
-        let pts: Vec<_> = self.samples.iter().copied().collect();
-        trace::average_window(&pts, self.time(), trace::LED_AVG_WINDOW)
+        trace::average_window(&self.samples.to_vec(), self.time(), trace::LED_AVG_WINDOW)
     }
 
     pub(crate) fn trace(&self) -> Vec<(f64, f64)> {
-        self.samples.iter().copied().collect()
+        self.samples.to_vec()
     }
 
     pub(crate) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
-        let pts: Vec<_> = self.samples.iter().copied().collect();
+        let pts: Vec<_> = self.samples.to_vec();
         trace::pwm_duty_freq(&pts, self.time(), 0.5)
     }
 
@@ -251,6 +248,13 @@ impl Blink {
         meters::add_led_series(&mut out, "R1", "D1", "gpio8", "led_a", R_SERIES);
         meters::add_psu(&mut out, self.supply_status.amps);
         out
+    }
+
+    #[cfg(test)]
+    pub(crate) fn perf_snapshot(&mut self) -> crate::stats::PerfSnapshot {
+        let time = self.time();
+        let samples = self.samples.len();
+        crate::stats::PerfSnapshot::from_kernel(&mut self.kernel, self.cpu, self.analog, time, samples)
     }
 }
 

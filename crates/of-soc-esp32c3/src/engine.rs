@@ -279,6 +279,16 @@ impl Esp32c3Engine {
         self.max_lead = lead.map(|l| SimTime(l.0.max(1)));
     }
 
+    /// Drop pin-edge records the engine has already forwarded, so a long
+    /// live run does not accumulate an unbounded log.
+    pub fn recycle_consumed_edges(&mut self) {
+        if self.sent == 0 {
+            return;
+        }
+        self.soc.drain_pin_edges(self.sent);
+        self.sent = 0;
+    }
+
     /// Let a lazily sleeping hart idle up to `t` (at most its claim).
     fn idle_to(&mut self, t: SimTime) {
         if let Some(claim) = self.idle_claim.take() {

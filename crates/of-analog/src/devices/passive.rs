@@ -58,6 +58,9 @@ impl Device for Resistor {
             false
         }
     }
+    fn get_param(&self, name: &str) -> Option<f64> {
+        if name == "r" { Some(self.ohms) } else { None }
+    }
 }
 
 /// Linear capacitor with optional initial voltage (used with `uic`).

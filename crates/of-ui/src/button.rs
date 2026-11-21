@@ -2,7 +2,6 @@
 
 mod schematic;
 
-use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::OnceLock;
 
@@ -16,7 +15,7 @@ use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace;
+use crate::trace::{self, TraceBuf};
 
 pub(super) use schematic::show as show_schematic;
 
@@ -96,7 +95,7 @@ pub(crate) struct ButtonSim {
     board: BuiltBoard,
     closed: bool,
     origin: SimTime,
-    samples: VecDeque<(f64, f64)>,
+    samples: TraceBuf,
     supply: SupplySettings,
     supply_mode: SupplyMode,
     supply_status: SupplyStatus,
@@ -188,7 +187,7 @@ impl ButtonSim {
             board,
             closed: false,
             origin,
-            samples: VecDeque::new(),
+            samples: TraceBuf::default_scope(),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
             supply_status: SupplyStatus::default(),
@@ -224,14 +223,14 @@ impl ButtonSim {
             }
             self.record_sample()?;
         }
-        self.trim();
         Ok(())
     }
 
     fn record_sample(&mut self) -> Result<(), Box<dyn Error>> {
         let t = self.time();
         let ma = self.instant_ma()?;
-        self.samples.push_back((t, ma));
+        self.samples.push(t, ma);
+        self.recycle_edges();
         let status = {
             let analog = self
                 .kernel
@@ -244,10 +243,9 @@ impl ButtonSim {
         Ok(())
     }
 
-    fn trim(&mut self) {
-        let t = self.time();
-        while self.samples.len() > 1 && t - self.samples[0].0 > trace::TRACE_WINDOW {
-            self.samples.pop_front();
+    fn recycle_edges(&mut self) {
+        if let Some(cpu) = self.kernel.engine_as::<Esp32c3Engine>(self.cpu) {
+            cpu.recycle_consumed_edges();
         }
     }
 
@@ -280,7 +278,7 @@ impl ButtonSim {
     }
 
     pub(super) fn trace(&self) -> Vec<(f64, f64)> {
-        self.samples.iter().copied().collect()
+        self.samples.to_vec()
     }
 
     pub(super) fn set_closed(&mut self, closed: bool) -> Result<(), Box<dyn Error>> {
@@ -367,10 +365,22 @@ impl ButtonSim {
         meters::add_psu(&mut out, self.supply_status.amps);
         out
     }
+
+    #[cfg(test)]
+    pub(crate) fn trace_capacity(&self) -> usize {
+        self.samples.capacity()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn perf_snapshot(&mut self) -> crate::stats::PerfSnapshot {
+        let time = self.time();
+        let samples = self.samples.len();
+        crate::stats::PerfSnapshot::from_kernel(&mut self.kernel, self.cpu, self.analog, time, samples)
+    }
 }
 
-fn average_window(samples: &VecDeque<(f64, f64)>, t: f64, window: f64) -> f64 {
-    let pts: Vec<_> = samples.iter().copied().collect();
+fn average_window(samples: &TraceBuf, t: f64, window: f64) -> f64 {
+    let pts: Vec<_> = samples.to_vec();
     crate::trace::average_window(&pts, t, window)
 }
 
