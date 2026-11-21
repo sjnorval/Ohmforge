@@ -2,14 +2,18 @@
 
 mod schematic;
 
+use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::OnceLock;
 
 use of_analog::{AnalogEngine, Edge, EngineConfig, Options};
 use of_components::analog::{Board, BuiltBoard, Library, Placement, build};
+use of_components::bounce::{BounceSettings, bounce_script};
 use of_core::{EngineId, Kernel, SimTime, Stop};
 use of_parts::parse_part;
-use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, initial_input_level, input_watches};
+use of_soc_esp32c3::{
+    Esp32c3, Esp32c3Engine, PinLink, UartByte, VIH_FRACTION, VIL_FRACTION, initial_input_level, input_code,
+};
 
 use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
@@ -93,7 +97,13 @@ pub(crate) struct ButtonSim {
     cpu: EngineId,
     analog: EngineId,
     board: BuiltBoard,
+    /// Intended (held) state from the UI, after bounce has been requested.
     closed: bool,
+    /// Actual SW1 contact, which may still be bouncing.
+    contact: bool,
+    bounce: BounceSettings,
+    pending_bounce: VecDeque<(SimTime, bool)>,
+    next_sample: SimTime,
     origin: SimTime,
     samples: TraceBuf,
     supply: SupplySettings,
@@ -151,10 +161,22 @@ impl ButtonSim {
         hook_pin(&mut analog, GPIO_BTN);
         hook_pin(&mut analog, GPIO_LED);
         let vdd_w = supply.volts.max(0.1);
-        for w in input_watches(GPIO_BTN, vdd_w) {
-            let edge = if w.rising { Edge::Rising } else { Edge::Falling };
-            analog.watch(BTN_NODE, w.volts, edge, 0, w.code)?;
-        }
+        analog.watch_relative(
+            BTN_NODE,
+            "v(vdd)",
+            VIH_FRACTION,
+            Edge::Rising,
+            0,
+            input_code(GPIO_BTN, true),
+        )?;
+        analog.watch_relative(
+            BTN_NODE,
+            "v(vdd)",
+            VIL_FRACTION,
+            Edge::Falling,
+            0,
+            input_code(GPIO_BTN, false),
+        )?;
         let v0 = analog.value(BTN_NODE).ok_or("no GPIO9 voltage in the solution")?;
 
         let origin = soc.hart.local_time();
@@ -186,6 +208,10 @@ impl ButtonSim {
             analog: analog_id,
             board,
             closed: false,
+            contact: false,
+            bounce: BounceSettings::default(),
+            pending_bounce: VecDeque::new(),
+            next_sample: origin,
             origin,
             samples: TraceBuf::default_scope(),
             supply,
@@ -193,6 +219,10 @@ impl ButtonSim {
             supply_status: SupplyStatus::default(),
         };
         sim.record_sample()?;
+        sim.next_sample = sim
+            .kernel
+            .now()
+            .saturating_add(SimTime::from_secs_f64(trace::SAMPLE_STEP));
         Ok(sim)
     }
 
@@ -212,17 +242,55 @@ impl ButtonSim {
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = self.origin.saturating_add(SimTime::from_secs_f64(seconds.max(0.0)));
         while self.kernel.now() < until {
-            let next = self
-                .kernel
-                .now()
-                .saturating_add(SimTime::from_secs_f64(trace::SAMPLE_STEP))
-                .min(until);
-            let stop = self.kernel.run_until(next)?;
-            if !matches!(stop, Stop::Reached(_)) {
-                return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+            self.apply_due_bounce()?;
+            let now = self.kernel.now();
+            if now >= until {
+                break;
             }
-            self.record_sample()?;
+            let mut next = self.next_sample.min(until);
+            if let Some(&(t, _)) = self.pending_bounce.front()
+                && t < next
+            {
+                next = t;
+            }
+            if next > now {
+                let stop = self.kernel.run_until(next)?;
+                if !matches!(stop, Stop::Reached(_)) {
+                    return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+                }
+            }
+            self.apply_due_bounce()?;
+            if self.kernel.now() >= self.next_sample {
+                self.record_sample()?;
+                let step = SimTime::from_secs_f64(trace::SAMPLE_STEP);
+                while self.next_sample <= self.kernel.now() {
+                    self.next_sample = self.next_sample.saturating_add(step);
+                }
+            }
         }
+        Ok(())
+    }
+
+    fn apply_due_bounce(&mut self) -> Result<(), Box<dyn Error>> {
+        let now = self.kernel.now();
+        while self.pending_bounce.front().is_some_and(|(t, _)| *t <= now) {
+            let (_, closed) = self.pending_bounce.pop_front().expect("front");
+            self.apply_contact(closed)?;
+        }
+        Ok(())
+    }
+
+    fn apply_contact(&mut self, closed: bool) -> Result<(), Box<dyn Error>> {
+        self.contact = closed;
+        let param = self
+            .board
+            .switch_param(SWITCH_REF, closed)
+            .ok_or("SW1 is not a switch")?;
+        let analog = self
+            .kernel
+            .engine_as::<AnalogEngine>(self.analog)
+            .ok_or("analog solver is not registered")?;
+        analog.set(&param.device, &param.param, param.value)?;
         Ok(())
     }
 
@@ -282,19 +350,29 @@ impl ButtonSim {
     }
 
     pub(super) fn set_closed(&mut self, closed: bool) -> Result<(), Box<dyn Error>> {
+        if self.closed == closed && self.pending_bounce.is_empty() {
+            return Ok(());
+        }
         self.closed = closed;
-        let param = self
-            .board
-            .switch_param(SWITCH_REF, closed)
-            .ok_or("SW1 is not a switch")?;
-        {
-            let analog = self
-                .kernel
-                .engine_as::<AnalogEngine>(self.analog)
-                .ok_or("analog solver is not registered")?;
-            analog.set(&param.device, &param.param, param.value)?;
+        self.pending_bounce.clear();
+        let now = self.kernel.now();
+        for (dt, c) in bounce_script(closed, self.bounce) {
+            let at = now.saturating_add(SimTime::from_secs_f64(dt));
+            if dt <= 0.0 {
+                self.apply_contact(c)?;
+            } else {
+                self.pending_bounce.push_back((at, c));
+            }
         }
         self.advance(self.time() + 1e-6)
+    }
+
+    pub(super) fn bounce(&self) -> BounceSettings {
+        self.bounce
+    }
+
+    pub(super) fn set_bounce(&mut self, bounce: BounceSettings) {
+        self.bounce = bounce;
     }
 
     #[allow(dead_code)]
@@ -348,7 +426,6 @@ impl ButtonSim {
 
     pub(crate) fn circuit_readout(&mut self) -> CircuitReadout {
         let sw = self.board.switches.get(SWITCH_REF).cloned();
-        let closed = self.closed;
         let mut out = CircuitReadout::new();
         {
             let analog = match self.analog() {
@@ -359,7 +436,7 @@ impl ButtonSim {
         }
         meters::add_led_series(&mut out, "R2", "D1", "gpio8", "led_a", R_SERIES);
         if let Some(s) = sw {
-            let ohms = if closed { s.ron } else { s.roff };
+            let ohms = if self.contact { s.ron } else { s.roff };
             meters::add_resistor(&mut out, "SW1", "gpio9", "0", ohms);
         }
         meters::add_psu(&mut out, self.supply_status.amps);
@@ -380,7 +457,7 @@ impl ButtonSim {
 }
 
 fn average_window(samples: &TraceBuf, t: f64, window: f64) -> f64 {
-    let pts: Vec<_> = samples.to_vec();
+    let pts = samples.to_vec();
     crate::trace::average_window(&pts, t, window)
 }
 
@@ -428,7 +505,27 @@ mod tests {
             sim.average_ma()
         );
         assert!(v_down < 0.1, "closed button should pull GPIO9 down: {v_down}");
-        let text = String::from_utf8_lossy(&sim.uart_bytes().iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned();
+        let text = uart_text(&mut sim);
+        // Default bounce is the canonical press train (5 edges), ending low.
+        assert!(text.contains("poll: 5 low"), "{text:?}");
+    }
+
+    #[test]
+    fn bounce_can_be_turned_off() {
+        let Some(mut sim) = maybe(ButtonKind::Poll) else { return };
+        sim.set_bounce(BounceSettings {
+            enabled: false,
+            seed: 0,
+        });
+        sim.advance(200e-6).unwrap();
+        sim.set_closed(true).unwrap();
+        sim.advance(sim.time() + 2e-3).unwrap();
+        let text = uart_text(&mut sim);
         assert!(text.contains("poll: 1 low"), "{text:?}");
+        assert!(!text.contains("poll: 5 low"), "{text:?}");
+    }
+
+    fn uart_text(sim: &mut ButtonSim) -> String {
+        String::from_utf8_lossy(&sim.uart_bytes().iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned()
     }
 }
