@@ -333,6 +333,10 @@ impl Esp32c3 {
         }
         self.hart.set_interrupt_lines(self.bus.cpu_lines());
         for byte in self.bus.take_uart_tx() {
+            if self.uart.len() >= Self::UART_LOG_CAPACITY {
+                let extra = self.uart.len() + 1 - Self::UART_LOG_CAPACITY;
+                self.uart.drain(..extra);
+            }
             self.uart.push(UartByte { at: now, byte });
         }
         if self.bus.take_pins_dirty() {
@@ -429,7 +433,10 @@ impl Esp32c3 {
         std::mem::take(&mut self.edges)
     }
 
-    /// Everything written to UART0 so far.
+    /// Maximum TX bytes retained in the SoC UART log (oldest are dropped).
+    pub const UART_LOG_CAPACITY: usize = 64 * 1024;
+
+    /// Everything written to UART0 so far (at most [`Self::UART_LOG_CAPACITY`] bytes).
     pub fn uart_bytes(&self) -> &[UartByte] {
         &self.uart
     }
@@ -439,8 +446,12 @@ impl Esp32c3 {
         String::from_utf8_lossy(&self.uart.iter().map(|b| b.byte).collect::<Vec<_>>()).into_owned()
     }
 
-    /// Push host (or test) bytes into UART0's RX FIFO instantly.
+    /// Queue host (or test) bytes for UART0 RX. They land in the FIFO one
+    /// frame at a time at the configured baud rate, starting from the hart's
+    /// current time.
     pub fn push_uart_rx(&mut self, bytes: &[u8]) {
-        self.bus.uart0.push_rx(bytes);
+        self.bus
+            .uart0
+            .queue_rx(self.hart.local_time(), bytes, crate::uart::APB_HZ);
     }
 }

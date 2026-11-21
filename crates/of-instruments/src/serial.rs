@@ -188,6 +188,157 @@ impl SerialMonitor {
             self.entries.remove(0);
         }
     }
+
+    /// Formats the log as hex dump lines of up to `width` bytes (default 16).
+    ///
+    /// Each line is `(time of first byte, direction, starting offset in that
+    /// direction's stream, the bytes)`. A direction change starts a new line.
+    pub fn hex_lines(&self, width: usize) -> Vec<(SimTime, Dir, usize, Vec<u8>)> {
+        let width = width.max(1);
+        let mut out = Vec::new();
+        let mut dir: Option<Dir> = None;
+        let mut off = 0usize;
+        let mut start = SimTime::ZERO;
+        let mut buf: Vec<u8> = Vec::new();
+        let flush = |out: &mut Vec<_>, start: SimTime, dir: Dir, off: usize, buf: &mut Vec<u8>| {
+            if !buf.is_empty() {
+                out.push((start, dir, off, std::mem::take(buf)));
+            }
+        };
+        for e in &self.entries {
+            if dir != Some(e.dir) {
+                if let Some(d) = dir {
+                    flush(&mut out, start, d, off, &mut buf);
+                    off = 0;
+                }
+                dir = Some(e.dir);
+            }
+            let d = e.dir;
+            for &b in &e.data {
+                if buf.is_empty() {
+                    start = e.at;
+                }
+                buf.push(b);
+                if buf.len() == width {
+                    let at_off = off;
+                    flush(&mut out, start, d, at_off, &mut buf);
+                    off = at_off + width;
+                }
+            }
+        }
+        if let Some(d) = dir {
+            flush(&mut out, start, d, off, &mut buf);
+        }
+        out
+    }
+
+    /// Formats [`Self::hex_lines`] as `offset  hex bytes  ascii` rows.
+    pub fn format_hex_line(offset: usize, bytes: &[u8], width: usize) -> String {
+        let width = width.max(1);
+        let mut hex = String::new();
+        let mut ascii = String::new();
+        for (i, &b) in bytes.iter().enumerate() {
+            if i > 0 {
+                hex.push(' ');
+            }
+            hex.push_str(&format!("{b:02x}"));
+            ascii.push(if (0x20..0x7f).contains(&b) { b as char } else { '.' });
+        }
+        let hex_width = width * 3 - 1;
+        format!("{offset:04x}  {hex:<hex_width$}  {ascii}")
+    }
+
+    /// Parses a find query: a sequence of hex bytes (`de ad be`, `deadbee`,
+    /// `de:ad:be`) becomes those bytes; anything else is the UTF-8 text,
+    /// matched case-insensitively when all-ASCII.
+    pub fn parse_find_query(query: &str) -> Vec<u8> {
+        let t = query.trim();
+        if t.is_empty() {
+            return Vec::new();
+        }
+        let compact: String = t
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != ':' && *c != '-')
+            .collect();
+        if compact.len() >= 2 && compact.len().is_multiple_of(2) && compact.chars().all(|c| c.is_ascii_hexdigit()) {
+            return (0..compact.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&compact[i..i + 2], 16).unwrap_or(0))
+                .collect();
+        }
+        t.as_bytes().to_vec()
+    }
+
+    /// Byte-accurate hits of `query` in the concatenated log, spanning entries.
+    /// Text queries that are not hex-byte strings match ASCII case-insensitively.
+    pub fn find(&self, query: &str) -> Vec<FindHit> {
+        let needle = Self::parse_find_query(query);
+        if needle.is_empty() {
+            return Vec::new();
+        }
+        let case_fold = query.trim().chars().any(|c| c.is_ascii_alphabetic()) && !Self::is_hex_byte_query(query);
+        let mut hay: Vec<(SimTime, Dir, u8)> = Vec::new();
+        for e in &self.entries {
+            for &b in &e.data {
+                hay.push((e.at, e.dir, b));
+            }
+        }
+        let mut hits = Vec::new();
+        let n = needle.len();
+        if hay.len() < n {
+            return hits;
+        }
+        for i in 0..=hay.len() - n {
+            let mut ok = true;
+            for (j, &nb) in needle.iter().enumerate() {
+                let hb = hay[i + j].2;
+                let eq = if case_fold {
+                    hb.eq_ignore_ascii_case(&nb)
+                } else {
+                    hb == nb
+                };
+                if !eq {
+                    ok = false;
+                    break;
+                }
+                if hay[i + j].1 != hay[i].1 {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                hits.push(FindHit {
+                    at: hay[i].0,
+                    dir: hay[i].1,
+                    index: i,
+                    len: n,
+                });
+            }
+        }
+        hits
+    }
+
+    fn is_hex_byte_query(query: &str) -> bool {
+        let compact: String = query
+            .trim()
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != ':' && *c != '-')
+            .collect();
+        compact.len() >= 2 && compact.len().is_multiple_of(2) && compact.chars().all(|c| c.is_ascii_hexdigit())
+    }
+}
+
+/// One match from [`SerialMonitor::find`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FindHit {
+    /// Simulation time of the first matching byte.
+    pub at: SimTime,
+    /// Stream the match was found in.
+    pub dir: Dir,
+    /// Byte index in the concatenated log (both directions, in order).
+    pub index: usize,
+    /// Length of the needle in bytes.
+    pub len: usize,
 }
 
 #[cfg(test)]
@@ -285,5 +436,39 @@ mod tests {
         m.clear();
         assert_eq!(m.delivery(), Delivery::Attached);
         assert!(m.pending_tx().is_empty());
+    }
+
+    #[test]
+    fn hex_lines_break_on_width_and_direction() {
+        let mut m = SerialMonitor::new();
+        m.push_rx(SimTime::from_us(1), b"ABCDEFGH");
+        m.try_send(SimTime::from_us(2), b"xy").unwrap();
+        let lines = m.hex_lines(4);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].2, 0);
+        assert_eq!(lines[0].3, b"ABCD");
+        assert_eq!(lines[1].2, 4);
+        assert_eq!(lines[1].3, b"EFGH");
+        assert_eq!(lines[2].1, Dir::HostToDevice);
+        assert_eq!(lines[2].3, b"xy");
+        let row = SerialMonitor::format_hex_line(0, b"AB", 16);
+        assert!(row.starts_with("0000  41 42"), "{row}");
+        assert!(row.contains("AB"), "{row}");
+    }
+
+    #[test]
+    fn find_text_and_hex_queries() {
+        let mut m = SerialMonitor::new();
+        m.push_rx(SimTime::from_us(5), b"ohmforge\n");
+        let hits = m.find("FORGE");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].at, SimTime::from_us(5));
+        assert_eq!(hits[0].len, 5);
+        let hex = m.find("0a");
+        assert_eq!(hex.len(), 1);
+        assert_eq!(hex[0].len, 1);
+        assert!(m.find("zzzz").is_empty());
+        assert!(m.find("").is_empty());
+        assert_eq!(SerialMonitor::parse_find_query("de ad"), vec![0xde, 0xad]);
     }
 }

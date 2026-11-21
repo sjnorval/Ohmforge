@@ -73,7 +73,7 @@ pub use engine::{
     Esp32c3Engine, InputWatch, PinLink, adc_request_code, adc_value_code, all_pin_codes, decode_adc_request,
     decode_input_code, decode_pin_code, initial_input_level, input_code, input_watches, pin_code,
 };
-pub use gpio::{GPIO_COUNT, PinOut};
+pub use gpio::{GPIO_COUNT, PinOut, VIH_FRACTION, VIL_FRACTION};
 pub use intmatrix::IntMatrix;
 pub use soc::{CHIP_ID, Esp32c3, LoadError, PinEdge, UartByte};
 pub use watchdog::{ResetKind, ResetSource, WatchdogReset};

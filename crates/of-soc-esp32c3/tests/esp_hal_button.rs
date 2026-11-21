@@ -19,9 +19,12 @@ use std::sync::OnceLock;
 use of_analog::devices::{Capacitor, PinDriver, SourceValue, VoltageSource};
 use of_analog::{AnalogEngine, Edge, EngineConfig, Options, SetParam};
 use of_components::analog::{Board, Library, Placement, build};
+use of_components::bounce::{PRESS_BOUNCE_US, RELEASE_BOUNCE_US};
 use of_core::{Kernel, SimTime, Stop};
 use of_soc_esp32c3::bootloader::espflash_flash_image;
-use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, all_pin_codes, initial_input_level, input_watches};
+use of_soc_esp32c3::{
+    Esp32c3, Esp32c3Engine, PinLink, VIH_FRACTION, VIL_FRACTION, all_pin_codes, initial_input_level, input_code,
+};
 
 const PARTITIONS: &[u8] = include_bytes!("../../../firmware/esp32c3-esp-hal-button/partitions.bin");
 const POLL: &[u8] = include_bytes!("../../../firmware/esp32c3-esp-hal-button/button_poll.bin");
@@ -153,10 +156,26 @@ fn run(soc: Esp32c3, setup: Setup, script: &[(SimTime, bool)], span: SimTime) ->
     }
     analog.on_code(PRESS, vec![press]);
     analog.on_code(RELEASE, vec![release]);
-    for w in input_watches(BUTTON, VDD) {
-        let edge = if w.rising { Edge::Rising } else { Edge::Falling };
-        analog.watch("v(gpio9)", w.volts, edge, 0, w.code).unwrap();
-    }
+    analog
+        .watch_relative(
+            "v(gpio9)",
+            "v(vdd)",
+            VIH_FRACTION,
+            Edge::Rising,
+            0,
+            input_code(BUTTON, true),
+        )
+        .unwrap();
+    analog
+        .watch_relative(
+            "v(gpio9)",
+            "v(vdd)",
+            VIL_FRACTION,
+            Edge::Falling,
+            0,
+            input_code(BUTTON, false),
+        )
+        .unwrap();
     let v0 = analog.value("v(gpio9)").unwrap();
 
     let start = soc.hart.local_time();
@@ -239,20 +258,22 @@ fn interrupt_wakes_the_sleeping_core_at_the_press() {
     assert!(r.uart.ends_with("irq: 1\nirq: 2\n"), "{:?}", r.uart);
 }
 
-/// Close-open chatter on the press and on the release.
-const BOUNCY: [(f64, bool); 8] = [
-    (200.0, true),
-    (230.0, false),
-    (260.0, true),
-    (300.0, false),
-    (350.0, true),
-    (800.0, false),
-    (820.0, true),
-    (850.0, false),
-];
-
+/// The firmware bounce tests use the canonical [`PRESS_BOUNCE_US`] /
+/// [`RELEASE_BOUNCE_US`] trains, starting the press at 200 µs and the
+/// release at 800 µs.
 fn bouncy() -> Vec<(SimTime, bool)> {
-    BOUNCY.iter().map(|&(t, c)| (us(t), c)).collect()
+    let mut script = Vec::new();
+    for &(t, c) in PRESS_BOUNCE_US {
+        script.push((us(200.0 + t), c));
+    }
+    for &(t, c) in RELEASE_BOUNCE_US {
+        script.push((us(800.0 + t), c));
+    }
+    script
+}
+
+fn bouncy_levels() -> Vec<bool> {
+    bouncy().into_iter().map(|(_, c)| c).collect()
 }
 
 #[test]
@@ -261,7 +282,7 @@ fn polling_sees_every_bounce() {
     let r = run(soc, BARE, &bouncy(), us(1_000.0));
     // No debouncing: the LED repeats every contact change.
     let levels: Vec<_> = r.led.iter().map(|e| e.1).collect();
-    assert_eq!(levels, BOUNCY.map(|(_, closed)| closed), "{:?}", r.led);
+    assert_eq!(levels, bouncy_levels(), "{:?}", r.led);
     for (&(at, _), &(t, _)) in bouncy().iter().zip(&r.led) {
         assert!(t.0 - at.0 < 2_000_000, "{at:?} -> {t:?}");
     }

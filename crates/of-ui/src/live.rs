@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use of_components::BounceSettings;
 use of_soc_esp32c3::UartByte;
 
 use crate::adc_pwm::{PwmKind, PwmSim};
@@ -23,6 +24,7 @@ pub(crate) enum Command {
     Reset,
     SetPot(f64),
     SetButton(bool),
+    SetBounce(BounceSettings),
     SetSupply(SupplySettings),
     PushUart(Vec<u8>),
     Shutdown,
@@ -42,6 +44,7 @@ pub(crate) struct Snapshot {
     pub lagging: bool,
     pub pot: f64,
     pub button: bool,
+    pub bounce: BounceSettings,
     pub led_ma: f64,
     pub led_instant: f64,
     pub wiper_v: Option<f64>,
@@ -72,6 +75,7 @@ impl Snapshot {
             lagging: false,
             pot: 0.5,
             button: false,
+            bounce: BounceSettings::default(),
             led_ma: 0.0,
             led_instant: 0.0,
             wiper_v: None,
@@ -141,6 +145,7 @@ struct Worker {
     speed: f64,
     pot: f64,
     button: bool,
+    bounce: BounceSettings,
     supply: SupplySettings,
     rt_factor: f64,
     lagging: bool,
@@ -179,6 +184,9 @@ impl Worker {
                 .map_err(|e| e.to_string()),
         };
         self.sim = result;
+        if let Ok(Running::Button(s)) = &mut self.sim {
+            s.set_bounce(self.bounce);
+        }
         self.booting = false;
         self.playing = self.sim.is_ok();
         self.generation = self.generation.saturating_add(1);
@@ -220,6 +228,12 @@ impl Worker {
         Ok(())
     }
 
+    fn apply_bounce(&mut self) {
+        if let Ok(Running::Button(s)) = &mut self.sim {
+            s.set_bounce(self.bounce);
+        }
+    }
+
     fn apply_supply(&mut self) -> Result<(), String> {
         match &mut self.sim {
             Ok(Running::Blink(s)) => s.set_supply(self.supply).map_err(|e| e.to_string()),
@@ -247,6 +261,7 @@ impl Worker {
         snap.lagging = self.lagging;
         snap.pot = self.pot;
         snap.button = self.button;
+        snap.bounce = self.bounce;
         snap.supply = self.supply;
         snap.generation = self.generation;
         match &mut self.sim {
@@ -290,6 +305,7 @@ impl Worker {
                 snap.supply_status = s.supply_status();
                 snap.led_trace = s.trace();
                 snap.button = s.closed();
+                snap.bounce = s.bounce();
                 snap.button_v = s.button_volts().ok();
                 snap.uart = s.uart_bytes().to_vec();
                 snap.uart_baud = s.uart_baud();
@@ -308,6 +324,7 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
         speed: 1.0,
         pot: 0.5,
         button: false,
+        bounce: BounceSettings::default(),
         supply: SupplySettings::default(),
         rt_factor: 0.0,
         lagging: false,
@@ -424,6 +441,11 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
                 w.sim = Err(e);
                 w.playing = false;
             }
+            publish(shared, w.snapshot());
+        }
+        Command::SetBounce(b) => {
+            w.bounce = b;
+            w.apply_bounce();
             publish(shared, w.snapshot());
         }
         Command::SetSupply(s) => {

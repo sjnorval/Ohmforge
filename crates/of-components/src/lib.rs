@@ -2,6 +2,9 @@
 //! placed parts to the analog solver ([`analog`]).
 
 pub mod analog;
+pub mod bounce;
+
+pub use bounce::BounceSettings;
 
 pub use of_parts::Corner;
 

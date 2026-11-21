@@ -14,6 +14,8 @@ use crate::kind::DemoKind;
 use crate::live::{Command, LiveSession, Snapshot};
 use crate::meters::{MeterKind, PlacedMeter, ProbeRef, place_ammeter, read_meter};
 use crate::meters_ui::{MeterView, SchematicHit};
+use of_components::BounceSettings;
+
 use crate::supply::{self, SupplySettings};
 use crate::theme::{LED_RED, TEAL, panel};
 use crate::trace;
@@ -30,6 +32,7 @@ pub struct OhmforgeDemo {
     uart_cursor: usize,
     pot: f64,
     button: bool,
+    bounce: BounceSettings,
     speed: f64,
     supply: SupplySettings,
     generation: u64,
@@ -59,6 +62,7 @@ impl OhmforgeDemo {
             uart_cursor: 0,
             pot: 0.5,
             button: false,
+            bounce: BounceSettings::default(),
             speed: 1.0,
             supply: SupplySettings::default(),
             generation: 0,
@@ -198,6 +202,7 @@ impl OhmforgeDemo {
         if snap.kind == self.kind && !snap.booting {
             // Keep local widgets in sync after a Reset/rebuild.
             self.supply = snap.supply;
+            self.bounce = snap.bounce;
         }
         self.sync_serial(&snap);
 
@@ -336,6 +341,26 @@ impl OhmforgeDemo {
             });
             if let Some(warn) = supply::rating_warning(&status) {
                 ui.colored_label(LED_RED, warn);
+            }
+
+            if self.kind.has_button() {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let mut on = self.bounce.enabled;
+                    if ui.checkbox(&mut on, "SW1 bounce").changed() {
+                        self.bounce.enabled = on;
+                        self.session.send(Command::SetBounce(self.bounce));
+                    }
+                    let mut seed = self.bounce.seed;
+                    if ui
+                        .add(egui::DragValue::new(&mut seed).prefix("seed ").speed(1.0))
+                        .changed()
+                    {
+                        self.bounce.seed = seed;
+                        self.session.send(Command::SetBounce(self.bounce));
+                    }
+                    ui.weak("seed 0 is the firmware bounce test train");
+                });
             }
 
             ui.add_space(8.0);
