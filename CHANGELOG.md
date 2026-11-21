@@ -10,6 +10,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Added
 
+- **Startup animation setting:** the desktop app has a "Show startup animation" checkbox, saved to a small config file in the platform config directory (`%APPDATA%\Ohmforge\config.toml` on Windows, `~/Library/Application Support/Ohmforge/config.toml` on macOS, and `$XDG_CONFIG_HOME/ohmforge/config.toml` or `~/.config/ohmforge/config.toml` on Linux). `--no-splash` and `OF_NO_SPLASH` still skip the load screen for that run without changing the saved preference.
 - **Schematic hop glyphs and rip-up:** perpendicular foreign-net crossings (already used on the dimmer and button boards) draw a small semicircle on the later-routed wire. Junction dots stay only at degree-3 joins. If a net cannot be placed, or crossings exceed a threshold, the router rips conflicting nets and retries in the same deterministic order.
 - **EILIi load screen:** the desktop app plays the packed 24 fps JPEG frames of [`EILIi.mp4`](assets/startup/EILIi.mp4) (`assets/startup/splash.ofsp`) for about 6 s while the demo starts, then fades 300 ms into the main window. Click, Esc or any key skips; `--no-splash` or `OF_NO_SPLASH` disables it. Audio is dropped and no video decoder is linked. Frames are regenerated with `scripts/gen-startup-frames.sh` (or `.ps1`) using ffmpeg as an external tool.
 - **Schematic router on the pot and button demos:** the dimmer, fade and push-button boards use the same orthogonal grid router as blink. Symbols, colours, stroke widths and labels are unchanged; only net paths that would have violated the routing invariants (body clearance, foreign-net colinear overlap) were allowed to move. Perpendicular crossings of a rail, which the hand-authored dimmer and button drawings already used, are now allowed at a high cost; hop glyphs remain a later PR.
@@ -55,6 +56,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Fixed
 
+- **Dimmer scope header:** the live "wiper … V" readout no longer overlaps the time/div control at 980×720 or narrower. The wiper value sits on a second row under the caption; the blink and push-button scope headers were checked for the same clash.
 - Clippy warnings in `of-analog` (#2), and riscv-tests CI runs with a stale cache (#7).
 
 [Unreleased]: https://github.com/sjnorval/Ohmforge/commits/main

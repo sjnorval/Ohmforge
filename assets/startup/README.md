@@ -16,7 +16,7 @@ These replace an earlier broken `startup-still.jpg` placeholder (103 bytes) that
 
 The desktop app (`cargo run -p of-app --features gui`) plays `splash.ofsp` in real time over about 6 s while the demo session starts, then fades into the main window in 300 ms. Click, Escape, or any other key skips to the last frame and, once the demo is ready, starts the fade. If initialisation is still running, the last frame is held until it finishes.
 
-Disable the splash with `--no-splash` or by setting `OF_NO_SPLASH` to `1`, `true`, `yes`, or `on`. There is no persistent settings toggle yet.
+A "Show startup animation" checkbox on the main window is saved to the platform config file (`%APPDATA%\Ohmforge\config.toml` on Windows, `~/Library/Application Support/Ohmforge/config.toml` on macOS, and `$XDG_CONFIG_HOME/ohmforge/config.toml` or `~/.config/ohmforge/config.toml` on Linux) and is honoured on the next launch. `--no-splash` or `OF_NO_SPLASH` set to `1`, `true`, `yes`, or `on` still skips the splash for that run without changing the saved preference.
 
 The app does not ship a video decoder (no ffmpeg or GStreamer is linked). Audio is dropped. The WASM crate (`of-web`) is still a placeholder and is not given these frames; the wasm CI target set is unchanged.
 

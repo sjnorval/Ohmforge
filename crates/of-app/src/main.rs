@@ -2,11 +2,15 @@
 //!
 //! Without the `gui` feature this prints a notice; build with
 //! `cargo run -p of-app --features gui` for the egui window.
-//! Pass `--no-splash` or set `OF_NO_SPLASH=1` to skip the load screen.
+//! Pass `--no-splash` or set `OF_NO_SPLASH=1` to skip the load screen for this run.
+//! A persistent "Show startup animation" setting also controls the load screen;
+//! the flags override it without changing the saved preference.
 
 #[cfg(feature = "gui")]
 fn main() -> eframe::Result<()> {
-    let no_splash = std::env::args().any(|arg| arg == "--no-splash") || of_ui::splash::blocked_by_env();
+    let cli_no_splash = std::env::args().any(|arg| arg == "--no-splash");
+    let prefs = of_ui::prefs::load();
+    let no_splash = !of_ui::prefs::should_play_splash(cli_no_splash, prefs.show_startup_animation);
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_inner_size([980.0, 720.0])
         .with_min_inner_size([560.0, 620.0]);

@@ -142,7 +142,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
   - [x] Virtual voltmeter/ammeter on the live schematic (click two probe points; non-disturbing ammeter on a unique branch) on `main` (#27)
   - [~] Serial monitor: lean console (TX log, Send delivers to UART0 RX at the configured baud when attached; hex view and find in this PR). d5 shell hosting still to do (d7)
 - [ ] BOM CSV export with MPNs, supplier links and ZAR cost, plus build checklist
-- [ ] EILIi startup animation as the desktop app load screen (packed 24 fps JPEG frames, no video decoder; click/Esc/any key skips; `--no-splash` / `OF_NO_SPLASH` disables). On branch `p2-splash`, uncommitted.
+- [x] EILIi startup animation as the desktop app load screen (packed 24 fps JPEG frames, no video decoder; click/Esc/any key skips; persistent "Show startup animation" setting; `--no-splash` / `OF_NO_SPLASH` still override).
 - [ ] Desktop builds on Windows, macOS, Linux; deterministic headless runs in CI
 
 ## P3 Breadth (weeks 28 to 42), exit 0.2: common hobby projects run

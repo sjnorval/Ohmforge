@@ -46,6 +46,7 @@ pub struct OhmforgeDemo {
     time_div: f64,
     scope_hold: bool,
     held_scope: Option<HeldScope>,
+    show_startup_animation: bool,
 }
 
 struct HeldScope {
@@ -84,6 +85,7 @@ impl OhmforgeDemo {
             time_div: DEFAULT_TIME_DIV,
             scope_hold: false,
             held_scope: None,
+            show_startup_animation: crate::prefs::load().show_startup_animation,
         }
     }
 
@@ -221,7 +223,7 @@ impl OhmforgeDemo {
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.heading(RichText::new(self.kind.title()).size(30.0).strong());
                 ui.add_space(12.0);
                 let mut kind = self.kind;
@@ -240,6 +242,17 @@ impl OhmforgeDemo {
                     });
                 if kind != self.kind {
                     self.select(kind);
+                }
+                ui.add_space(12.0);
+                let mut show = self.show_startup_animation;
+                if ui.checkbox(&mut show, "Show startup animation").changed() {
+                    self.show_startup_animation = show;
+                    let prefs = crate::prefs::AppPrefs {
+                        show_startup_animation: show,
+                    };
+                    if let Err(err) = crate::prefs::save(&prefs) {
+                        eprintln!("Ohmforge preferences: {err}");
+                    }
                 }
             });
             ui.add_space(4.0);
@@ -471,6 +484,72 @@ fn schematic(
     }
 }
 
+/// Widget rectangles from [`scope_header`], used to test that labels do not overlap.
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(test), allow(dead_code))]
+struct ScopeHeaderRects {
+    title: Rect,
+    wiper: Option<Rect>,
+    time_div: Rect,
+    hold: Rect,
+}
+
+/// Scope caption, optional secondary readout, and time/div controls.
+///
+/// Controls are allocated from the right first so the title can only use the
+/// leftover width (truncated if needed). Extra readouts such as the pot wiper
+/// sit on a second row so they cannot collide with `time/div` when the panel
+/// is one column of a 980x720 window.
+fn scope_header(
+    ui: &mut Ui,
+    title: &str,
+    wiper_v: Option<f64>,
+    time_div: &mut f64,
+    hold: &mut bool,
+) -> ScopeHeaderRects {
+    let mut title_rect = Rect::NOTHING;
+    let mut time_div_rect = Rect::NOTHING;
+    let mut hold_rect = Rect::NOTHING;
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let hold_resp = ui
+                .selectable_label(*hold, "Hold")
+                .on_hover_text("Freeze the scope view for inspection");
+            if hold_resp.clicked() {
+                *hold = !*hold;
+            }
+            hold_rect = hold_resp.rect;
+            let mut div = *time_div;
+            ComboBox::from_id_salt("scope_time_div")
+                .selected_text(trace::format_time_div(div))
+                .show_ui(ui, |ui| {
+                    for &d in TIME_DIVS {
+                        ui.selectable_value(&mut div, d, trace::format_time_div(d));
+                    }
+                });
+            *time_div = div;
+            time_div_rect = ui.weak("time/div").rect;
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.set_clip_rect(ui.max_rect());
+                title_rect = ui.add(egui::Label::new(RichText::new(title).strong()).truncate()).rect;
+            });
+        });
+    });
+    let wiper = wiper_v.map(|v| {
+        let mut rect = Rect::NOTHING;
+        ui.horizontal(|ui| {
+            rect = ui.monospace(format!("wiper {v:.2} V")).rect;
+        });
+        rect
+    });
+    ScopeHeaderRects {
+        title: title_rect,
+        wiper,
+        time_div: time_div_rect,
+        hold: hold_rect,
+    }
+}
+
 fn apply_time_div(session: &LiveSession, time_div: &mut f64, new: f64) {
     let new = trace::snap_time_div(new);
     if (new - *time_div).abs() < 1e-15 {
@@ -520,51 +599,28 @@ fn scope_panel(
     session: &LiveSession,
 ) {
     panel().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let title = if matches!(kind, DemoKind::Dimmer | DemoKind::Fade) {
-                "LED current (averaged)"
+        let title = if matches!(kind, DemoKind::Dimmer | DemoKind::Fade) {
+            "LED current (averaged)"
+        } else {
+            "LED current"
+        };
+        let mut hold = *scope_hold;
+        let mut div = *time_div;
+        scope_header(ui, title, snap.wiper_v, &mut div, &mut hold);
+        if hold != *scope_hold {
+            *scope_hold = hold;
+            if hold {
+                *held_scope = Some(HeldScope {
+                    time: snap.time,
+                    trace: snap.led_trace.clone(),
+                });
             } else {
-                "LED current"
-            };
-            ui.label(RichText::new(title).strong());
-            if let Some(v) = snap.wiper_v {
-                ui.separator();
-                ui.monospace(format!("wiper {v:.2} V"));
+                *held_scope = None;
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut hold = *scope_hold;
-                if ui
-                    .selectable_label(hold, "Hold")
-                    .on_hover_text("Freeze the scope view for inspection")
-                    .clicked()
-                {
-                    hold = !hold;
-                }
-                if hold != *scope_hold {
-                    *scope_hold = hold;
-                    if hold {
-                        *held_scope = Some(HeldScope {
-                            time: snap.time,
-                            trace: snap.led_trace.clone(),
-                        });
-                    } else {
-                        *held_scope = None;
-                    }
-                }
-                let mut div = *time_div;
-                ComboBox::from_id_salt("scope_time_div")
-                    .selected_text(trace::format_time_div(div))
-                    .show_ui(ui, |ui| {
-                        for &d in TIME_DIVS {
-                            ui.selectable_value(&mut div, d, trace::format_time_div(d));
-                        }
-                    });
-                if (div - *time_div).abs() > 1e-15 {
-                    apply_time_div(session, time_div, div);
-                }
-                ui.weak("time/div");
-            });
-        });
+        }
+        if (div - *time_div).abs() > 1e-15 {
+            apply_time_div(session, time_div, div);
+        }
 
         let held = held_scope.as_ref();
         let time = held.map(|h| h.time).unwrap_or(snap.time);
@@ -702,4 +758,69 @@ fn scope(ui: &mut Ui, cfg: ScopePlot, trace: impl Iterator<Item = (f64, f64)>) -
         });
     }
     zoom
+}
+
+#[cfg(test)]
+mod header_layout_tests {
+    use super::*;
+    use egui::Context;
+
+    fn layout(width: f32, title: &str, wiper: Option<f64>) -> ScopeHeaderRects {
+        let ctx = Context::default();
+        let mut rects = ScopeHeaderRects {
+            title: Rect::NOTHING,
+            wiper: None,
+            time_div: Rect::NOTHING,
+            hold: Rect::NOTHING,
+        };
+        let mut time_div = DEFAULT_TIME_DIV;
+        let mut hold = false;
+        let raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 280.0))),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                crate::theme::panel().show(ui, |ui| {
+                    rects = scope_header(ui, title, wiper, &mut time_div, &mut hold);
+                });
+            });
+        });
+        output.textures_delta.clear();
+        rects
+    }
+
+    fn assert_no_overlap(a: Rect, b: Rect, label: &str) {
+        let hit = a.intersect(b);
+        assert!(
+            hit.width() <= 0.5 || hit.height() <= 0.5,
+            "{label}: {a:?} overlaps {b:?} (intersection {hit:?})"
+        );
+    }
+
+    #[test]
+    fn dimmer_header_does_not_overlap_at_two_column_980() {
+        // 980-wide window, 20 px margins, two instrument columns, plus panel padding.
+        for width in [470.0, 420.0, 360.0, 300.0] {
+            let r = layout(width, "LED current (averaged)", Some(1.65));
+            assert!(r.time_div.is_positive(), "time/div missing at width {width}");
+            let wiper = r.wiper.expect("wiper missing at width {width}");
+            assert!(wiper.is_positive(), "wiper empty at width {width}");
+            assert_no_overlap(wiper, r.time_div, &format!("wiper vs time/div at {width}"));
+            assert_no_overlap(r.title, r.time_div, &format!("title vs time/div at {width}"));
+            assert_no_overlap(r.title, r.hold, &format!("title vs Hold at {width}"));
+            assert_no_overlap(wiper, r.hold, &format!("wiper vs Hold at {width}"));
+        }
+    }
+
+    #[test]
+    fn blink_and_button_headers_do_not_overlap() {
+        for title in ["LED current", "LED current (averaged)"] {
+            let r = layout(470.0, title, None);
+            assert!(r.time_div.is_positive(), "{title}: time/div missing");
+            assert!(r.wiper.is_none());
+            assert_no_overlap(r.title, r.time_div, title);
+            assert_no_overlap(r.title, r.hold, title);
+        }
+    }
 }

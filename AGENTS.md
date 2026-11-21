@@ -44,7 +44,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |
-| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, bench PSU whose Vset is tracked by GPIO V_IH/V_IL, virtual V/A meters, serial monitor for UART0 with hex view and find). Load-screen splash (packed EILIi frames, skip and `--no-splash` / `OF_NO_SPLASH`) |
+| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, bench PSU whose Vset is tracked by GPIO V_IH/V_IL, virtual V/A meters, serial monitor for UART0 with hex view and find). Load-screen splash (packed EILIi frames, skip, persistent Show startup animation setting, and `--no-splash` / `OF_NO_SPLASH`) |
 | `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui demo picker, with the EILIi load screen |
 | `of-web` | WASM entry point | Empty |
 | `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD) |
@@ -132,7 +132,7 @@ bash firmware/esp32c3-xip-blinky/build.sh
 cargo run -p of-cli -- --version
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv
-cargo run -p of-app --features gui      # desktop app: EILIi load screen, then blink, dimmer, fade and push-button (click Play)
+cargo run -p of-app --features gui      # desktop app: EILIi load screen (or skip via setting / --no-splash), then blink, dimmer, fade and push-button (click Play)
 ```
 
 Run all of these before proposing a commit; they mirror `.github/workflows/ci.yml`. **Load the MSVC Build Tools environment first** (see section 9), otherwise linking fails.
