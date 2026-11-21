@@ -19,7 +19,7 @@ use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace::{self, TraceBuf};
+use crate::trace::{self, SampleClock, TraceBuf};
 
 pub(super) use schematic::show as show_schematic;
 
@@ -106,6 +106,7 @@ pub(crate) struct ButtonSim {
     next_sample: SimTime,
     origin: SimTime,
     samples: TraceBuf,
+    sample_clock: SampleClock,
     supply: SupplySettings,
     supply_mode: SupplyMode,
     supply_status: SupplyStatus,
@@ -214,15 +215,16 @@ impl ButtonSim {
             next_sample: origin,
             origin,
             samples: TraceBuf::default_scope(),
+            sample_clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
             supply_status: SupplyStatus::default(),
         };
         sim.record_sample()?;
+        sim.sample_clock.take(sim.time());
         sim.next_sample = sim
-            .kernel
-            .now()
-            .saturating_add(SimTime::from_secs_f64(trace::SAMPLE_STEP));
+            .origin
+            .saturating_add(SimTime::from_secs_f64(sim.sample_clock.next().max(0.0)));
         Ok(sim)
     }
 
@@ -237,6 +239,14 @@ impl ButtonSim {
 
     pub(super) fn time(&self) -> f64 {
         SimTime(self.kernel.now().0.saturating_sub(self.origin.0)).as_secs_f64()
+    }
+
+    pub(crate) fn set_scope_window(&mut self, visible: f64) {
+        self.samples.set_visible_window(visible);
+        self.sample_clock.set_step(self.samples.sample_step(), self.time());
+        self.next_sample = self
+            .origin
+            .saturating_add(SimTime::from_secs_f64(self.sample_clock.next().max(0.0)));
     }
 
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
@@ -261,10 +271,15 @@ impl ButtonSim {
             }
             self.apply_due_bounce()?;
             if self.kernel.now() >= self.next_sample {
-                self.record_sample()?;
-                let step = SimTime::from_secs_f64(trace::SAMPLE_STEP);
-                while self.next_sample <= self.kernel.now() {
-                    self.next_sample = self.next_sample.saturating_add(step);
+                if self.sample_clock.take(self.time()) {
+                    self.record_sample()?;
+                }
+                self.next_sample = self
+                    .origin
+                    .saturating_add(SimTime::from_secs_f64(self.sample_clock.next().max(0.0)));
+                if self.next_sample <= self.kernel.now() {
+                    // Keep the bounce/run loop moving if the grid did not advance.
+                    self.next_sample = self.kernel.now().saturating_add(SimTime::from_ns(1));
                 }
             }
         }
@@ -391,7 +406,8 @@ impl ButtonSim {
             .engine_as::<AnalogEngine>(self.analog)
             .ok_or("analog solver is not registered")?;
         self.supply_mode = supply::apply(analog, &self.supply, self.supply_mode)?;
-        self.advance(self.time() + 1e-6)
+        self.advance(self.time() + 1e-6)?;
+        self.record_sample()
     }
 
     pub(super) fn uart_bytes(&mut self) -> &[UartByte] {

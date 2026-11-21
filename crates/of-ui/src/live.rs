@@ -14,7 +14,7 @@ use crate::button::{ButtonKind, ButtonSim};
 use crate::kind::DemoKind;
 use crate::meters::CircuitReadout;
 use crate::supply::{SupplySettings, SupplyStatus};
-use crate::trace;
+use crate::trace::{self, DEFAULT_VISIBLE_WINDOW};
 
 /// Commands the UI sends to the worker.
 pub(crate) enum Command {
@@ -27,6 +27,8 @@ pub(crate) enum Command {
     SetBounce(BounceSettings),
     SetSupply(SupplySettings),
     PushUart(Vec<u8>),
+    /// Visible scope span in seconds (time/div x divisions).
+    SetScopeWindow(f64),
     Shutdown,
 }
 
@@ -151,6 +153,7 @@ struct Worker {
     lagging: bool,
     booting: bool,
     generation: u64,
+    scope_visible: f64,
 }
 
 impl Worker {
@@ -189,6 +192,7 @@ impl Worker {
         }
         self.booting = false;
         self.playing = self.sim.is_ok();
+        self.apply_scope_window();
         self.generation = self.generation.saturating_add(1);
         self.rt_factor = 0.0;
         self.lagging = false;
@@ -248,6 +252,16 @@ impl Worker {
             Ok(Running::Blink(s)) => s.push_uart_rx(bytes),
             Ok(Running::Pwm(s)) => s.push_uart_rx(bytes),
             Ok(Running::Button(s)) => s.push_uart_rx(bytes),
+            Err(_) => {}
+        }
+    }
+
+    fn apply_scope_window(&mut self) {
+        let visible = self.scope_visible.max(trace::visible_window(trace::TIME_DIVS[0]));
+        match &mut self.sim {
+            Ok(Running::Blink(s)) => s.set_scope_window(visible),
+            Ok(Running::Pwm(s)) => s.set_scope_window(visible),
+            Ok(Running::Button(s)) => s.set_scope_window(visible),
             Err(_) => {}
         }
     }
@@ -330,6 +344,7 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
         lagging: false,
         booting: true,
         generation: 0,
+        scope_visible: DEFAULT_VISIBLE_WINDOW,
     };
     // Publish a booting/starting snapshot, then build the first sim.
     publish(&shared, w.snapshot());
@@ -426,6 +441,10 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
             publish(shared, w.snapshot());
         }
         Command::SetSpeed(s) => w.speed = s.clamp(0.001, 10.0),
+        Command::SetScopeWindow(visible) => {
+            w.scope_visible = visible.max(trace::visible_window(trace::TIME_DIVS[0]));
+            w.apply_scope_window();
+        }
         Command::SetPlaying(p) => w.playing = p && w.sim.is_ok(),
         Command::SetPot(p) => {
             w.pot = p.clamp(0.0, 1.0);
@@ -466,10 +485,6 @@ fn publish(shared: &Arc<Mutex<Snapshot>>, snap: Snapshot) {
         *g = snap;
     }
 }
-
-// Keep the compiler aware that TRACE_WINDOW is part of the live pacing story.
-#[allow(dead_code)]
-const _WINDOW: f64 = trace::TRACE_WINDOW;
 
 #[cfg(test)]
 mod tests {
@@ -570,6 +585,7 @@ mod tests {
                 let n = sim.trace().len();
                 assert!(n <= cap, "trace grew past the ring capacity: {n} > {cap}");
                 assert!(n > 8, "trace should still hold a window of samples, got {n}");
+                assert!(cap <= crate::trace::MAX_TRACE_SAMPLES);
             }
             Err(e) if skip_without_rom(&e) => {}
             Err(e) => panic!("{e}"),
