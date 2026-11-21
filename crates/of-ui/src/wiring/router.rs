@@ -6,8 +6,11 @@
 //! heavy bend penalty, and a surcharge on tracks that stab a symbol so nets
 //! prefer the streets between bodies. Existing same-net trunk cells are
 //! sources at cost zero (trunk reuse). Foreign-net colinear overlap is
-//! blocked. Perpendicular crossings are allowed at a high cost so the pot
-//! and button boards can pass a rail; hop glyphs and rip-up come later.
+//! blocked. Perpendicular crossings are allowed at a high cost; the later-
+//! routed net receives a hop glyph at each crossing. If a net cannot be
+//! placed, conflicting already-routed nets are ripped up and the board is
+//! retried in the same deterministic order, up to a fixed number of passes.
+//! Rip-up also fires when the crossing count exceeds a threshold.
 //!
 //! Nets are routed in a fixed order: power, then ground, then remaining nets
 //! by descending fanout and a stable name order. The same parts, pins, nets
@@ -21,7 +24,7 @@ use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 
 use crate::wiring::invariants::{colinear_overlap, hits_rect, segment_hits_body};
 use crate::wiring::model::{
-    CLEARANCE, Component, Direction, GRID, Net, NetKind, Pin, PinRef, Point, Rect, Route, Schematic,
+    CLEARANCE, Component, Direction, GRID, Hop, Net, NetKind, Pin, PinRef, Point, Rect, Route, Schematic,
 };
 
 /// Hundredths of a schematic unit, so pin coordinates that are already on a
@@ -43,6 +46,11 @@ const OFF_STREET: i64 = 2;
 /// path that must cross a rail is preferred to looping around the board,
 /// while blink-style routes that never need a crossing stay unchanged.
 const CROSS_PENALTY: i64 = 20 * GRID_Q as i64;
+/// Give up rip-up and reroute after this many full passes.
+const MAX_PASSES: usize = 8;
+/// If a complete routing still has more perpendicular crossings than this,
+/// rip the later-routed net involved in a crossing and try again.
+const CROSSING_RIP_THRESHOLD: usize = 8;
 
 fn q(v: f32) -> i32 {
     (v * Q as f32).round() as i32
@@ -264,28 +272,234 @@ fn align_down(v: i32, step: i32) -> i32 {
 ///
 /// Existing [`crate::wiring::model::Net::route`] caches are replaced. Pins
 /// with [`Pin::routed`] set to `false` receive a perpendicular stub only
-/// (labelled power or ground) and are not joined to the net trunk.
+/// (labelled power or ground) and are not joined to the net trunk. After a
+/// successful routing, hops are assigned on the later-routed net at every
+/// perpendicular foreign-net crossing.
 pub fn route(schematic: &mut Schematic) {
     for net in &mut schematic.nets {
         net.route = None;
     }
     let order = net_order(schematic);
-    let mut placed: Vec<Placed> = Vec::new();
-    for id in order {
-        if let Some(generated) = route_net(schematic, &id, &placed) {
-            placed.push(Placed {
-                id: id.clone(),
-                segments: polyline_segments(&generated.polylines),
-            });
-            if let Some(net) = schematic.nets.iter_mut().find(|n| n.id == id) {
-                net.route = Some(generated);
+    for _pass in 0..MAX_PASSES {
+        let mut placed = placed_from(schematic);
+        let mut failed: Vec<String> = Vec::new();
+        for id in &order {
+            if schematic.net(id).and_then(|n| n.route.as_ref()).is_some() {
+                continue;
+            }
+            if let Some(generated) = route_net(schematic, id, &placed, false) {
+                install(schematic, &mut placed, id, generated);
+            } else {
+                failed.push(id.clone());
             }
         }
+        if !failed.is_empty() {
+            let mut ripped = false;
+            // Rip blockers, then route the failed net immediately so a higher-
+            // priority net cannot reclaim the corridor on the next ordered pass.
+            for id in &failed {
+                let current = placed_from(schematic);
+                for blocker in conflicting_placed(schematic, id, &current) {
+                    if unroute(schematic, &blocker) {
+                        ripped = true;
+                    }
+                }
+                if schematic.net(id).and_then(|n| n.route.as_ref()).is_some() {
+                    continue;
+                }
+                let mut placed_now = placed_from(schematic);
+                if let Some(generated) = route_net(schematic, id, &placed_now, false) {
+                    install(schematic, &mut placed_now, id, generated);
+                }
+            }
+            if !ripped {
+                break;
+            }
+            continue;
+        }
+        let ncross = count_interior_crossings(schematic);
+        if ncross > CROSSING_RIP_THRESHOLD
+            && let Some(victim) = latest_crossing_net(schematic, &order)
+        {
+            unroute(schematic, &victim);
+            continue;
+        }
+        break;
+    }
+    // Place any net that was ripped on the last pass and had no retry left.
+    let mut placed = placed_from(schematic);
+    for id in &order {
+        if schematic.net(id).and_then(|n| n.route.as_ref()).is_some() {
+            continue;
+        }
+        if let Some(generated) = route_net(schematic, id, &placed, false) {
+            install(schematic, &mut placed, id, generated);
+        }
+    }
+    assign_hops(schematic, &order);
+}
+
+fn placed_from(schematic: &Schematic) -> Vec<Placed> {
+    let mut placed = Vec::new();
+    for net in &schematic.nets {
+        if let Some(route) = &net.route {
+            placed.push(Placed {
+                id: net.id.clone(),
+                segments: polyline_segments(&route.polylines),
+            });
+        }
+    }
+    placed
+}
+
+fn install(schematic: &mut Schematic, placed: &mut Vec<Placed>, id: &str, generated: Route) {
+    placed.push(Placed {
+        id: id.to_string(),
+        segments: polyline_segments(&generated.polylines),
+    });
+    if let Some(net) = schematic.nets.iter_mut().find(|n| n.id == id) {
+        net.route = Some(generated);
+    }
+}
+
+fn unroute(schematic: &mut Schematic, id: &str) -> bool {
+    if let Some(net) = schematic.nets.iter_mut().find(|n| n.id == id)
+        && net.route.is_some()
+    {
+        net.route = None;
+        return true;
+    }
+    false
+}
+
+/// Nets already placed whose segments colinearly overlap a "ghost" route of
+/// `net_id` that is allowed to overlap foreign wires. Those nets are the
+/// deterministic rip-up victims.
+fn conflicting_placed(schematic: &Schematic, net_id: &str, placed: &[Placed]) -> Vec<String> {
+    let Some(ghost) = route_net(schematic, net_id, placed, true) else {
+        return Vec::new();
+    };
+    let ghost_segs = polyline_segments(&ghost.polylines);
+    let mut ids = std::collections::BTreeSet::new();
+    for p in placed {
+        if p.id == net_id {
+            continue;
+        }
+        for &(ga, gb) in &ghost_segs {
+            for &(fa, fb) in &p.segments {
+                if colinear_overlap(ga, gb, fa, fb).is_some() {
+                    ids.insert(p.id.clone());
+                }
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
+fn count_interior_crossings(schematic: &Schematic) -> usize {
+    interior_crossings(schematic).len()
+}
+
+fn latest_crossing_net(schematic: &Schematic, order: &[String]) -> Option<String> {
+    let rank = |id: &str| order.iter().position(|x| x == id).unwrap_or(usize::MAX);
+    interior_crossings(schematic)
+        .into_iter()
+        .map(|c| {
+            if rank(&c.net_a) >= rank(&c.net_b) {
+                c.net_a
+            } else {
+                c.net_b
+            }
+        })
+        .max_by_key(|id| rank(id))
+}
+
+struct Crossing {
+    net_a: String,
+    net_b: String,
+    point: Point,
+    a_horizontal: bool,
+    b_horizontal: bool,
+}
+
+fn interior_crossings(schematic: &Schematic) -> Vec<Crossing> {
+    let mut out = Vec::new();
+    let mut nets: Vec<(&str, Vec<(Point, Point)>)> = Vec::new();
+    for net in &schematic.nets {
+        let Some(route) = &net.route else { continue };
+        nets.push((net.id.as_str(), polyline_segments(&route.polylines)));
+    }
+    for i in 0..nets.len() {
+        for j in (i + 1)..nets.len() {
+            let (id_a, segs_a) = &nets[i];
+            let (id_b, segs_b) = &nets[j];
+            for &(a0, a1) in segs_a {
+                for &(b0, b1) in segs_b {
+                    if let Some(p) = interior_cross_point(a0, a1, b0, b1) {
+                        out.push(Crossing {
+                            net_a: (*id_a).to_string(),
+                            net_b: (*id_b).to_string(),
+                            point: p,
+                            a_horizontal: (a0.y - a1.y).abs() <= 1e-4,
+                            b_horizontal: (b0.y - b1.y).abs() <= 1e-4,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| {
+        a.point
+            .y
+            .total_cmp(&b.point.y)
+            .then(a.point.x.total_cmp(&b.point.x))
+            .then(a.net_a.cmp(&b.net_a))
+            .then(a.net_b.cmp(&b.net_b))
+    });
+    out
+}
+
+fn interior_cross_point(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<Point> {
+    let p = ortho_intersection(a0, a1, b0, b1)?;
+    if crate::wiring::hops::on_open_segment(p, a0, a1) && crate::wiring::hops::on_open_segment(p, b0, b1) {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+fn assign_hops(schematic: &mut Schematic, order: &[String]) {
+    let rank = |id: &str| order.iter().position(|x| x == id).unwrap_or(usize::MAX);
+    let mut hops_by_net: HashMap<String, Vec<Hop>> = HashMap::new();
+    for c in interior_crossings(schematic) {
+        let later = if rank(&c.net_a) > rank(&c.net_b) {
+            c.net_a.clone()
+        } else if rank(&c.net_b) > rank(&c.net_a) {
+            c.net_b.clone()
+        } else if c.net_a <= c.net_b {
+            c.net_a.clone()
+        } else {
+            c.net_b.clone()
+        };
+        let later_horizontal = if later == c.net_a {
+            c.a_horizontal
+        } else {
+            c.b_horizontal
+        };
+        hops_by_net.entry(later).or_default().push(Hop {
+            over: c.point,
+            across_horizontal: !later_horizontal,
+        });
+    }
+    for net in &mut schematic.nets {
+        let Some(route) = &mut net.route else { continue };
+        let mut hops = hops_by_net.remove(&net.id).unwrap_or_default();
+        hops.sort_by(|a, b| a.over.y.total_cmp(&b.over.y).then(a.over.x.total_cmp(&b.over.x)));
+        route.hops = hops;
     }
 }
 
 struct Placed {
-    #[allow(dead_code)]
     id: String,
     segments: Vec<(Point, Point)>,
 }
@@ -338,7 +552,7 @@ fn find_pin<'a>(schematic: &'a Schematic, pin_ref: &PinRef) -> Option<(&'a Pin, 
     Some((pin, comp))
 }
 
-fn route_net(schematic: &Schematic, net_id: &str, placed: &[Placed]) -> Option<Route> {
+fn route_net(schematic: &Schematic, net_id: &str, placed: &[Placed], allow_colinear: bool) -> Option<Route> {
     let net = schematic.net(net_id)?;
     let terms = terminals_for(schematic, net);
     if terms.is_empty() {
@@ -371,7 +585,16 @@ fn route_net(schematic: &Schematic, net_id: &str, placed: &[Placed]) -> Option<R
         let (i, j) = farthest_pair(&terms, &routed);
         trunk.push(stubs[i]);
         let goal = stubs[j].1;
-        let path = astar(&grid, schematic, net_id, placed, &trunk, stubs[i].1, goal, &foreign)?;
+        let path = astar(
+            &grid,
+            schematic,
+            net_id,
+            &trunk,
+            stubs[i].1,
+            goal,
+            &foreign,
+            allow_colinear,
+        )?;
         append_path(&mut trunk, &path);
         trunk.push(stubs[j]);
 
@@ -390,11 +613,11 @@ fn route_net(schematic: &Schematic, net_id: &str, placed: &[Placed]) -> Option<R
                 &grid,
                 schematic,
                 net_id,
-                placed,
                 &trunk,
                 /* unused start, multi-source from trunk */ stubs[term_idx].1,
                 goal,
                 &foreign,
+                allow_colinear,
             )?;
             append_path(&mut trunk, &path);
             trunk.push(stubs[term_idx]);
@@ -539,11 +762,11 @@ fn astar(
     grid: &Grid,
     schematic: &Schematic,
     net_id: &str,
-    _placed: &[Placed],
     trunk: &[(Point, Point)],
-    _hint_start: Point,
+    hint_start: Point,
     goal: Point,
     foreign: &[(Point, Point)],
+    allow_colinear: bool,
 ) -> Option<Vec<Point>> {
     let goal_cell = pq(goal);
     if !grid.on_grid(goal_cell) {
@@ -557,7 +780,7 @@ fn astar(
         }
     }
     if sources.is_empty() {
-        sources.insert(pq(_hint_start));
+        sources.insert(pq(hint_start));
     }
 
     let mut open = BinaryHeap::new();
@@ -599,7 +822,7 @@ fn astar(
         for neigh in grid.neighbors(cell) {
             let edge_a = unp(cell);
             let edge_b = unp(neigh);
-            if edge_blocked(schematic, net_id, edge_a, edge_b, trunk, foreign) {
+            if edge_blocked(schematic, net_id, edge_a, edge_b, trunk, foreign, allow_colinear) {
                 continue;
             }
             let dir = Heading::between(cell, neigh);
@@ -703,6 +926,7 @@ fn edge_blocked(
     b: Point,
     _trunk: &[(Point, Point)],
     foreign: &[(Point, Point)],
+    allow_colinear: bool,
 ) -> bool {
     for comp in &schematic.components {
         // Pin stubs may sit on the uninflated outline (same rule as the
@@ -723,9 +947,11 @@ fn edge_blocked(
             return true;
         }
     }
-    for &(fa, fb) in foreign {
-        if colinear_overlap(a, b, fa, fb).is_some() {
-            return true;
+    if !allow_colinear {
+        for &(fa, fb) in foreign {
+            if colinear_overlap(a, b, fa, fb).is_some() {
+                return true;
+            }
         }
     }
     false

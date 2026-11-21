@@ -1,6 +1,6 @@
 # Schematic wire routing
 
-Status: proposed (design only; no implementation yet).
+Status: implemented through phase 4 in `crates/of-ui/src/wiring` (model, orthogonal router, demo ports, hops and rip-up). Later phases (45° mode, waypoints, re-edit) are still open.
 Date: 2026-11-21.
 Related: decision d1 ([`docs/UX-Research/decisions/schematic-canvas.md`](../UX-Research/decisions/schematic-canvas.md)), canvas interaction spec ([`docs/UX-Research/Screens/schematic-editor-canvas.md`](../UX-Research/Screens/schematic-editor-canvas.md)), roadmap P2 item “egui schematic editor (place, wire, probe)”.
 
@@ -114,7 +114,7 @@ This work sits under the still-open P2 item “egui schematic editor (place, wir
 1. **Grid size** — 4 vs 8 px in today’s demo coordinates, and how that later maps to the canvas spec’s configurable snap (the screen spec mentions a KiCad-like EMU). The first router PR should pick one demo-space pitch and record it.
 2. **Pin snapping** — leave pins at their hand-authored coordinates (stubs take up the off-grid remainder) or nudge symbols onto the grid in a dedicated, visually reviewed step.
 3. **Power and ground** — keep labelled stubs and implicit name-based connectivity (current demos and d1) as the default, and only draw a full rail when the net has no label or the user asks for one?
-4. **Hop style** — semicircle over the crossed wire, a small gap-and-jog, or (if we ever need it) a simple unmarked crossing with no dot. Default proposal: semicircle hop, only when avoidance failed.
+4. **Hop style** — decided: a small semicircle in the same stroke, on the later-routed net (power and ground first, then fanout, then name). A vertical hopping wire bulges east; a horizontal hopping wire bulges north. Junction dots are never drawn at a crossing.
 5. **Where the code lives** — `of-ui` module vs a later `of-schematic` crate. Start in `of-ui`; extract when P3 breadboard or KiCad export needs the types without pulling in egui.
 6. **Persisting routes** — recompute always (simpler, must stay deterministic) vs storing geometry once waypoints exist so a user’s jog does not vanish on the next open. Proposal: recompute until PR 6, then store waypoints (and the cache) with the project.
 7. **Live styling** — when §9 voltage colouring or current dots arrive, do they attach to the generated polylines only, leaving symbol strokes as they are? (Recommended: yes.)

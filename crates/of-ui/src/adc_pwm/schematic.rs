@@ -172,7 +172,9 @@ fn draw(
         for poly in &route.polylines {
             let is_minus_stub = poly.iter().any(|p| p.distance(minus) <= 1e-4);
             if !is_minus_stub {
-                paint_poly(poly, wire);
+                for piece in wiring::poly_with_hops(poly, &route.hops) {
+                    paint_poly(&piece, wire);
+                }
             }
         }
         for p in &route.junctions {
@@ -226,12 +228,16 @@ fn draw(
     );
     if let Some(route) = board.net("vdd").and_then(|n| n.route.as_ref()) {
         for poly in &route.polylines {
-            paint_poly(poly, Stroke::new(1.7, TEAL));
+            for piece in wiring::poly_with_hops(poly, &route.hops) {
+                paint_poly(&piece, Stroke::new(1.7, TEAL));
+            }
         }
     }
     if let Some(route) = board.net("gpio2").and_then(|n| n.route.as_ref()) {
         for poly in &route.polylines {
-            paint_poly(poly, Stroke::new(1.7, TEAL));
+            for piece in wiring::poly_with_hops(poly, &route.hops) {
+                paint_poly(&piece, Stroke::new(1.7, TEAL));
+            }
         }
     }
     if let Some(route) = gnd_route {
@@ -239,7 +245,9 @@ fn draw(
             if poly.iter().any(|p| p.distance(minus) <= 1e-4) {
                 // Dimmer: the minus pin is name-connected only (no visible stub).
                 if position.is_none() {
-                    paint_poly(poly, wire);
+                    for piece in wiring::poly_with_hops(poly, &route.hops) {
+                        paint_poly(&piece, wire);
+                    }
                 }
             }
         }
