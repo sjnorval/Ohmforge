@@ -14,7 +14,30 @@ use crate::button::{ButtonKind, ButtonSim};
 use crate::kind::DemoKind;
 use crate::meters::CircuitReadout;
 use crate::supply::{SupplySettings, SupplyStatus};
-use crate::trace;
+use crate::trace::{self, DEFAULT_VISIBLE_WINDOW};
+
+/// Slowest playback speed (simulation-seconds per wall-second).
+pub(crate) const MIN_SPEED: f64 = 1e-6;
+/// Fastest playback speed.
+pub(crate) const MAX_SPEED: f64 = 10.0;
+
+pub(crate) fn clamp_speed(s: f64) -> f64 {
+    s.clamp(MIN_SPEED, MAX_SPEED)
+}
+
+/// Book `sim_adv / speed` wall time against `anchor` and return a park of at
+/// most 16 ms, so very low speeds do not busy-spin and the worker can still
+/// take commands.
+fn park_after_slice(sim_adv: f64, speed: f64, now: Instant, anchor: &mut Instant) -> Option<Duration> {
+    let speed = speed.max(MIN_SPEED);
+    let secs = sim_adv / speed;
+    if secs.is_finite() && secs > 0.0 {
+        *anchor = anchor.checked_add(Duration::from_secs_f64(secs)).unwrap_or(*anchor);
+    }
+    anchor
+        .checked_duration_since(now)
+        .map(|d| d.min(Duration::from_millis(16)))
+}
 
 /// Commands the UI sends to the worker.
 pub(crate) enum Command {
@@ -27,6 +50,8 @@ pub(crate) enum Command {
     SetBounce(BounceSettings),
     SetSupply(SupplySettings),
     PushUart(Vec<u8>),
+    /// Visible scope span in seconds (time/div x divisions).
+    SetScopeWindow(f64),
     Shutdown,
 }
 
@@ -151,6 +176,7 @@ struct Worker {
     lagging: bool,
     booting: bool,
     generation: u64,
+    scope_visible: f64,
 }
 
 impl Worker {
@@ -189,6 +215,7 @@ impl Worker {
         }
         self.booting = false;
         self.playing = self.sim.is_ok();
+        self.apply_scope_window();
         self.generation = self.generation.saturating_add(1);
         self.rt_factor = 0.0;
         self.lagging = false;
@@ -248,6 +275,16 @@ impl Worker {
             Ok(Running::Blink(s)) => s.push_uart_rx(bytes),
             Ok(Running::Pwm(s)) => s.push_uart_rx(bytes),
             Ok(Running::Button(s)) => s.push_uart_rx(bytes),
+            Err(_) => {}
+        }
+    }
+
+    fn apply_scope_window(&mut self) {
+        let visible = self.scope_visible.max(trace::visible_window(trace::TIME_DIVS[0]));
+        match &mut self.sim {
+            Ok(Running::Blink(s)) => s.set_scope_window(visible),
+            Ok(Running::Pwm(s)) => s.set_scope_window(visible),
+            Ok(Running::Button(s)) => s.set_scope_window(visible),
             Err(_) => {}
         }
     }
@@ -330,6 +367,7 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
         lagging: false,
         booting: true,
         generation: 0,
+        scope_visible: DEFAULT_VISIBLE_WINDOW,
     };
     // Publish a booting/starting snapshot, then build the first sim.
     publish(&shared, w.snapshot());
@@ -392,10 +430,8 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
             }
             if w.time() >= want - 1e-9 {
                 w.lagging = false;
-                let consumed = Duration::from_secs_f64(sim_adv / speed);
-                anchor += consumed;
-                if let Some(sleep) = anchor.checked_duration_since(Instant::now()) {
-                    thread::sleep(sleep.min(Duration::from_millis(16)));
+                if let Some(sleep) = park_after_slice(sim_adv, speed, Instant::now(), &mut anchor) {
+                    thread::sleep(sleep);
                 }
             } else {
                 // Could not catch up in this slice: drop leftover debt so we
@@ -425,7 +461,11 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
             w.finish_boot();
             publish(shared, w.snapshot());
         }
-        Command::SetSpeed(s) => w.speed = s.clamp(0.001, 10.0),
+        Command::SetSpeed(s) => w.speed = clamp_speed(s),
+        Command::SetScopeWindow(visible) => {
+            w.scope_visible = visible.max(trace::visible_window(trace::TIME_DIVS[0]));
+            w.apply_scope_window();
+        }
         Command::SetPlaying(p) => w.playing = p && w.sim.is_ok(),
         Command::SetPot(p) => {
             w.pot = p.clamp(0.0, 1.0);
@@ -467,13 +507,11 @@ fn publish(shared: &Arc<Mutex<Snapshot>>, snap: Snapshot) {
     }
 }
 
-// Keep the compiler aware that TRACE_WINDOW is part of the live pacing story.
-#[allow(dead_code)]
-const _WINDOW: f64 = trace::TRACE_WINDOW;
-
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
+
+    use super::{MAX_SPEED, MIN_SPEED, clamp_speed, park_after_slice};
 
     fn report(name: &str, sim_s: f64, run: impl FnOnce()) {
         let t0 = Instant::now();
@@ -570,9 +608,35 @@ mod tests {
                 let n = sim.trace().len();
                 assert!(n <= cap, "trace grew past the ring capacity: {n} > {cap}");
                 assert!(n > 8, "trace should still hold a window of samples, got {n}");
+                assert!(cap <= crate::trace::MAX_TRACE_SAMPLES);
             }
             Err(e) if skip_without_rom(&e) => {}
             Err(e) => panic!("{e}"),
         }
+    }
+
+    #[test]
+    fn clamp_speed_includes_micro_realtime() {
+        assert_eq!(clamp_speed(1e-9), MIN_SPEED);
+        assert_eq!(clamp_speed(MIN_SPEED), MIN_SPEED);
+        assert_eq!(clamp_speed(1.0), 1.0);
+        assert_eq!(clamp_speed(100.0), MAX_SPEED);
+    }
+
+    #[test]
+    fn slow_pacing_parks_instead_of_spinning() {
+        let mut anchor = Instant::now();
+        let now = anchor;
+        // 1 us of sim at 1e-6x is 1 s of wall; a single park is capped at 16 ms.
+        let sleep = park_after_slice(1e-6, 1e-6, now, &mut anchor);
+        assert_eq!(sleep, Some(Duration::from_millis(16)));
+        assert!(anchor.duration_since(now) >= Duration::from_millis(990));
+
+        let now2 = Instant::now();
+        let sleep2 = park_after_slice(0.0, 1e-6, now2, &mut anchor);
+        assert!(sleep2.is_some(), "should park while still ahead of the clock");
+        let d = sleep2.unwrap();
+        assert!(d > Duration::ZERO);
+        assert!(d <= Duration::from_millis(16));
     }
 }

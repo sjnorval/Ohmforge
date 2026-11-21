@@ -15,7 +15,7 @@ use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace::{self, TraceBuf};
+use crate::trace::{self, SampleClock, TraceBuf};
 
 pub(super) use schematic::show as show_schematic;
 
@@ -102,6 +102,7 @@ pub(crate) struct PwmSim {
     origin: SimTime,
     /// Instantaneous LED current samples (t relative to `origin`, mA).
     samples: TraceBuf,
+    sample_clock: SampleClock,
     supply: SupplySettings,
     supply_mode: SupplyMode,
     supply_status: SupplyStatus,
@@ -200,6 +201,7 @@ impl PwmSim {
             position,
             origin,
             samples: TraceBuf::default_scope(),
+            sample_clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
             supply_status: SupplyStatus::default(),
@@ -220,19 +222,32 @@ impl PwmSim {
         SimTime(self.kernel.now().0.saturating_sub(self.origin.0)).as_secs_f64()
     }
 
+    pub(crate) fn set_scope_window(&mut self, visible: f64) {
+        self.samples.set_visible_window(visible);
+        self.sample_clock.set_step(self.samples.sample_step(), self.time());
+    }
+
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = self.origin.saturating_add(SimTime::from_secs_f64(seconds.max(0.0)));
         while self.kernel.now() < until {
-            let next = self
-                .kernel
-                .now()
-                .saturating_add(SimTime::from_secs_f64(trace::SAMPLE_STEP))
-                .min(until);
-            let stop = self.kernel.run_until(next)?;
-            if !matches!(stop, Stop::Reached(_)) {
-                return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+            let grid_abs = self
+                .origin
+                .saturating_add(SimTime::from_secs_f64(self.sample_clock.next().max(0.0)));
+            let next = grid_abs.min(until);
+            if next > self.kernel.now() {
+                let stop = self.kernel.run_until(next)?;
+                if !matches!(stop, Stop::Reached(_)) {
+                    return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+                }
+            } else if self.kernel.now() < until {
+                let stop = self.kernel.run_until(until)?;
+                if !matches!(stop, Stop::Reached(_)) {
+                    return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+                }
             }
-            self.record_sample()?;
+            if self.sample_clock.take(self.time()) {
+                self.record_sample()?;
+            }
         }
         Ok(())
     }
@@ -332,7 +347,8 @@ impl PwmSim {
             .engine_as::<AnalogEngine>(self.analog)
             .ok_or("analog solver is not registered")?;
         self.supply_mode = supply::apply(analog, &self.supply, self.supply_mode)?;
-        self.advance(self.time() + 1e-6)
+        self.advance(self.time() + 1e-6)?;
+        self.record_sample()
     }
 
     pub(super) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {

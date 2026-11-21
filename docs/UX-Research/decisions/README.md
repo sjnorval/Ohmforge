@@ -38,4 +38,4 @@ updated: 2026-11-03
 | `d6` | UI toolkit: egui/eframe 0.37 (keep, not iced/Slint) | Stable |
 | `d7` | Serial monitor: lean console + queued host→device | Stable |
 
-> Add a new record here when a design call is made. The companion `design-brief.md` screen notes carry the earlier, screen-level detail.
+> Add a new record here when a design call is made. The companion `design-brief.md` screen notes carry the earlier, screen-level detail. Schematic net routing under d1 is specified in [`docs/design/wire-routing.md`](../../design/wire-routing.md).

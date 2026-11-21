@@ -10,7 +10,7 @@ use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte};
 use crate::meters::{self, CircuitReadout};
 use crate::pins::{add_pin_drivers, hook_pin};
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace::{self, SAMPLE_STEP, TraceBuf};
+use crate::trace::{self, SampleClock, TraceBuf};
 
 #[cfg(test)]
 pub(crate) const LED_ON_MA: f64 = 1.0;
@@ -32,6 +32,7 @@ pub(crate) struct Blink {
     cpu: EngineId,
     analog: EngineId,
     samples: TraceBuf,
+    sample_clock: SampleClock,
     supply: SupplySettings,
     supply_mode: SupplyMode,
     supply_status: SupplyStatus,
@@ -92,6 +93,7 @@ impl Blink {
             cpu,
             analog: analog_id,
             samples: TraceBuf::default_scope(),
+            sample_clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
             supply_status: SupplyStatus::default(),
@@ -100,19 +102,31 @@ impl Blink {
         Ok(sim)
     }
 
+    pub(crate) fn set_scope_window(&mut self, visible: f64) {
+        self.samples.set_visible_window(visible);
+        self.sample_clock.set_step(self.samples.sample_step(), self.time());
+    }
+
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = SimTime::from_secs_f64(seconds.max(0.0));
         while self.kernel.now() < until {
-            let next = self
-                .kernel
-                .now()
-                .saturating_add(SimTime::from_secs_f64(SAMPLE_STEP))
-                .min(until);
-            let stop = self.kernel.run_until(next)?;
-            if !matches!(stop, Stop::Reached(_)) {
-                return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+            let grid = SimTime::from_secs_f64(self.sample_clock.next().max(0.0));
+            let next = grid.min(until);
+            if next > self.kernel.now() {
+                let stop = self.kernel.run_until(next)?;
+                if !matches!(stop, Stop::Reached(_)) {
+                    return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+                }
+            } else if self.kernel.now() < until {
+                // Grid time is not ahead of now (e.g. a tiny slice): run to `until`.
+                let stop = self.kernel.run_until(until)?;
+                if !matches!(stop, Stop::Reached(_)) {
+                    return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+                }
             }
-            self.record_sample()?;
+            if self.sample_clock.take(self.time()) {
+                self.record_sample()?;
+            }
         }
         Ok(())
     }
@@ -155,7 +169,8 @@ impl Blink {
             .ok_or("analog solver is not registered")?;
         self.supply_mode = supply::apply(analog, &self.supply, self.supply_mode)?;
         // A short step so the rail updates while playback is paused.
-        self.advance(self.time() + 1e-6)
+        self.advance(self.time() + 1e-6)?;
+        self.record_sample()
     }
 
     #[allow(dead_code)] // unit tests; UI syncs via `uart_bytes`.
@@ -355,5 +370,29 @@ mod tests {
             "limit did not clamp: status={status:?} led={ma} mA"
         );
         assert!(status.amps <= 0.6e-3 + 1e-5, "{status:?}");
+    }
+    #[test]
+    fn tiny_advances_keep_the_scope_until_the_left_edge() {
+        let mut sim = Blink::new().unwrap();
+        let visible = crate::trace::DEFAULT_VISIBLE_WINDOW;
+        // Many slices much smaller than SAMPLE_STEP, as at a very low playback speed.
+        let end = 0.20;
+        let dt = 5e-6;
+        let mut t = sim.time();
+        while t < end {
+            t += dt;
+            sim.advance(t).unwrap();
+        }
+        let pts = sim.trace();
+        let now = sim.time();
+        let left = now - visible;
+        assert!(!pts.is_empty(), "empty trace");
+        assert!(
+            pts[0].0 <= left + crate::trace::SAMPLE_STEP * 2.0,
+            "cleared too early: first {} left {left}",
+            pts[0].0
+        );
+        let on_screen = pts.iter().filter(|(tt, _)| *tt >= left - 1e-12).count();
+        assert!(on_screen > 100, "sparse on-screen trace: {on_screen}");
     }
 }

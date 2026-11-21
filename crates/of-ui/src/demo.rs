@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use egui::{Align2, Color32, ComboBox, FontId, Pos2, Rect, RichText, Sense, Shape, Slider, Stroke, Ui, pos2, vec2};
+use egui::{
+    Align2, Color32, ComboBox, Event, FontId, Pos2, Rect, RichText, Sense, Shape, Slider, Stroke, Ui, pos2, vec2,
+};
 use of_core::SimTime;
 use of_instruments::{Delivery, SerialMonitor};
 
@@ -11,14 +13,14 @@ use crate::adc_pwm;
 use crate::blink;
 use crate::button;
 use crate::kind::DemoKind;
-use crate::live::{Command, LiveSession, Snapshot};
+use crate::live::{self, Command, LiveSession, Snapshot};
 use crate::meters::{MeterKind, PlacedMeter, ProbeRef, place_ammeter, read_meter};
 use crate::meters_ui::{MeterView, SchematicHit};
 use of_components::BounceSettings;
 
 use crate::supply::{self, SupplySettings};
 use crate::theme::{LED_RED, TEAL, panel};
-use crate::trace;
+use crate::trace::{self, DEFAULT_TIME_DIV, TIME_DIVS};
 
 /// Current that counts as a fully-on LED for the on-screen glow (display only).
 const LED_FULL_MA: f64 = 4.0;
@@ -41,6 +43,14 @@ pub struct OhmforgeDemo {
     meters: Vec<PlacedMeter>,
     next_meter: u64,
     meter_message: Option<String>,
+    time_div: f64,
+    scope_hold: bool,
+    held_scope: Option<HeldScope>,
+}
+
+struct HeldScope {
+    time: f64,
+    trace: Vec<(f64, f64)>,
 }
 
 impl Default for OhmforgeDemo {
@@ -71,6 +81,9 @@ impl OhmforgeDemo {
             meters: Vec::new(),
             next_meter: 0,
             meter_message: None,
+            time_div: DEFAULT_TIME_DIV,
+            scope_hold: false,
+            held_scope: None,
         }
     }
 
@@ -252,8 +265,8 @@ impl OhmforgeDemo {
                     self.restart();
                 }
                 ui.monospace(format!("{:.3} ms", snap.time * 1e3));
-                ui.weak(format!("{:.2}× requested", snap.speed));
-                let rt = format!("{:.2}× realtime", snap.rt_factor);
+                ui.weak(format!("{} requested", trace::format_multiplier(snap.speed)));
+                let rt = format!("{} realtime", trace::format_multiplier(snap.rt_factor));
                 if snap.lagging {
                     ui.colored_label(LED_RED, format!("{rt} (catching up)"));
                 } else {
@@ -264,10 +277,10 @@ impl OhmforgeDemo {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let mut speed = self.speed;
-                let slider = Slider::new(&mut speed, 0.001..=10.0)
+                let slider = Slider::new(&mut speed, live::MIN_SPEED..=live::MAX_SPEED)
                     .logarithmic(true)
                     .text("Speed")
-                    .custom_formatter(|n, _| format!("{n:.3}×"));
+                    .custom_formatter(|n, _| trace::format_multiplier(n));
                 if ui.add(slider).changed() {
                     self.speed = speed;
                     self.session.send(Command::SetSpeed(speed));
@@ -382,7 +395,16 @@ impl OhmforgeDemo {
                         meters: &self.meters,
                         readout: &snap.readout,
                     };
-                    instruments(ui, &snap, self.kind, &view)
+                    instruments(
+                        ui,
+                        &snap,
+                        self.kind,
+                        &view,
+                        &mut self.time_div,
+                        &mut self.scope_hold,
+                        &mut self.held_scope,
+                        &self.session,
+                    )
                 };
                 if self.kind.has_button() && hit.button != self.button {
                     self.button = hit.button;
@@ -429,27 +451,6 @@ fn readouts(ui: &mut Ui, snap: &Snapshot) {
     });
 }
 
-fn instruments(ui: &mut Ui, snap: &Snapshot, kind: DemoKind, meters: &MeterView<'_>) -> SchematicHit {
-    let current = snap.led_ma;
-    let glow = brightness(current);
-    let pos = kind.has_pot().then_some(snap.pot);
-    let mut hit = SchematicHit {
-        button: snap.button,
-        probe: None,
-    };
-    if ui.available_width() >= 820.0 {
-        ui.columns(2, |columns| {
-            hit = schematic(&mut columns[0], kind, current, glow, pos, snap, meters);
-            scope_panel(&mut columns[1], snap, kind);
-        });
-    } else {
-        hit = schematic(ui, kind, current, glow, pos, snap, meters);
-        ui.add_space(12.0);
-        scope_panel(ui, snap, kind);
-    }
-    hit
-}
-
 fn schematic(
     ui: &mut Ui,
     kind: DemoKind,
@@ -470,7 +471,54 @@ fn schematic(
     }
 }
 
-fn scope_panel(ui: &mut Ui, snap: &Snapshot, kind: DemoKind) {
+fn apply_time_div(session: &LiveSession, time_div: &mut f64, new: f64) {
+    let new = trace::snap_time_div(new);
+    if (new - *time_div).abs() < 1e-15 {
+        return;
+    }
+    *time_div = new;
+    session.send(Command::SetScopeWindow(trace::visible_window(new)));
+}
+
+fn instruments(
+    ui: &mut Ui,
+    snap: &Snapshot,
+    kind: DemoKind,
+    meters: &MeterView<'_>,
+    time_div: &mut f64,
+    scope_hold: &mut bool,
+    held_scope: &mut Option<HeldScope>,
+    session: &LiveSession,
+) -> SchematicHit {
+    let current = snap.led_ma;
+    let glow = brightness(current);
+    let pos = kind.has_pot().then_some(snap.pot);
+    let mut hit = SchematicHit {
+        button: snap.button,
+        probe: None,
+    };
+    if ui.available_width() >= 820.0 {
+        ui.columns(2, |columns| {
+            hit = schematic(&mut columns[0], kind, current, glow, pos, snap, meters);
+            scope_panel(&mut columns[1], snap, kind, time_div, scope_hold, held_scope, session);
+        });
+    } else {
+        hit = schematic(ui, kind, current, glow, pos, snap, meters);
+        ui.add_space(12.0);
+        scope_panel(ui, snap, kind, time_div, scope_hold, held_scope, session);
+    }
+    hit
+}
+
+fn scope_panel(
+    ui: &mut Ui,
+    snap: &Snapshot,
+    kind: DemoKind,
+    time_div: &mut f64,
+    scope_hold: &mut bool,
+    held_scope: &mut Option<HeldScope>,
+    session: &LiveSession,
+) {
     panel().show(ui, |ui| {
         ui.horizontal(|ui| {
             let title = if matches!(kind, DemoKind::Dimmer | DemoKind::Fade) {
@@ -483,9 +531,45 @@ fn scope_panel(ui: &mut Ui, snap: &Snapshot, kind: DemoKind) {
                 ui.separator();
                 ui.monospace(format!("wiper {v:.2} V"));
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let mut hold = *scope_hold;
+                if ui
+                    .selectable_label(hold, "Hold")
+                    .on_hover_text("Freeze the scope view for inspection")
+                    .clicked()
+                {
+                    hold = !hold;
+                }
+                if hold != *scope_hold {
+                    *scope_hold = hold;
+                    if hold {
+                        *held_scope = Some(HeldScope {
+                            time: snap.time,
+                            trace: snap.led_trace.clone(),
+                        });
+                    } else {
+                        *held_scope = None;
+                    }
+                }
+                let mut div = *time_div;
+                ComboBox::from_id_salt("scope_time_div")
+                    .selected_text(trace::format_time_div(div))
+                    .show_ui(ui, |ui| {
+                        for &d in TIME_DIVS {
+                            ui.selectable_value(&mut div, d, trace::format_time_div(d));
+                        }
+                    });
+                if (div - *time_div).abs() > 1e-15 {
+                    apply_time_div(session, time_div, div);
+                }
+                ui.weak("time/div");
+            });
         });
-        let time = snap.time;
-        let window = 0.12;
+
+        let held = held_scope.as_ref();
+        let time = held.map(|h| h.time).unwrap_or(snap.time);
+        let trace_src: &[(f64, f64)] = held.map(|h| h.trace.as_slice()).unwrap_or(snap.led_trace.as_slice());
+        let window = trace::visible_window(*time_div);
         let start = (time - window).max(0.0);
         let end = start + window;
         let (min_y, max_y, y_step) = if matches!(kind, DemoKind::Blink) {
@@ -493,7 +577,7 @@ fn scope_panel(ui: &mut Ui, snap: &Snapshot, kind: DemoKind) {
         } else {
             (0.0, 6.0, 1.0)
         };
-        scope(
+        let zoom = scope(
             ui,
             ScopePlot {
                 time,
@@ -503,10 +587,13 @@ fn scope_panel(ui: &mut Ui, snap: &Snapshot, kind: DemoKind) {
                 max_y,
                 y_step,
                 y_unit: "mA",
-                x_caption: "Simulation time (ms)",
+                x_caption: "Simulation time",
             },
-            snap.led_trace.iter().copied(),
+            trace_src.iter().copied(),
         );
+        if zoom != 0 {
+            apply_time_div(session, time_div, trace::step_time_div(*time_div, zoom));
+        }
     });
 }
 
@@ -521,7 +608,7 @@ struct ScopePlot {
     x_caption: &'static str,
 }
 
-fn scope(ui: &mut Ui, cfg: ScopePlot, trace: impl Iterator<Item = (f64, f64)>) {
+fn scope(ui: &mut Ui, cfg: ScopePlot, trace: impl Iterator<Item = (f64, f64)>) -> i32 {
     let ScopePlot {
         time,
         start,
@@ -558,14 +645,17 @@ fn scope(ui: &mut Ui, cfg: ScopePlot, trace: impl Iterator<Item = (f64, f64)>) {
         tick += y_step;
     }
     let x_ticks = 5;
+    let mut axis_unit = "ms";
     for i in 0..=x_ticks {
         let t = start + span * f64::from(i) / f64::from(x_ticks);
         let x = x(t);
+        let (label, unit) = trace::format_axis_time(t, span);
+        axis_unit = unit;
         painter.vline(x, plot.y_range(), grid);
         painter.text(
             pos2(x, plot.bottom() + 10.0),
             Align2::CENTER_TOP,
-            format!("{:.1}", t * 1e3),
+            label,
             font.clone(),
             muted,
         );
@@ -573,7 +663,7 @@ fn scope(ui: &mut Ui, cfg: ScopePlot, trace: impl Iterator<Item = (f64, f64)>) {
     painter.text(
         pos2(plot.center().x, response.rect.bottom()),
         Align2::CENTER_BOTTOM,
-        x_caption,
+        format!("{x_caption} ({axis_unit})"),
         font,
         muted,
     );
@@ -592,10 +682,24 @@ fn scope(ui: &mut Ui, cfg: ScopePlot, trace: impl Iterator<Item = (f64, f64)>) {
         }
         scope.circle_filled(last, 3.0, TEAL);
     }
-}
 
-// Referenced so unused-import lint stays quiet if TRACE_WINDOW is only used by the worker.
-#[allow(dead_code)]
-fn _trace_window() -> f64 {
-    trace::TRACE_WINDOW
+    let mut zoom = 0;
+    if response.hovered() {
+        ui.input(|i| {
+            for ev in &i.events {
+                if let Event::MouseWheel { delta, .. } = ev {
+                    if delta.y > 0.0 {
+                        zoom = -1;
+                    } else if delta.y < 0.0 {
+                        zoom = 1;
+                    }
+                }
+            }
+        });
+        // Stop the page ScrollArea from moving while zooming the plot.
+        ui.input_mut(|i| {
+            i.smooth_scroll_delta.y = 0.0;
+        });
+    }
+    zoom
 }
