@@ -1,5 +1,8 @@
 //! egui views and instrument panels, enabled by the `gui` feature.
 
+#[cfg_attr(not(test), allow(dead_code, unused_imports))]
+mod wiring;
+
 #[cfg(feature = "gui")]
 mod adc_pwm;
 #[cfg(feature = "gui")]
