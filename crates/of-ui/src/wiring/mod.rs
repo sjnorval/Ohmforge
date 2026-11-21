@@ -535,4 +535,109 @@ mod tests {
         assert!(arc.iter().any(|p| p.x > 10.0 + 1.0));
         assert!(arc.iter().all(|p| p.x >= 10.0 - 1e-3));
     }
+
+    #[test]
+    fn rip_up_resolves_a_synthetic_blocked_corridor() {
+        use super::{Component, Direction, Net, NetKind, Pin, PinRef, Rect, Schematic};
+        let pin = |id: &str, x: f32, y: f32, dir: Direction, net: &str| Pin {
+            id: id.into(),
+            name: id.into(),
+            position: Point::new(x, y),
+            direction: dir,
+            net: Some(net.into()),
+            routed: true,
+        };
+        let comp = |id: &str, min: (f32, f32), max: (f32, f32), pins: Vec<Pin>| Component {
+            id: id.into(),
+            reference: id.to_uppercase(),
+            body: Rect::from_min_max(Point::new(min.0, min.1), Point::new(max.0, max.1)),
+            pins,
+        };
+        let ko =
+            |min: (f32, f32), max: (f32, f32)| Rect::from_min_max(Point::new(min.0, min.1), Point::new(max.0, max.1));
+        let mut board = Schematic {
+            components: vec![
+                comp(
+                    "ea",
+                    (-16.0, 16.0),
+                    (-4.0, 24.0),
+                    vec![pin("p", -4.0, 20.0, Direction::East, "early")],
+                ),
+                comp(
+                    "eb",
+                    (132.0, 16.0),
+                    (144.0, 24.0),
+                    vec![pin("p", 132.0, 20.0, Direction::West, "early")],
+                ),
+                comp(
+                    "la",
+                    (16.0, 28.0),
+                    (24.0, 36.0),
+                    vec![pin("p", 20.0, 28.0, Direction::North, "late")],
+                ),
+                comp(
+                    "lb",
+                    (104.0, 28.0),
+                    (112.0, 36.0),
+                    vec![pin("p", 108.0, 28.0, Direction::North, "late")],
+                ),
+            ],
+            nets: vec![
+                Net {
+                    id: "early".into(),
+                    name: "early".into(),
+                    kind: NetKind::Power,
+                    terminals: vec![PinRef::new("ea", "p"), PinRef::new("eb", "p")],
+                    waypoints: Vec::new(),
+                    route: None,
+                },
+                Net {
+                    id: "late".into(),
+                    name: "late".into(),
+                    kind: NetKind::Signal,
+                    terminals: vec![PinRef::new("la", "p"), PinRef::new("lb", "p")],
+                    waypoints: Vec::new(),
+                    route: None,
+                },
+            ],
+            fixture_strokes: Vec::new(),
+            keepouts: vec![
+                // Ceiling of the mid corridor; early can still go up at x=-4 / 132.
+                ko((12.0, 8.0), (116.0, 18.0)),
+                // Floor of the corridor, with gaps at the late verticals (x=20 and x=108).
+                ko((24.0, 24.0), (100.0, 80.0)),
+                ko((-20.0, 24.0), (16.0, 80.0)),
+                ko((112.0, 24.0), (160.0, 80.0)),
+            ],
+        };
+        super::route(&mut board);
+        let violations = check(&board);
+        assert!(
+            violations.is_empty(),
+            "synthetic board invariants:\n{}",
+            violations.iter().map(|v| v.line()).collect::<Vec<_>>().join("\n")
+        );
+        let early = board.net("early").and_then(|n| n.route.as_ref()).expect("early routed");
+        let late = board.net("late").and_then(|n| n.route.as_ref()).expect("late routed");
+        assert!(!early.polylines.is_empty());
+        assert!(!late.polylines.is_empty());
+        let ys = |route: &super::Route| {
+            route
+                .polylines
+                .iter()
+                .flat_map(|p| p.iter())
+                .map(|pt| pt.y)
+                .collect::<Vec<_>>()
+        };
+        let late_ys = ys(late);
+        let early_ys = ys(early);
+        assert!(
+            late_ys.iter().any(|y| (*y - 20.0).abs() <= 1e-3),
+            "late should use the mid corridor, ys={late_ys:?}"
+        );
+        assert!(
+            early_ys.iter().any(|y| *y <= 8.0),
+            "early should detour over the top after rip-up, ys={early_ys:?}"
+        );
+    }
 }
