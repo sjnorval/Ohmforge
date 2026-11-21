@@ -156,7 +156,9 @@ fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus, meters
         for poly in &route.polylines {
             let is_minus_stub = poly.iter().any(|p| p.distance(minus) <= 1e-4);
             if !is_minus_stub {
-                paint_poly(poly, wire);
+                for piece in wiring::poly_with_hops(poly, &route.hops) {
+                    paint_poly(&piece, wire);
+                }
             }
         }
         for p in &route.junctions {
@@ -172,7 +174,9 @@ fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus, meters
     let btn_stroke = if closed { Stroke::new(1.7, TEAL) } else { wire };
     if let Some(route) = board.net("gpio9").and_then(|n| n.route.as_ref()) {
         for poly in &route.polylines {
-            paint_poly(poly, btn_stroke);
+            for piece in wiring::poly_with_hops(poly, &route.hops) {
+                paint_poly(&piece, btn_stroke);
+            }
         }
     }
 
@@ -188,13 +192,17 @@ fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus, meters
     );
     if let Some(route) = board.net("vdd").and_then(|n| n.route.as_ref()) {
         for poly in &route.polylines {
-            paint_poly(poly, Stroke::new(1.7, TEAL));
+            for piece in wiring::poly_with_hops(poly, &route.hops) {
+                paint_poly(&piece, Stroke::new(1.7, TEAL));
+            }
         }
     }
     if let Some(route) = gnd_route {
         for poly in &route.polylines {
             if poly.iter().any(|p| p.distance(minus) <= 1e-4) {
-                paint_poly(poly, wire);
+                for piece in wiring::poly_with_hops(poly, &route.hops) {
+                    paint_poly(&piece, wire);
+                }
             }
         }
     }
