@@ -54,6 +54,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Fixed
 
+- **Dimmer scope header:** the live "wiper … V" readout no longer overlaps the time/div control at 980×720 or narrower. The wiper value sits on a second row under the caption; the blink and push-button scope headers were checked for the same clash.
 - Clippy warnings in `of-analog` (#2), and riscv-tests CI runs with a stale cache (#7).
 
 [Unreleased]: https://github.com/sjnorval/Ohmforge/commits/main
