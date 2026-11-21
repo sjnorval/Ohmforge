@@ -16,6 +16,29 @@ use crate::meters::CircuitReadout;
 use crate::supply::{SupplySettings, SupplyStatus};
 use crate::trace::{self, DEFAULT_VISIBLE_WINDOW};
 
+/// Slowest playback speed (simulation-seconds per wall-second).
+pub(crate) const MIN_SPEED: f64 = 1e-6;
+/// Fastest playback speed.
+pub(crate) const MAX_SPEED: f64 = 10.0;
+
+pub(crate) fn clamp_speed(s: f64) -> f64 {
+    s.clamp(MIN_SPEED, MAX_SPEED)
+}
+
+/// Book `sim_adv / speed` wall time against `anchor` and return a park of at
+/// most 16 ms, so very low speeds do not busy-spin and the worker can still
+/// take commands.
+fn park_after_slice(sim_adv: f64, speed: f64, now: Instant, anchor: &mut Instant) -> Option<Duration> {
+    let speed = speed.max(MIN_SPEED);
+    let secs = sim_adv / speed;
+    if secs.is_finite() && secs > 0.0 {
+        *anchor = anchor.checked_add(Duration::from_secs_f64(secs)).unwrap_or(*anchor);
+    }
+    anchor
+        .checked_duration_since(now)
+        .map(|d| d.min(Duration::from_millis(16)))
+}
+
 /// Commands the UI sends to the worker.
 pub(crate) enum Command {
     SetKind(DemoKind),
@@ -407,10 +430,8 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
             }
             if w.time() >= want - 1e-9 {
                 w.lagging = false;
-                let consumed = Duration::from_secs_f64(sim_adv / speed);
-                anchor += consumed;
-                if let Some(sleep) = anchor.checked_duration_since(Instant::now()) {
-                    thread::sleep(sleep.min(Duration::from_millis(16)));
+                if let Some(sleep) = park_after_slice(sim_adv, speed, Instant::now(), &mut anchor) {
+                    thread::sleep(sleep);
                 }
             } else {
                 // Could not catch up in this slice: drop leftover debt so we
@@ -440,7 +461,7 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
             w.finish_boot();
             publish(shared, w.snapshot());
         }
-        Command::SetSpeed(s) => w.speed = s.clamp(0.001, 10.0),
+        Command::SetSpeed(s) => w.speed = clamp_speed(s),
         Command::SetScopeWindow(visible) => {
             w.scope_visible = visible.max(trace::visible_window(trace::TIME_DIVS[0]));
             w.apply_scope_window();
@@ -488,7 +509,9 @@ fn publish(shared: &Arc<Mutex<Snapshot>>, snap: Snapshot) {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
+
+    use super::{MAX_SPEED, MIN_SPEED, clamp_speed, park_after_slice};
 
     fn report(name: &str, sim_s: f64, run: impl FnOnce()) {
         let t0 = Instant::now();
@@ -590,5 +613,30 @@ mod tests {
             Err(e) if skip_without_rom(&e) => {}
             Err(e) => panic!("{e}"),
         }
+    }
+
+    #[test]
+    fn clamp_speed_includes_micro_realtime() {
+        assert_eq!(clamp_speed(1e-9), MIN_SPEED);
+        assert_eq!(clamp_speed(MIN_SPEED), MIN_SPEED);
+        assert_eq!(clamp_speed(1.0), 1.0);
+        assert_eq!(clamp_speed(100.0), MAX_SPEED);
+    }
+
+    #[test]
+    fn slow_pacing_parks_instead_of_spinning() {
+        let mut anchor = Instant::now();
+        let now = anchor;
+        // 1 us of sim at 1e-6x is 1 s of wall; a single park is capped at 16 ms.
+        let sleep = park_after_slice(1e-6, 1e-6, now, &mut anchor);
+        assert_eq!(sleep, Some(Duration::from_millis(16)));
+        assert!(anchor.duration_since(now) >= Duration::from_millis(990));
+
+        let now2 = Instant::now();
+        let sleep2 = park_after_slice(0.0, 1e-6, now2, &mut anchor);
+        assert!(sleep2.is_some(), "should park while still ahead of the clock");
+        let d = sleep2.unwrap();
+        assert!(d > Duration::ZERO);
+        assert!(d <= Duration::from_millis(16));
     }
 }

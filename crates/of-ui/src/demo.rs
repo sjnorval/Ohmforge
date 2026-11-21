@@ -13,7 +13,7 @@ use crate::adc_pwm;
 use crate::blink;
 use crate::button;
 use crate::kind::DemoKind;
-use crate::live::{Command, LiveSession, Snapshot};
+use crate::live::{self, Command, LiveSession, Snapshot};
 use crate::meters::{MeterKind, PlacedMeter, ProbeRef, place_ammeter, read_meter};
 use crate::meters_ui::{MeterView, SchematicHit};
 use of_components::BounceSettings;
@@ -265,8 +265,8 @@ impl OhmforgeDemo {
                     self.restart();
                 }
                 ui.monospace(format!("{:.3} ms", snap.time * 1e3));
-                ui.weak(format!("{:.2}× requested", snap.speed));
-                let rt = format!("{:.2}× realtime", snap.rt_factor);
+                ui.weak(format!("{} requested", trace::format_multiplier(snap.speed)));
+                let rt = format!("{} realtime", trace::format_multiplier(snap.rt_factor));
                 if snap.lagging {
                     ui.colored_label(LED_RED, format!("{rt} (catching up)"));
                 } else {
@@ -277,10 +277,10 @@ impl OhmforgeDemo {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let mut speed = self.speed;
-                let slider = Slider::new(&mut speed, 0.001..=10.0)
+                let slider = Slider::new(&mut speed, live::MIN_SPEED..=live::MAX_SPEED)
                     .logarithmic(true)
                     .text("Speed")
-                    .custom_formatter(|n, _| format!("{n:.3}×"));
+                    .custom_formatter(|n, _| trace::format_multiplier(n));
                 if ui.add(slider).changed() {
                     self.speed = speed;
                     self.session.send(Command::SetSpeed(speed));
