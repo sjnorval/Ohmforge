@@ -257,6 +257,8 @@ pub trait Component: Send {
 }
 ```
 
+> **Update (22 November 2026):** this component model is being made concrete as a base engine with plug-in components: the engine owns nets, the solvers, time, events and measurement, and every real part, including the ESP32-C3 and the bench PSU, is a component on one API. Components elaborate into `of-analog` devices, whose `Device` trait already provides the static and per-iteration stamps above. See [`docs/design/engine-components.md`](design/engine-components.md).
+
 ```toml
 # library/sensors/bosch-bme280/part.toml
 [part]

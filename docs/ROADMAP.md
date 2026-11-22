@@ -1,6 +1,6 @@
 # Roadmap and task list
 
-Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress). The ROM boot work (branch `p2-rom-boot`) is on `main` (#20), and the esp-hal blinky (branch `p2-esp-hal-blinky`) too (#21). GPIO inputs (branch `p2-gpio-inputs`) are on `main` (#22). ADC and LEDC PWM (branch `p2-adc-pwm`) are on `main` (#24). The desktop demo picker (#26) and live playback, bench supply and virtual meters (#27) are on `main`. The parts the library should grow to, and what each one needs from the simulator, are in the [common components checklist](COMPONENTS.md).
+Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 20 November 2026 (`main` includes PRs #7 to #12: P1, the blinky milestone, interrupts, timers and watchdogs, the ESP image parser and the desktop blink demo; P2 is in progress). The ROM boot work (branch `p2-rom-boot`) is on `main` (#20), and the esp-hal blinky (branch `p2-esp-hal-blinky`) too (#21). GPIO inputs (branch `p2-gpio-inputs`) are on `main` (#22). ADC and LEDC PWM (branch `p2-adc-pwm`) are on `main` (#24). The desktop demo picker (#26) and live playback, bench supply and virtual meters (#27) are on `main`. The parts the library should grow to, and what each one needs from the simulator, are in the [common components checklist](COMPONENTS.md). The move to a base engine with plug-in components (the ESP32-C3, the bench PSU and every part as components on one engine API) is planned in [`design/engine-components.md`](design/engine-components.md) (P2 phases E1 to E6, below).
 
 **Current phase: P2 ESP32-C3 MVP, in progress** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). P1 Analog core and phase one (the RISC-V CPU core, pulled forward from P2) are done; the first P2 slice (blinky end to end), the interrupt matrix, SYSTIMER alarms, timer groups, watchdogs, the ESP image parser, the desktop demo picker, live playback, the bench supply and virtual meters are on `main`. P0 leftovers continue alongside.
 
@@ -38,7 +38,7 @@ Status: done; the core is implemented and tested (63 unit tests, 1 doc test, 75 
 - [x] GUI scaffold ported to eframe 0.37 (`App::ui`) with X11/Wayland backends so the Linux CI GUI check builds
 - [ ] `of-core`: scheduler snapshot/restore and replay log
 - [x] `of-core`: `Engine` trait (`advance_to(limit, ctx) -> reached`, `next_event`, `on_event`) and `Kernel` (quantum slices, events, breakpoints, host stops); used by the analog engine and the ESP32-C3 engine
-- [ ] Project file format v0 (`project.toml` + circuit file) with serde round-trip tests
+- [ ] Project file format v0 (`project.toml` + circuit file) with serde round-trip tests (the circuit file comes with P2 phase E4, [`design/engine-components.md`](design/engine-components.md))
 - [ ] `of-parts`: JSON Schema generation (schemars) and a validator command in `of-cli`
 - [ ] `of-cli`: `ohmforge validate-parts parts/`
 - [ ] RFC template in `rfcs/0000-template.md`
@@ -105,6 +105,13 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
 - [ ] Mixed-signal sync: CPU stops on MMIO, analog advances to the exact time
   - [x] `Esp32c3Engine`: stops after each peripheral access, pin changes become kernel events at the exact hart time (blinky drives an LED + resistor, `tests/blinky_led.rs`)
   - [x] Stop before input reads so GPIO/ADC reads see the analog value at that instant: GPIO (#22: `Bus::defer_load`, lazy `wfi` woken at the input event; a busy core may take a pin interrupt up to one slice late, bounded by `Esp32c3Engine::set_max_lead`); ADC (#24: the engine stops at the conversion start and the analog engine answers with the node voltage at that instant)
+- [ ] Base engine and plug-in components (design: [`design/engine-components.md`](design/engine-components.md)). The engine is the real world (nets, analog and digital solvers, time, events, measurement); every real part, the ESP32-C3 and the bench PSU become components on one API, and demos become circuit files. The schematic editor items below (place and wire, waypoints, re-edit) and BOM v1 build on it.
+  - [ ] E1 Design doc, roadmap, plan pointer and README note (branch `docs-engine-components`, not yet merged)
+  - [ ] E2 Engine core (`of-engine`) and the `Component` trait: elaboration into `of-analog` devices, registry, invariants (one ground, every source has a return path, KCL, no floating nets), terminal currents; port the resistor, pot, LED, push button and bench PSU (`+` and `−` terminals). Needs E1
+  - [ ] E3 ESP32-C3 as a component: GPIO half-bridges on its own 3V3/GND pins, input watches, ADC sample points, LEDC, UART port, supply load, firmware and boot parameters, CPU as an active engine; engine glue moves out of `of-ui`. Needs E2
+  - [ ] E4 Circuit files (serde, round-trip): blink, dimmer, fade and button drive both the simulation and the shared router, with output parity (firmware traces and wiring goldens match or have reviewed updates). Needs E3
+  - [ ] E5 Instruments as components: measurement service in `of-instruments` (trace store, period-aligned averages, duty/frequency), voltmeter, ammeter, scope, logger and UART console on any circuit. Needs E2 (E4 for the desktop panels)
+  - [ ] E6 Parts library and BOM from components: `[symbol]`, pin kinds and `bom` in `part.toml`; the BOM comes from the circuit's components. Needs E4
 - [ ] egui schematic editor (place, wire, probe), oscilloscope, logic analyser with UART decode, serial monitor
   - [x] Read-only desktop blink demo (`of-ui` `BlinkDemo`, `cargo run -p of-app --features gui`): bundled blinky co-simulated with R1 330 Ω and a red LED, the schematic LED lit from the simulated current, an LED current trace and UART0 output. Not the editor or the real oscilloscope (GPU waveform path, decision d2)
   - [x] Live desktop playback (worker thread, realtime speed control, live pot/button, scrolling scope, clickable SW1, tooltips, configurable bench PSU on the VDD rail, virtual voltmeter/ammeter) on `main` (#27). Window-tied scope retention, 1-2-5 time/div zoom (10 µs/div to 1 s/div) and playback down to 1e-6× are in this PR. The analog solver holds a settled DC solution instead of re-solving every slice, and the hart caches decoded instructions (branch `p2-perf`). 1× realtime is still not reached on the busy demos (blink / dimmer / fade / button-poll). GPIO thresholds track live Vset, and clickable SW1 bounces with the firmware-test train (branch `p2-honest-io`).
@@ -115,9 +122,9 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
     - [x] Port the pot-dimmer and push-button demos
     - [x] Crossing policy (avoid, then hop) and rip-up and reroute
     - [ ] Optional 45° PCB-style mode (off by default)
-    - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs)
+    - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs; needs the E4 circuit files and E6 symbols)
     - [ ] Interactive trace re-edit mode in the schematic editor: manually re-route or adjust auto-generated traces (drag segments; move, add or remove waypoints/bends; re-run autoroute on a net); edits keep the same invariants (no body crossings, no foreign-net overlap, T-junctions)
-- [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
+- [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist (built from components, needs E6)
 - [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer, fade and push-button demos; Arduino and ESP-IDF builds still to do)
 
 ### First milestone: blinky end to end
@@ -177,7 +184,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 
 ## P6 1.0 (weeks 70 to 84)
 
-- [ ] Stable component API and WASM SDK for third-party parts (`of-component-api`, `of-plugin-wasm`)
+- [ ] Stable component API and WASM SDK for third-party parts (`of-component-api`, `of-plugin-wasm`); the in-tree API comes from P2 phase E2 ([`design/engine-components.md`](design/engine-components.md))
 - [ ] ESP32-S3 and ESP32-C6 support
 - [ ] Complete documentation (mdBook user guide, part-authoring guide, API docs)
 - [ ] BLE (stretch goal)
@@ -198,6 +205,8 @@ An optional account for syncing projects and files across devices. That needs se
 ### Physics interaction layers
 
 Beyond the electrical simulation, model thermal and electromagnetic interactions between components, added over time as needed. Each layer can be turned on or off, with tiered interaction levels (for example beginner, intermediate, advanced, expert, engineer) depending on what the user is testing. The models should follow established physics and electrical theory.
+
+The engine design gives these layers an extension point (optional thermal and coupling ports on components, run-time tiers, telemetry from component readings): [`design/engine-components.md`](design/engine-components.md) section 3j.
 
 Related work already on the P5 checklist, and not replaced by this thread: the thermal model (self-heating, ambient, tempco; MOSFET Rds(on) against temperature), the hardware-in-the-loop lab, and the published validation report.
 
