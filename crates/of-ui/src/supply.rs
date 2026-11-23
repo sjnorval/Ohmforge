@@ -295,4 +295,72 @@ mod tests {
         s.on = false;
         assert!(!s.set_outside_rated());
     }
+
+    #[test]
+    fn sourced_current_returns_through_ground_and_includes_the_load() {
+        use crate::pins::{add_pin_drivers, pin_driver_names};
+        use of_soc_esp32c3::gpio::PinOut;
+
+        let settings = SupplySettings::default();
+        let mut c = Circuit::new();
+        let vdd = c.node("vdd");
+        let gpio = c.node("gpio8");
+        c.add(Resistor::new("rled", gpio, 0, 330.0)).unwrap();
+        c.add(Resistor::new("pot", vdd, 0, 10_000.0)).unwrap();
+        add_supply(&mut c, vdd, &settings).unwrap();
+        add_pin_drivers(&mut c, 8, gpio, vdd, PinOut::driven(true, 2)).unwrap();
+        let analog = AnalogEngine::new(
+            "analog",
+            c,
+            Options::default(),
+            EngineConfig {
+                max_step: 1e-5,
+                ..EngineConfig::default()
+            },
+        )
+        .unwrap();
+        let mut k = run(analog, 100e-6);
+        {
+            let a = k.engine_as::<AnalogEngine>(EngineId(0)).unwrap();
+            let i_psu = a.value("i(psu)").expect("i(psu)");
+            let v_vdd = a.value("v(vdd)").unwrap();
+            let v_gpio = a.value("v(gpio8)").unwrap();
+            let i_led = v_gpio / 330.0;
+            let i_pot = v_vdd / 10_000.0;
+            assert!(
+                (i_psu - (i_led + i_pot)).abs() < 1e-6,
+                "KCL at VDD: i(psu)={i_psu} I_led={i_led} I_pot={i_pot}"
+            );
+            assert!(
+                i_psu > 8e-3,
+                "high-side LED current should flow from the PSU, got {i_psu} A"
+            );
+            let status = regulate(a, &settings, SupplyMode::Cv).unwrap();
+            assert!(
+                (status.amps - i_psu).abs() < 2e-5,
+                "readout {} vs i(psu) {i_psu}",
+                status.amps
+            );
+
+            let (hs, ls) = pin_driver_names(8);
+            a.set(&hs, "r", PinDriver::HI_Z).unwrap();
+            a.set(&ls, "r", 120.0).unwrap();
+        }
+        let t = SimTime::from_secs_f64(200e-6);
+        assert_eq!(k.run_until(t).unwrap(), Stop::Reached(t));
+        let a = k.engine_as::<AnalogEngine>(EngineId(0)).unwrap();
+        let i_psu = a.value("i(psu)").expect("i(psu)");
+        let v_vdd = a.value("v(vdd)").unwrap();
+        let v_gpio = a.value("v(gpio8)").unwrap();
+        let i_led = v_gpio / 330.0;
+        let i_pot = v_vdd / 10_000.0;
+        assert!(
+            (i_psu - (i_led + i_pot)).abs() < 1e-6,
+            "KCL with pin low: i(psu)={i_psu} I_led={i_led} I_pot={i_pot}"
+        );
+        assert!(
+            (i_psu - i_pot).abs() < 1e-5,
+            "low-side should leave only the divider on the PSU, i_psu={i_psu} i_pot={i_pot}"
+        );
+    }
 }

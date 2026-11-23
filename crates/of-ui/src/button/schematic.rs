@@ -180,7 +180,7 @@ fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus, meters
         }
     }
 
-    let (plus, psu) = draw_psu(
+    let (plus, minus_pt, psu) = draw_psu(
         &painter,
         point(18.0, 210.0),
         supply.volts,
@@ -206,8 +206,8 @@ fn draw(ui: &mut Ui, brightness: f32, closed: bool, supply: SupplyStatus, meters
             }
         }
     }
-    let _ = plus;
-    label(96.0, 266.0, Align2::CENTER_CENTER, "GND", muted);
+    let _ = (plus, minus_pt);
+    label(116.0, 262.0, Align2::CENTER_CENTER, "GND", muted);
 
     hover_tooltip(ui, chip, "u1", "U1 · ESP32-C3");
     hover_tooltip(

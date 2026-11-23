@@ -56,6 +56,7 @@ mod tests {
     #[test]
     fn blink_fixture_matches_golden() {
         let got = serialize(&blink_board());
+        maybe_write_golden("src/wiring/goldens/blink.routes.txt", &got);
         assert_eq!(
             got, BLINK_GOLDEN,
             "blink route golden drifted; if the change is intended, update crates/of-ui/src/wiring/goldens/blink.routes.txt\n--- got ---\n{got}"
@@ -79,6 +80,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let got = if got.is_empty() { got } else { format!("{got}\n") };
+        maybe_write_golden("src/wiring/goldens/blink.invariants.txt", &got);
         assert_eq!(
             got, BLINK_INVARIANTS,
             "blink invariant snapshot drifted; update crates/of-ui/src/wiring/goldens/blink.invariants.txt\n--- got ---\n{got}"
@@ -498,10 +500,11 @@ mod tests {
             "dimmer gpio2 should hop over VDD and GND, hops={gpio2_hops:?}"
         );
         assert!(hops_on(&dimmer, "vdd").is_empty());
-        // The GND symbol drop at x=222 crosses the VDD rail at y=152.
+        // GND return (including the PSU minus) hops over foreign nets (VDD and
+        // the pot wiper rail) on the way to the common ground symbol.
         assert_eq!(
             hops_on(&dimmer, "gnd").len(),
-            1,
+            2,
             "dimmer gnd hops={:?}",
             hops_on(&dimmer, "gnd")
         );
@@ -638,6 +641,54 @@ mod tests {
         assert!(
             early_ys.iter().any(|y| *y <= 8.0),
             "early should detour over the top after rip-up, ys={early_ys:?}"
+        );
+    }
+
+    #[test]
+    fn every_demo_routes_the_psu_return() {
+        let boards = [
+            ("blink", blink_board()),
+            ("dimmer", dimmer_board()),
+            ("fade", fade_board()),
+            ("button", button_board()),
+        ];
+        for (name, board) in boards {
+            let psu = board.component("psu").unwrap_or_else(|| panic!("{name} has no psu"));
+            let plus = psu.pins.iter().find(|p| p.id == "plus").expect("plus");
+            let minus = psu.pins.iter().find(|p| p.id == "minus").expect("minus");
+            assert!(plus.routed, "{name} psu.plus must be routed to VDD");
+            assert!(minus.routed, "{name} psu.minus must be routed to GND");
+            assert_eq!(plus.net.as_deref(), Some("vdd"), "{name} psu.plus net");
+            assert_eq!(minus.net.as_deref(), Some("gnd"), "{name} psu.minus net");
+            let gnd = board.net("gnd").and_then(|n| n.route.as_ref()).expect("gnd routed");
+            let on_gnd = gnd
+                .polylines
+                .iter()
+                .any(|poly| poly.iter().any(|p| p.distance(minus.position) <= 1e-4));
+            assert!(on_gnd, "{name} psu.minus is not on the GND route");
+            let vdd = board.net("vdd").and_then(|n| n.route.as_ref()).expect("vdd routed");
+            let on_vdd = vdd
+                .polylines
+                .iter()
+                .any(|poly| poly.iter().any(|p| p.distance(plus.position) <= 1e-4));
+            assert!(on_vdd, "{name} psu.plus is not on the VDD route");
+            assert!(check(&board).is_empty(), "{name} invariants: {:?}", check(&board));
+        }
+    }
+
+    #[test]
+    fn a_label_straddling_a_body_edge_is_flagged() {
+        // The old "GND under PSU" box sat across the PSU's bottom-right corner.
+        let mut board = blink_board();
+        assert!(check(&board).is_empty(), "{:?}", check(&board));
+        board.keepouts.push(crate::wiring::model::Rect::from_min_max(
+            Point::new(85.0, 260.0),
+            Point::new(107.0, 272.0),
+        ));
+        let v = check(&board);
+        assert!(
+            v.iter().any(|v| v.code == "label-on-body" && v.detail.contains("psu")),
+            "expected a label-on-body violation for the PSU, got {v:?}"
         );
     }
 }

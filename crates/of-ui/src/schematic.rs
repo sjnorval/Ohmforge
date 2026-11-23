@@ -18,8 +18,8 @@ pub fn hold_press(ui: &Ui, rect: Rect, id: &'static str, tooltip: &str) -> bool 
 
 /// A compact bench-supply rectangle in the existing muted/teal schematic language.
 ///
-/// `origin` is the top-left of the box. Returns the positive-terminal point
-/// and the body rect (for tooltips).
+/// `origin` is the top-left of the box. Returns the positive-terminal point,
+/// the negative-terminal point, and the body rect (for tooltips).
 pub fn draw_psu(
     painter: &egui::Painter,
     origin: Pos2,
@@ -29,7 +29,7 @@ pub fn draw_psu(
     mode: &str,
     plus_left: bool,
     muted: Color32,
-) -> (Pos2, Rect) {
+) -> (Pos2, Pos2, Rect) {
     let box_r = Rect::from_min_size(origin, egui::vec2(78.0, 52.0));
     let stroke = Stroke::new(1.7, muted);
     painter.rect_stroke(box_r, 2.0, stroke, egui::StrokeKind::Outside);
@@ -60,8 +60,10 @@ pub fn draw_psu(
         } else {
             format!("{ma:.2} mA")
         };
+        // The minus terminal shares this row: keep the readout clear of it.
+        let toward_far_side = if plus_left { 7.0 } else { -7.0 };
         painter.text(
-            Pos2::new(box_r.center().x, box_r.top() + 40.0),
+            Pos2::new(box_r.center().x + toward_far_side, box_r.top() + 40.0),
             egui::Align2::CENTER_CENTER,
             i_label,
             font,
@@ -94,7 +96,18 @@ pub fn draw_psu(
         TEAL,
     );
     painter.line_segment([Pos2::new(minus.x + inward, minus.y), minus], stroke);
-    (plus, box_r)
+    painter.text(
+        Pos2::new(minus.x + inward * 1.6, minus.y),
+        if plus_left {
+            egui::Align2::LEFT_CENTER
+        } else {
+            egui::Align2::RIGHT_CENTER
+        },
+        "\u{2212}",
+        FontId::monospace(11.0),
+        muted,
+    );
+    (plus, minus, box_r)
 }
 
 /// A 6 mm tactile switch, open or closed, in the same stroke language.
