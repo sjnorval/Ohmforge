@@ -13,7 +13,9 @@ fn main() -> eframe::Result<()> {
     let no_splash = !of_ui::prefs::should_play_splash(cli_no_splash, prefs.show_startup_animation);
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_inner_size([980.0, 720.0])
-        .with_min_inner_size([560.0, 620.0]);
+        .with_min_inner_size([560.0, 620.0])
+        // Open maximised; restoring the window falls back to the inner size above.
+        .with_maximized(true);
     // Window and taskbar icon (assets/icon-192.png); skipped if it fails to decode.
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon-192.png")) {
         viewport = viewport.with_icon(icon);

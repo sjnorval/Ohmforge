@@ -21,6 +21,8 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 > **Architecture in progress.** The design is merged (phase E1, #43). The bench PSU already has explicit `+` and `−` terminals, with `−` routed to GND on the demo boards, and the LED and PSU currents are averaged over whole PWM periods (#45, closed by #54). Ohmforge is moving to a **base engine** that stands in for the real world: it owns the nets, the analog and digital solvers, simulated time and events, and the wiring, readings, logging and measuring services. **Every part with a real-world counterpart becomes a plug-in component** on one engine API: resistors, LEDs, pots and buttons, the **bench PSU** and the **ESP32-C3 itself**. Meters, the scope, the logger and the UART console become instruments that work on any circuit; demos become circuit files drawn by the existing schematic router; and the BOM comes straight from the components. Next in P2 are engine phases E2 and E3 (#46, #47). Phases E4 to E6 follow in P3 / 0.2 (#48 to #50); 0.1 does not wait for them. The design is in [`docs/design/engine-components.md`](docs/design/engine-components.md).
 
+**Planned: editor integration.** Upload, serial monitor and debugging from VS Code and the Arduino IDE 2.x as if the simulator were a real board: a local control API, a virtual serial port, a GDB stub and hot reload in P3, then a VS Code extension and an Arduino board package in P4. The plan is in [`docs/design/editor-integration.md`](docs/design/editor-integration.md).
+
 ## Workspace layout
 
 | Crate | Purpose |
