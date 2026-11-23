@@ -24,7 +24,7 @@ Status: done; the core is implemented and tested (63 unit tests, 1 doc test, 75 
 - [~] Decode cache (invalidated by `fence.i`, RISC-V I-stream coherence): a 4096-line direct-mapped cache in the hart that skips the bus fetch on hits; monomorphised `Bus` run loop and quiescent-slice GPIO batching (#28, #44); MIPS still to benchmark, and 1× realtime on busy demos still open
 - [ ] Debug triggers (`tselect`/`tdata1`/`tdata2`) for hardware breakpoints and watchpoints; then pass `rv32mi-p-breakpoint`
 - [ ] PMP (the C3 has 16 entries) and U-mode if firmware needs them; then pass `rv32mi-p-pmpaddr`
-- [ ] `of-gdb`: remote serial protocol stub on top of the debugger API
+- [ ] `of-gdb`: remote serial protocol stub on top of the debugger API (scheduled in P3 as editor-integration item I3, [`design/editor-integration.md`](design/editor-integration.md))
 - [ ] riscv-arch-test (the newer compliance suite) once a signature-dump harness exists
 
 ## P0 Foundations (weeks 0 to 6)
@@ -162,6 +162,12 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
   - [ ] E6 (#50) Parts library and BOM from components: `[symbol]`, pin kinds and `bom` in `part.toml`; the BOM comes from the circuit's components. Needs E4
 - [ ] Classic ESP32 (Xtensa LX6) through a QEMU sidecar process (`of-cpu-qemu-ipc`), kept out of process for licence and stability reasons
 - [ ] Peripherals: I2C, SPI, RMT, DAC (C3 and classic ESP32)
+- [ ] Flash like real hardware: expose the simulated chip's UART0 (and later the C3's USB Serial/JTAG) as a virtual serial port (TCP/RFC 2217 first, then a host COM/PTY bridge), with the board's DTR/RTS auto-reset circuit driving EN and GPIO9 into the ROM's download mode, so unmodified `esptool`, `espflash`, the Arduino IDE and `idf.py flash` write the simulated SPI flash through the real ROM loader; flash contents persist with the project (editor-integration item I2, [`design/editor-integration.md`](design/editor-integration.md))
+- [ ] Editor integration foundations (design: [`design/editor-integration.md`](design/editor-integration.md); the plugins follow in P4)
+  - [ ] I1 Control API and headless mode: `ohmforge serve` and the same server in `of-app`, JSON-RPC 2.0 over a named pipe / Unix socket or loopback TCP with a session token; open project, load and flash firmware, reset, run/pause, UART and readings; `ohmforge flash` client. Needs E3 (E4 for `project.open`)
+  - [ ] I2 Virtual serial port and auto-reset: the “Flash like real hardware” item above
+  - [ ] I3 `of-gdb` GDB remote stub (from the phase-one list): breakpoints, registers and memory through the bus, virtual time stopped while halted
+  - [ ] I4 Build-folder watch and hot reload (`DESIGN_AND_PLAN.md` §8 step 5): new firmware with the circuit state kept
 - [ ] Breadboard view alongside the schematic editor (uses the same routed net paths as the schematic; [`docs/design/wire-routing.md`](design/wire-routing.md))
 - [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour and tests (checklist with priorities and simulator dependencies: [`COMPONENTS.md`](COMPONENTS.md))
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
@@ -177,11 +183,15 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Wi-Fi virtual radio (simulated network between boards and a host bridge)
 - [ ] Sleep modes and a power profiler (current over time, battery life estimate)
 - [ ] Energy parts: Li-ion/LiPo with state of charge and internal resistance, coin cell, USB 5 V source
+- [ ] Editor plugins (design: [`design/editor-integration.md`](design/editor-integration.md); need P3 items I1 to I4)
+  - [ ] I5 VS Code extension MVP (TypeScript, AGPL-3.0-or-later, talks to the control API, never links Rust): start simulator, upload (on build), serial monitor, `ohmforge` debug type via cortex-debug or `cppdbg` against `of-gdb`, task provider, ESP-IDF / PlatformIO / Cargo snippets; Marketplace and Open VSX
+  - [ ] I6 Arduino IDE 2.x board package: `package_ohmforge_index.json` with an “Ohmforge simulated ESP32-C3” board on the user's installed `esp32:esp32` core and toolchain (not redistributed), port discovery, upload through `ohmforge flash` or esptool, serial monitor and plotter over the virtual port
 - [ ] Release 0.3
 
 ## P5 Realism (weeks 56 to 72), exit 0.4: validation report published
 
 - [ ] Monte Carlo runs over part tolerances
+- [ ] Optional GPU acceleration for batch runs (Monte Carlo, `.step` and parameter sweeps) through `wgpu`, behind a feature flag with CPU fallback. Single live simulations stay on the CPU: their matrices are too small for a GPU to beat the transfer cost.
 - [ ] Thermal model (self-heating, ambient, tempco; MOSFET Rds(on) against temperature)
 - [ ] Fault injection (opens, shorts, brown-outs, noisy supplies)
 - [ ] Hardware-in-the-loop lab: compare simulation with real boards
@@ -192,6 +202,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 
 - [ ] Stable component API and WASM SDK for third-party parts (`of-component-api`, `of-plugin-wasm`); the in-tree API comes from phase E2, #46 ([`design/engine-components.md`](design/engine-components.md))
 - [ ] ESP32-S3 and ESP32-C6 support
+- [ ] Editor rich views (I7, [`design/editor-integration.md`](design/editor-integration.md)): live schematic and instruments in a VS Code webview (the `of-web` build), readings in the debugger, and an optional Arduino IDE 2 extension (a trimmed VS Code extension)
 - [ ] Complete documentation (mdBook user guide, part-authoring guide, API docs)
 - [ ] BLE (stretch goal)
 - [ ] Release 1.0

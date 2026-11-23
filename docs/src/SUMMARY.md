@@ -12,6 +12,7 @@
 
 - [Engine and components](design/engine-components.md)
 - [Wire routing](design/wire-routing.md)
+- [Editor integration](design/editor-integration.md)
 
 # RFCs
 

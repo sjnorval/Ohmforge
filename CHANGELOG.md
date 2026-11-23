@@ -10,10 +10,12 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Changed
 
+- **Desktop window:** the app now opens maximised; restoring it falls back to the 980 × 720 default.
 - **Stub crate dependencies:** removed unused dependency lines from empty and placeholder crates, dropped unused `[workspace.dependencies]` path entries, and gated `of-ui`'s `of-instruments` behind the `gui` feature so `cargo check --workspace` stays free of unused-dependency warnings. Planned edges remain in the `AGENTS.md` crate map.
 
 ### Added
 
+- **Editor integration plan:** [`docs/design/editor-integration.md`](docs/design/editor-integration.md) plans VS Code and Arduino IDE 2.x support on a shared foundation (control API and `ohmforge serve`, virtual serial port with auto-reset, `of-gdb`, build-folder hot reload; P3), a VS Code extension and an Arduino board package (P4) and rich webviews (P6); the roadmap, README and mdBook point to it. No code change.
 - **Engine E2 (first slice):** new `of-engine` crate elaborates components into `of-analog` with ground / floating-net / supply-pin invariants; `of-component-api` gains `elaborate`, `terminal_currents`, `ElabCtx` / `EventCtx`; `LibraryComponent` and `BenchPsu` (`+`/`−`) port R/LED/pot/button/PSU with KCL and bridge-parity tests. RFC 0001 marked Accepted. Desktop demos still use the existing `of-ui` glue until E3/E4.
 - **RFC 0001 (component API):** [`rfcs/0001-component-api.md`](rfcs/0001-component-api.md) adopts [`docs/design/engine-components.md`](docs/design/engine-components.md) as the normative E2 design (engine core, `Component` trait, invariants, five ported parts). Accepted; tracks #46.
 - **`ohmforge validate-parts`:** walks a parts tree, parses every `part.toml`, runs loader consistency checks and requires CC-BY-SA-4.0 licence fields (`cargo run -p of-cli -- validate-parts parts/`).
