@@ -365,6 +365,190 @@ fn pin_nets(pl: &Placement, part: &PartFile, model: &AnalogModel) -> Result<Vec<
 
 const KELVIN: f64 = 273.15;
 
+/// Result of adding one placement to a circuit.
+#[derive(Debug)]
+pub struct PlacementAdded {
+    /// Device name (or subcircuit instance prefix).
+    pub instance: String,
+    /// Switch metadata, if this placement is a switch.
+    pub switch: Option<Switch>,
+    /// Potentiometer metadata, if this placement is a potentiometer.
+    pub pot: Option<Pot>,
+    /// Ignored parameters and similar notes.
+    pub warnings: Vec<String>,
+}
+
+/// Add one placement's devices to an existing (unfinalised) circuit.
+pub fn add_placement(
+    c: &mut Circuit,
+    lib: &Library,
+    pl: &Placement,
+    corner: Corner,
+    env: &Env,
+) -> Result<PlacementAdded, BridgeError> {
+    let build_env = BuildEnv {
+        temp_c: env.temp_c,
+        tnom_c: env.tnom_c,
+    };
+    let temp_k = env.temp_c + KELVIN;
+    let dt = env.temp_c - env.tnom_c;
+    let lp = lib
+        .get(&pl.part)
+        .ok_or_else(|| BridgeError::UnknownPart(pl.refdes.clone(), pl.part.clone()))?;
+    let model = lp
+        .part
+        .analog
+        .as_ref()
+        .ok_or_else(|| BridgeError::NoAnalogModel(pl.refdes.clone(), pl.part.clone()))?;
+    let nets = pin_nets(pl, &lp.part, model)?;
+    let r = Resolved {
+        refdes: &pl.refdes,
+        model,
+        overrides: &pl.params,
+        corner,
+    };
+    let name = pl.refdes.to_ascii_lowercase();
+    let nodes: Vec<usize> = nets.iter().map(|n| c.node(n)).collect();
+    let tc = 1.0 + r.get("tc1").unwrap_or(0.0) * dt + r.get("tc2").unwrap_or(0.0) * dt * dt;
+    let with_tnom = |mut m: BTreeMap<String, f64>| {
+        m.entry("tnom".into()).or_insert(env.tnom_c);
+        m
+    };
+    let mut warnings = Vec::new();
+    let note = |w: &mut Vec<String>, unknown: Vec<String>| {
+        if !unknown.is_empty() {
+            w.push(format!(
+                "{}: model parameters not supported, ignored: {}",
+                pl.refdes,
+                unknown.join(", ")
+            ));
+        }
+    };
+    let positive = |key: &str| -> Result<f64, BridgeError> {
+        let v = r.need(key)?;
+        if v > 0.0 {
+            Ok(v)
+        } else {
+            Err(BridgeError::Param(
+                pl.refdes.clone(),
+                format!("'{key}' must be positive (got {v})"),
+            ))
+        }
+    };
+    let mut switch = None;
+    let mut pot = None;
+    let instance = match model.kind.as_str() {
+        "resistor" => {
+            let ohms = positive("resistance")? * tc;
+            c.add(Resistor::new(&name, nodes[0], nodes[1], ohms).with_tolerance(r.tolerance("resistance")))?;
+            name
+        }
+        "load" => {
+            let ohms = match r.get("resistance") {
+                Some(v) => v,
+                None => positive("voltage")? / positive("current")?,
+            };
+            c.add(Resistor::new(&name, nodes[0], nodes[1], ohms))?;
+            name
+        }
+        "switch" => {
+            let s = Switch {
+                device: name.clone(),
+                ron: positive("ron")?,
+                roff: positive("roff")?,
+            };
+            let ohms = if switch_closed(&pl.params) { s.ron } else { s.roff };
+            c.add(Resistor::new(&name, nodes[0], nodes[1], ohms))?;
+            switch = Some(s);
+            name
+        }
+        "potentiometer" => {
+            let p = Pot {
+                a: format!("{name}_a"),
+                b: format!("{name}_b"),
+                resistance: positive("resistance")? * tc,
+            };
+            let (ra, rb) = p.legs(pot_position(&pl.params));
+            let tol = r.tolerance("resistance");
+            c.add(Resistor::new(&p.a, nodes[0], nodes[1], ra).with_tolerance(tol))?;
+            c.add(Resistor::new(&p.b, nodes[1], nodes[2], rb).with_tolerance(tol))?;
+            pot = Some(p);
+            name
+        }
+        "capacitor" => {
+            let cap = positive("capacitance")? * tc;
+            c.add(
+                Capacitor::new(&name, nodes[0], nodes[1], cap, r.get("ic"))
+                    .with_parasitics(r.get("esr").unwrap_or(0.0), r.get("esl").unwrap_or(0.0))
+                    .with_tolerance(r.tolerance("capacitance")),
+            )?;
+            name
+        }
+        "inductor" => {
+            let l = positive("inductance")? * tc;
+            c.add(
+                Inductor::new(&name, nodes[0], nodes[1], l, r.get("ic"))
+                    .with_series_resistance(r.get("rser").unwrap_or(0.0))
+                    .with_tolerance(r.tolerance("inductance")),
+            )?;
+            name
+        }
+        "diode" | "led" => {
+            let p = with_tnom(r.all(&["area"]));
+            let (dm, unknown) = if model.kind == "led" {
+                DiodeModel::led_from_params(&p)
+            } else {
+                DiodeModel::from_params(&p)
+            };
+            note(&mut warnings, unknown);
+            let area = r.get("area").unwrap_or(1.0);
+            c.add(Diode::new(&name, nodes[0], nodes[1], dm, area, false).with_temp(temp_k))?;
+            name
+        }
+        "npn" | "pnp" => {
+            let pol = if model.kind == "npn" { 1.0 } else { -1.0 };
+            let (bm, unknown) = BjtModel::from_params(pol, &with_tnom(r.all(&["area"])));
+            note(&mut warnings, unknown);
+            let area = r.get("area").unwrap_or(1.0);
+            c.add(Bjt::new(&name, nodes[0], nodes[1], nodes[2], bm, area, false).with_temp(temp_k))?;
+            name
+        }
+        "subckt" => {
+            let text = lp
+                .spice
+                .as_deref()
+                .ok_or_else(|| BridgeError::Library(format!("{}: SPICE file not loaded", pl.part)))?;
+            let sub = model.subckt.as_deref().unwrap_or_default();
+            let inst = format!("x{name}");
+            let mut card = format!("{inst} {} {sub}", nets.join(" "));
+            for (k, v) in r.all(&[]) {
+                let _ = write!(card, " {k}={v:e}");
+            }
+            let deck_text = format!("* {} ({})\n{text}\n{card}\n.end\n", pl.refdes, pl.part);
+            let deck = of_netlist::spice::parse_str(&deck_text)
+                .map_err(|e| BridgeError::Spice(pl.refdes.clone(), e.to_string()))?;
+            warnings.extend(deck.warnings.iter().map(|w| format!("{}: {w}", pl.refdes)));
+            add_deck(c, &deck, &build_env, &mut warnings).map_err(|e| match e {
+                BuildError::Circuit(ce) => BridgeError::Circuit(ce),
+                other => BridgeError::Spice(pl.refdes.clone(), other.to_string()),
+            })?;
+            inst
+        }
+        other => {
+            return Err(BridgeError::Library(format!(
+                "{}: unknown analog kind '{other}'",
+                pl.part
+            )));
+        }
+    };
+    Ok(PlacementAdded {
+        instance,
+        switch,
+        pot,
+        warnings,
+    })
+}
+
 /// Build the circuit for `board`.
 pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
     let mut c = Circuit::new();
@@ -372,163 +556,19 @@ pub fn build(lib: &Library, board: &Board) -> Result<BuiltBoard, BridgeError> {
     let mut warnings = Vec::new();
     let mut switches = BTreeMap::new();
     let mut pots = BTreeMap::new();
-    let env = BuildEnv {
-        temp_c: board.env.temp_c,
-        tnom_c: board.env.tnom_c,
-    };
-    let temp_k = board.env.temp_c + KELVIN;
-    let dt = board.env.temp_c - board.env.tnom_c;
     for pl in &board.placements {
-        let lp = lib
-            .get(&pl.part)
-            .ok_or_else(|| BridgeError::UnknownPart(pl.refdes.clone(), pl.part.clone()))?;
-        let model = lp
-            .part
-            .analog
-            .as_ref()
-            .ok_or_else(|| BridgeError::NoAnalogModel(pl.refdes.clone(), pl.part.clone()))?;
-        let nets = pin_nets(pl, &lp.part, model)?;
-        let r = Resolved {
-            refdes: &pl.refdes,
-            model,
-            overrides: &pl.params,
-            corner: board.corner,
-        };
-        let name = pl.refdes.to_ascii_lowercase();
         if instances.contains_key(&pl.refdes) {
             return Err(BridgeError::Duplicate(pl.refdes.clone()));
         }
-        let nodes: Vec<usize> = nets.iter().map(|n| c.node(n)).collect();
-        let tc = 1.0 + r.get("tc1").unwrap_or(0.0) * dt + r.get("tc2").unwrap_or(0.0) * dt * dt;
-        let with_tnom = |mut m: BTreeMap<String, f64>| {
-            m.entry("tnom".into()).or_insert(board.env.tnom_c);
-            m
-        };
-        let note = |w: &mut Vec<String>, unknown: Vec<String>| {
-            if !unknown.is_empty() {
-                w.push(format!(
-                    "{}: model parameters not supported, ignored: {}",
-                    pl.refdes,
-                    unknown.join(", ")
-                ));
-            }
-        };
-        let positive = |key: &str| -> Result<f64, BridgeError> {
-            let v = r.need(key)?;
-            if v > 0.0 {
-                Ok(v)
-            } else {
-                Err(BridgeError::Param(
-                    pl.refdes.clone(),
-                    format!("'{key}' must be positive (got {v})"),
-                ))
-            }
-        };
-        let inst = match model.kind.as_str() {
-            "resistor" => {
-                let ohms = positive("resistance")? * tc;
-                c.add(Resistor::new(&name, nodes[0], nodes[1], ohms).with_tolerance(r.tolerance("resistance")))?;
-                name
-            }
-            "load" => {
-                let ohms = match r.get("resistance") {
-                    Some(v) => v,
-                    None => positive("voltage")? / positive("current")?,
-                };
-                c.add(Resistor::new(&name, nodes[0], nodes[1], ohms))?;
-                name
-            }
-            "switch" => {
-                let s = Switch {
-                    device: name.clone(),
-                    ron: positive("ron")?,
-                    roff: positive("roff")?,
-                };
-                let ohms = if switch_closed(&pl.params) { s.ron } else { s.roff };
-                c.add(Resistor::new(&name, nodes[0], nodes[1], ohms))?;
-                switches.insert(pl.refdes.clone(), s);
-                name
-            }
-            "potentiometer" => {
-                let p = Pot {
-                    a: format!("{name}_a"),
-                    b: format!("{name}_b"),
-                    resistance: positive("resistance")? * tc,
-                };
-                let (ra, rb) = p.legs(pot_position(&pl.params));
-                let tol = r.tolerance("resistance");
-                c.add(Resistor::new(&p.a, nodes[0], nodes[1], ra).with_tolerance(tol))?;
-                c.add(Resistor::new(&p.b, nodes[1], nodes[2], rb).with_tolerance(tol))?;
-                pots.insert(pl.refdes.clone(), p);
-                name
-            }
-            "capacitor" => {
-                let cap = positive("capacitance")? * tc;
-                c.add(
-                    Capacitor::new(&name, nodes[0], nodes[1], cap, r.get("ic"))
-                        .with_parasitics(r.get("esr").unwrap_or(0.0), r.get("esl").unwrap_or(0.0))
-                        .with_tolerance(r.tolerance("capacitance")),
-                )?;
-                name
-            }
-            "inductor" => {
-                let l = positive("inductance")? * tc;
-                c.add(
-                    Inductor::new(&name, nodes[0], nodes[1], l, r.get("ic"))
-                        .with_series_resistance(r.get("rser").unwrap_or(0.0))
-                        .with_tolerance(r.tolerance("inductance")),
-                )?;
-                name
-            }
-            "diode" | "led" => {
-                let p = with_tnom(r.all(&["area"]));
-                let (dm, unknown) = if model.kind == "led" {
-                    DiodeModel::led_from_params(&p)
-                } else {
-                    DiodeModel::from_params(&p)
-                };
-                note(&mut warnings, unknown);
-                let area = r.get("area").unwrap_or(1.0);
-                c.add(Diode::new(&name, nodes[0], nodes[1], dm, area, false).with_temp(temp_k))?;
-                name
-            }
-            "npn" | "pnp" => {
-                let pol = if model.kind == "npn" { 1.0 } else { -1.0 };
-                let (bm, unknown) = BjtModel::from_params(pol, &with_tnom(r.all(&["area"])));
-                note(&mut warnings, unknown);
-                let area = r.get("area").unwrap_or(1.0);
-                c.add(Bjt::new(&name, nodes[0], nodes[1], nodes[2], bm, area, false).with_temp(temp_k))?;
-                name
-            }
-            "subckt" => {
-                let text = lp
-                    .spice
-                    .as_deref()
-                    .ok_or_else(|| BridgeError::Library(format!("{}: SPICE file not loaded", pl.part)))?;
-                let sub = model.subckt.as_deref().unwrap_or_default();
-                let inst = format!("x{name}");
-                let mut card = format!("{inst} {} {sub}", nets.join(" "));
-                for (k, v) in r.all(&[]) {
-                    let _ = write!(card, " {k}={v:e}");
-                }
-                let deck_text = format!("* {} ({})\n{text}\n{card}\n.end\n", pl.refdes, pl.part);
-                let deck = of_netlist::spice::parse_str(&deck_text)
-                    .map_err(|e| BridgeError::Spice(pl.refdes.clone(), e.to_string()))?;
-                warnings.extend(deck.warnings.iter().map(|w| format!("{}: {w}", pl.refdes)));
-                add_deck(&mut c, &deck, &env, &mut warnings).map_err(|e| match e {
-                    BuildError::Circuit(ce) => BridgeError::Circuit(ce),
-                    other => BridgeError::Spice(pl.refdes.clone(), other.to_string()),
-                })?;
-                inst
-            }
-            other => {
-                return Err(BridgeError::Library(format!(
-                    "{}: unknown analog kind '{other}'",
-                    pl.part
-                )));
-            }
-        };
-        instances.insert(pl.refdes.clone(), inst);
+        let added = add_placement(&mut c, lib, pl, board.corner, &board.env)?;
+        warnings.extend(added.warnings);
+        if let Some(s) = added.switch {
+            switches.insert(pl.refdes.clone(), s);
+        }
+        if let Some(p) = added.pot {
+            pots.insert(pl.refdes.clone(), p);
+        }
+        instances.insert(pl.refdes.clone(), added.instance);
     }
     Ok(BuiltBoard {
         circuit: c,

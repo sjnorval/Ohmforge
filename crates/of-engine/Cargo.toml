@@ -1,0 +1,23 @@
+[package]
+name = "of-engine"
+description = "Base engine: elaborates components into the analog solver and checks invariants."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+of-core.workspace = true
+of-analog.workspace = true
+of-component-api.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+of-components.workspace = true
+of-parts.workspace = true

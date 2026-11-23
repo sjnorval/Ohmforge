@@ -2029,7 +2029,9 @@ dependencies = [
 name = "of-component-api"
 version = "0.0.1"
 dependencies = [
+ "of-analog",
  "of-core",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2066,6 +2068,18 @@ version = "0.0.1"
 [[package]]
 name = "of-digital"
 version = "0.0.1"
+
+[[package]]
+name = "of-engine"
+version = "0.0.1"
+dependencies = [
+ "of-analog",
+ "of-component-api",
+ "of-components",
+ "of-core",
+ "of-parts",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "of-firmware"

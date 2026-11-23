@@ -14,4 +14,4 @@ Smaller changes do not need an RFC; use an ordinary pull request.
 
 | Number | Title | Status | Tracking |
 |---|---|---|---|
-| [0001](0001-component-api.md) | Component API for engine E2 | Draft | [#46](https://github.com/sjnorval/Ohmforge/issues/46) |
+| [0001](0001-component-api.md) | Component API for engine E2 | Accepted | [#46](https://github.com/sjnorval/Ohmforge/issues/46) |

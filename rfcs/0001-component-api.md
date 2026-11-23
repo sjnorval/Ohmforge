@@ -1,6 +1,6 @@
 # RFC 0001: Component API for engine E2
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Author:** Stefan Norval \<sjnorval@gmail.com\>
 - **Date:** 2026-11-23
 - **Tracking issue:** [#46](https://github.com/sjnorval/Ohmforge/issues/46)
