@@ -3,7 +3,7 @@
 
 mod common;
 
-use of_analog::devices::{SourceValue, VoltageSource};
+use of_analog::devices::{CurrentSource, SourceValue, VoltageSource};
 use of_analog::{Options, analysis};
 use of_components::Corner;
 use of_components::analog::{Board, BridgeError, Placement, build, to_spice};
@@ -28,6 +28,42 @@ fn op_led_current(board: &Board) -> f64 {
         .unwrap();
     let op = analysis::operating_point(&mut b.circuit, &Options::default()).unwrap();
     -op.get("i(v1)").unwrap()
+}
+
+/// Forward voltage of a library LED at 20 mA (anode positive).
+fn led_vf_at_20ma(part_id: &str) -> f64 {
+    let lib = common::library();
+    let board = Board {
+        placements: vec![Placement::new("D1", part_id, &[("A", "a"), ("K", "gnd")])],
+        ..Board::default()
+    };
+    let mut b = build(&lib, &board).unwrap();
+    let a = b.circuit.node("a");
+    // SPICE current source from ground into the anode (forward bias).
+    b.circuit
+        .add(CurrentSource::new("i1", 0, a, SourceValue::dc(20e-3)))
+        .unwrap();
+    let op = analysis::operating_point(&mut b.circuit, &Options::default()).unwrap();
+    op.get("v(a)").unwrap()
+}
+
+#[test]
+fn coloured_leds_match_datasheet_forward_voltage() {
+    // Kingbright APT1608 family: typical VF at IF = 20 mA from the datasheets
+    // linked in each part.toml. Allow a few percent for Shockley fit.
+    let cases = [
+        ("generic.led-red-0603", 2.0),
+        ("generic.led-green-0603", 2.2),
+        ("generic.led-blue-0603", 3.3),
+    ];
+    for (id, want) in cases {
+        let vf = led_vf_at_20ma(id);
+        let tol = 0.03 * want;
+        assert!(
+            (vf - want).abs() <= tol,
+            "{id}: Vf={vf} V at 20 mA, want {want} V ± {tol}"
+        );
+    }
 }
 
 #[test]

@@ -28,6 +28,8 @@ Nine parts, all with an `[analog]` section. There is no digital or protocol mode
 | `generic.capacitor-mlcc` | `parts/passives/capacitor-mlcc` | X5R/X7R MLCC with ESR/ESL; DC-bias derating is not modelled |
 | `generic.capacitor-tantalum` | `parts/passives/capacitor-tantalum` | 22 µF 16 V tantalum, including ESR for the AMS1117 output cap |
 | `generic.led-red-0603` | `parts/leds/red-0603` | Red 0603 LED (Shockley plus light output), typical 2.0 V at 20 mA |
+| `generic.led-green-0603` | `parts/leds/green-0603` | Green 0603 LED (APT1608SGC), typical 2.2 V at 20 mA |
+| `generic.led-blue-0603` | `parts/leds/blue-0603` | Blue 0603 LED (APT1608QBC/D), typical 3.3 V at 20 mA |
 | `generic.npn-small-signal` | `parts/discretes/npn-small-signal` | MMBT3904-class Gummel-Poon NPN (Ohmforge parameters, not a vendor model) |
 | `ams.ams1117-3.3` | `parts/regulators/ams1117` | AMS1117-3.3 1 A LDO macromodel (`ams1117.lib`), checked against the datasheet and ngspice |
 | `bosch.bme280` | `parts/sensors/bosch-bme280` | GY-BME280 supply load only; I2C behaviour is not implemented |
@@ -107,7 +109,8 @@ LEDs are listed under [Output](#output).
 ## Output
 
 - [x] **Red 0603 LED** (`generic.led-red-0603`) — Analog (LED Shockley model with `popt()` / `bright()` probes); GPIO. P1. Already co-simulated with a 330 Ω series resistor on GPIO8 in the blinky tests and the desktop demo. Dimmed and faded through LEDC PWM by esp-hal firmware (`firmware/esp32c3-esp-hal-adc-pwm`).
-- [ ] **Other LED colours and sizes** (green, yellow, blue, white; 3 mm / 5 mm through-hole) — Analog, same `led` kind with different Vf and wavelength; GPIO. P2. No new peripheral needed for on/off; PWM dimming can use LEDC.
+- [x] **Green and blue 0603 LEDs** (`generic.led-green-0603`, `generic.led-blue-0603`) — Analog, same `led` kind; GPIO. P2. Kingbright APT1608SGC / APT1608QBC/D; datasheet Vf at 20 mA checked in the bridge tests. Remaining colours and through-hole sizes still open.
+- [ ] **Other LED colours and sizes** (yellow, white; 3 mm / 5 mm through-hole) — Analog, same `led` kind with different Vf and wavelength; GPIO. P2. No new peripheral needed for on/off; PWM dimming can use LEDC.
 - [ ] **Discrete RGB LED** (common cathode or anode) — Analog, three LED devices; GPIO or PWM/LEDC. P2. Full colour mixing can use three LEDC channels.
 - [ ] **Addressable RGB LED, WS2812 / NeoPixel class** — Digital protocol model (and analog supply current if possible); RMT (or very tight GPIO timing). P2. Blocked on RMT, which is a phase P3 peripheral. A bit-banged GPIO path is not realistic until output timing is much tighter than today.
 - [ ] **7-segment display** (single or four-digit, raw or TM1637 class) — Digital (segment map) plus analog LED loads; GPIO or I2C, sometimes a protocol chip. P2. A raw display needs GPIO outputs (modelled) and usually a driver or many pins; TM1637 needs a two-wire protocol on GPIO. An I2C backpack needs I2C (not modelled).
@@ -205,7 +208,7 @@ Checklist tiers below are the P1/P2/P3 *component* priorities, not roadmap phase
 | Boards and interconnect | 10 | 0 | 5 | 3 | 2 |
 | **Total** | **84** | **9** | **17** | **48** | **19** |
 
-The nine library parts are: the chip resistor, MLCC, tantalum capacitor, red 0603 LED, small-signal NPN, AMS1117-3.3, the BME280 supply load, the tactile push button and the potentiometer.
+The eleven library parts are: the chip resistor, MLCC, tantalum capacitor, red/green/blue 0603 LEDs, small-signal NPN, AMS1117-3.3, the BME280 supply load, the tactile push button and the potentiometer.
 
 ## Suggested order
 

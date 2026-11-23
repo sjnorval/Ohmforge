@@ -18,6 +18,8 @@ Current parts:
 | `passives/capacitor-mlcc` | `generic.capacitor-mlcc` | Ceramic chip capacitor (X5R/X7R) |
 | `passives/capacitor-tantalum` | `generic.capacitor-tantalum` | Tantalum chip capacitor 22 µF 16 V |
 | `leds/red-0603` | `generic.led-red-0603` | LED, red, 0603 |
+| `leds/green-0603` | `generic.led-green-0603` | LED, green, 0603 |
+| `leds/blue-0603` | `generic.led-blue-0603` | LED, blue, 0603 |
 | `discretes/npn-small-signal` | `generic.npn-small-signal` | Small-signal NPN transistor (MMBT3904 class) |
 | `switches/pushbutton-6mm` | `generic.pushbutton` | Tactile push button, 6 mm, SPST-NO (ideal switch: `ron`/`roff`) |
 | `passives/bourns-ptv09a` | `bourns.ptv09a-b103` | Potentiometer, 9 mm rotary, 10 kΩ linear (two resistors split at the wiper: `position`) |
