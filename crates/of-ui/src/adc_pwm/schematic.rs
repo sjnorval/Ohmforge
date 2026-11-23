@@ -216,11 +216,11 @@ fn draw(
         point(18.0, 210.0)
     };
     let plus_left = position.is_some();
-    let (plus, psu) = draw_psu(
+    let (plus, minus_pt, psu) = draw_psu(
         &painter,
         psu_origin,
         supply.volts,
-        supply.amps,
+        supply.display_amps(),
         supply.mode != supply::SupplyMode::Off,
         supply::mode_label(supply.mode),
         plus_left,
@@ -243,18 +243,15 @@ fn draw(
     if let Some(route) = gnd_route {
         for poly in &route.polylines {
             if poly.iter().any(|p| p.distance(minus) <= 1e-4) {
-                // Dimmer: the minus pin is name-connected only (no visible stub).
-                if position.is_none() {
-                    for piece in wiring::poly_with_hops(poly, &route.hops) {
-                        paint_poly(&piece, wire);
-                    }
+                for piece in wiring::poly_with_hops(poly, &route.hops) {
+                    paint_poly(&piece, wire);
                 }
             }
         }
     }
-    let _ = plus;
+    let _ = (plus, minus_pt);
     if position.is_none() {
-        label(96.0, 266.0, Align2::CENTER_CENTER, "GND", muted);
+        label(116.0, 262.0, Align2::CENTER_CENTER, "GND", muted);
     }
     hover_tooltip(ui, chip, "u1", "U1 · ESP32-C3");
     hover_tooltip(

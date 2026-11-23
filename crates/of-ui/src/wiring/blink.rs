@@ -22,13 +22,6 @@ fn pin(id: &str, name: &str, pos: Point, dir: Direction, net: &str) -> Pin {
     }
 }
 
-fn stub_pin(id: &str, name: &str, pos: Point, dir: Direction, net: &str) -> Pin {
-    Pin {
-        routed: false,
-        ..pin(id, name, pos, dir, net)
-    }
-}
-
 /// The series-resistor zigzag, in schematic units, from R1 pin 1 to pin 2.
 ///
 /// This is part of the R1 symbol and is painted with the live signal stroke so
@@ -87,9 +80,7 @@ pub fn board() -> Schematic {
                 body: Rect::from_min_max(p(18.0, 210.0), p(96.0, 262.0)),
                 pins: vec![
                     pin("plus", "+", p(96.0, 224.0), Direction::East, "vdd"),
-                    // The minus pin is labelled GND under the box and connects by
-                    // name; only a perpendicular stub is drawn.
-                    stub_pin("minus", "-", p(96.0, 252.0), Direction::East, "gnd"),
+                    pin("minus", "\u{2212}", p(96.0, 252.0), Direction::East, "gnd"),
                 ],
             },
             Component {
@@ -121,7 +112,7 @@ pub fn board() -> Schematic {
             Rect::from_min_max(p(294.0, 100.0), p(308.0, 112.0)), // K
             Rect::from_min_max(p(254.0, 119.0), p(304.0, 131.0)), // Red LED
             Rect::from_min_max(p(211.0, 195.0), p(233.0, 207.0)), // GND under symbol
-            Rect::from_min_max(p(85.0, 260.0), p(107.0, 272.0)),  // GND under PSU
+            Rect::from_min_max(p(104.0, 256.0), p(128.0, 268.0)), // GND right of the PSU, under its return
         ],
     };
 

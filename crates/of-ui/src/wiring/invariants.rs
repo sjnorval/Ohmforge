@@ -35,6 +35,8 @@ pub fn check(schematic: &Schematic) -> Vec<Violation> {
     out.extend(junction_degrees(schematic));
     out.extend(pin_stubs(schematic));
     out.extend(crossing_hops(schematic));
+    out.extend(source_return_paths(schematic));
+    out.extend(label_clearance(schematic));
     out.sort_by(|a, b| a.code.cmp(&b.code).then(a.detail.cmp(&b.detail)));
     out
 }
@@ -655,6 +657,128 @@ fn crossing_hops(schematic: &Schematic) -> Vec<Violation> {
                 "hop-at-junction",
                 format!("hop on {net} at {} sits on a junction dot", fmt_pt(hop.over)),
             ));
+        }
+    }
+    out
+}
+
+/// A bench PSU is a two-terminal source: + must be routed onto a power net
+/// and - onto a ground net, so the drawn return is the same net the solver uses.
+fn source_return_paths(schematic: &Schematic) -> Vec<Violation> {
+    use crate::wiring::model::NetKind;
+    let mut out = Vec::new();
+    for comp in &schematic.components {
+        let is_psu = comp.id == "psu" || comp.reference.eq_ignore_ascii_case("PSU");
+        if !is_psu {
+            continue;
+        }
+        let plus = comp.pins.iter().find(|p| p.id == "plus" || p.name == "+");
+        let minus = comp
+            .pins
+            .iter()
+            .find(|p| p.id == "minus" || p.name == "-" || p.name == "\u{2212}");
+        match plus {
+            Some(pin) => check_source_pin(schematic, &mut out, &comp.id, pin, NetKind::Power, "power"),
+            None => out.push(Violation::new("source-open", format!("{} has no + pin", comp.id))),
+        }
+        match minus {
+            Some(pin) => check_source_pin(schematic, &mut out, &comp.id, pin, NetKind::Ground, "ground"),
+            None => out.push(Violation::new("source-open", format!("{} has no - pin", comp.id))),
+        }
+    }
+    out
+}
+
+fn check_source_pin(
+    schematic: &Schematic,
+    out: &mut Vec<Violation>,
+    component: &str,
+    pin: &crate::wiring::model::Pin,
+    expected: crate::wiring::model::NetKind,
+    kind_name: &str,
+) {
+    if !pin.routed {
+        out.push(Violation::new(
+            "source-open",
+            format!(
+                "{}.{} is a name-only stub; it must be routed onto the {kind_name} net",
+                component, pin.id
+            ),
+        ));
+    }
+    let Some(net_id) = pin.net.as_deref() else {
+        out.push(Violation::new(
+            "source-open",
+            format!("{}.{} is not assigned to a net", component, pin.id),
+        ));
+        return;
+    };
+    let Some(net) = schematic.net(net_id) else {
+        out.push(Violation::new(
+            "source-open",
+            format!("{}.{} names unknown net {net_id}", component, pin.id),
+        ));
+        return;
+    };
+    if net.kind != expected {
+        out.push(Violation::new(
+            "source-open",
+            format!(
+                "{}.{} is on {net_id} ({}) but must be on a {kind_name} net",
+                component,
+                pin.id,
+                net.kind.as_str()
+            ),
+        ));
+    }
+    let on_route = net.route.as_ref().is_some_and(|route| {
+        route
+            .polylines
+            .iter()
+            .any(|poly| poly.iter().any(|p| p.distance(pin.position) <= EPS))
+    });
+    if pin.routed && !on_route {
+        out.push(Violation::new(
+            "source-open",
+            format!("{}.{} is not joined into the routed {net_id} net", component, pin.id),
+        ));
+    }
+}
+
+/// Text labels (one-row keepouts) must not straddle or crowd a component's edge:
+/// a label outside a body keeps a small gap from it. A label centred inside a
+/// body is that part's own text (e.g. the SW1 caption) and is left alone.
+fn label_clearance(schematic: &Schematic) -> Vec<Violation> {
+    /// Taller keepouts are routing blocks, not text rows.
+    const LABEL_ROW_MAX: f32 = 16.0;
+    /// Minimum gap between a label box and a body edge.
+    const LABEL_GAP: f32 = 2.0;
+    let mut out = Vec::new();
+    for k in &schematic.keepouts {
+        if k.max.y - k.min.y > LABEL_ROW_MAX {
+            continue;
+        }
+        for comp in &schematic.components {
+            let b = comp.body;
+            let centre = Point::new((k.min.x + k.max.x) * 0.5, (k.min.y + k.max.y) * 0.5);
+            if point_in_interior(centre, b) {
+                continue;
+            }
+            let overlaps = k.min.x - LABEL_GAP < b.max.x - EPS
+                && k.max.x + LABEL_GAP > b.min.x + EPS
+                && k.min.y - LABEL_GAP < b.max.y - EPS
+                && k.max.y + LABEL_GAP > b.min.y + EPS;
+            if overlaps {
+                out.push(Violation::new(
+                    "label-on-body",
+                    format!(
+                        "label box {}-{} is within {LABEL_GAP} px of {} body",
+                        fmt_pt(k.min),
+                        fmt_pt(k.max),
+                        comp.id
+                    ),
+                ));
+            }
         }
     }
     out

@@ -7,7 +7,7 @@ component gnd_sym GND 211,174 233,184
   pin pin 222,174 N gnd
 component psu PSU 300,168 378,220
   pin plus 300,182 W vdd
-  pin minus 300,210 W gnd stub
+  pin minus 300,210 W gnd
 component r2 R2 157,70 207,94
   pin 1 157,82 W gpio8
   pin 2 207,82 E led_a
@@ -21,9 +21,10 @@ component u1 U1 18,49 120,145
   pin gpio2 120,112 E gpio2
   pin gnd 120,133 E gnd
 net gnd ground u1.gnd d1.K psu.minus gnd_sym.pin rv1.1
-  route 291,82 312,82 312,133 120,133
-  route 222,133 222,174
-  route 300,210 296,210
+  route 291,82 312,82 312,162 222,162
+  route 140,162 222,162
+  route 222,174 222,162
+  route 300,210 140,210 140,133 120,133
   route 62,228 62,232
 net gpio2 signal u1.gpio2 rv1.wiper
   route 86,198 90,198 90,156 128,156 128,112 120,112
@@ -48,8 +49,10 @@ keepout 36,172 50,184
 keepout 36,214 50,226
 keepout 50,252 74,264
 keepout 8,16 400,50
-junction gnd 222,133
 junction vdd 62,152
+junction gnd 140,162
+junction gnd 222,162
 hop gpio2 128,133 h
 hop gpio2 128,152 h
-hop gnd 222,152 h
+hop gnd 140,152 h
+hop gnd 240,162 v

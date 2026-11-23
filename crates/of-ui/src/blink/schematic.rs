@@ -180,11 +180,11 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
     // VDD pin on the left of the chip; existing pin labels stay put.
     label(27.0, 64.0, Align2::LEFT_CENTER, "VDD", text);
     let psu = board.component("psu").expect("psu");
-    let (plus, psu_rect) = draw_psu(
+    let (plus, minus_pt, psu_rect) = draw_psu(
         &painter,
         point(psu.body.min.x, psu.body.min.y),
         supply.volts,
-        supply.amps,
+        supply.display_amps(),
         supply.mode != supply::SupplyMode::Off,
         supply::mode_label(supply.mode),
         false,
@@ -206,8 +206,8 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
             }
         }
     }
-    label(96.0, 266.0, Align2::CENTER_CENTER, "GND", muted);
-    let _ = plus;
+    label(116.0, 262.0, Align2::CENTER_CENTER, "GND", muted);
+    let _ = (plus, minus_pt);
 
     hover_tooltip(ui, chip, "u1", "U1 \u{00b7} ESP32-C3");
     hover_tooltip(

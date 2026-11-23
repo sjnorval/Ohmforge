@@ -47,7 +47,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |
-| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, bench PSU whose Vset is tracked by GPIO V_IH/V_IL, virtual V/A meters, serial monitor for UART0 with hex view and find). Load-screen splash (packed EILIi frames, skip, persistent Show startup animation setting, and `--no-splash` / `OF_NO_SPLASH`) |
+| `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, two-terminal bench PSU (+ to VDD, − routed to GND) whose Vset is tracked by GPIO V_IH/V_IL and whose current is period-averaged with the LED, virtual V/A meters, serial monitor for UART0 with hex view and find). Load-screen splash (packed EILIi frames, skip, persistent Show startup animation setting, and `--no-splash` / `OF_NO_SPLASH`) |
 | `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui demo picker, with the EILIi load screen |
 | `of-web` | WASM entry point | Empty |
 | `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD); `ohmforge validate-parts parts/` |

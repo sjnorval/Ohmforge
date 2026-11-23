@@ -68,6 +68,8 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Fixed
 
+- **PSU return and current readout (#45):** the bench supply is a two-terminal source. Its symbol now has explicit + and − pins, and − is routed to the common GND net on every demo (dimmer, fade, blink, and the push-button boards), with the GND label moved clear of the PSU box and a wiring invariant (`label-on-body`) that flags labels straddling a part's edge. The electrical model already placed the source between `vdd` and node 0, with GPIO high-side drivers sourcing from that rail, so LED current does return through the instrument; a KCL test checks that the current out of + equals the current into − and matches the LED plus pot divider. The face and sidebar now show the period-averaged rail current, so a snapshot during the PWM-off half no longer looks like only the 10 kOhm pot (0.33 mA) while the LED averages ~2.6 mA. The ESP32-C3 core supply current is not modelled.
+- **Dimmer LED current chatter (#45):** the averaged LED-current trace used a 2 ms sliding window over 50 us samples, so a constant-duty 1 kHz PWM beat against the window and showed about +/- 0.2 mA of ripple. The display average is now a boxcar over two whole PWM periods, aligned to rising edges, and dimmer/fade also record a sample at each LEDC edge. At constant duty the averaged trace stays flat (ripple bound in tests); no extra noise is added.
 - **Dimmer scope header:** the live "wiper … V" readout no longer overlaps the time/div control at 980×720 or narrower. The wiper value sits on a second row under the caption; the blink and push-button scope headers were checked for the same clash.
 - Clippy warnings in `of-analog` (#2), and riscv-tests CI runs with a stale cache (#7).
 

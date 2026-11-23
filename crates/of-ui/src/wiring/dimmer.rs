@@ -123,8 +123,7 @@ fn build(wiper: Option<f32>) -> Schematic {
             body: Rect::from_min_max(p(300.0, 168.0), p(378.0, 220.0)),
             pins: vec![
                 pin("plus", "+", p(300.0, 182.0), Direction::West, "vdd"),
-                // No visible minus stub or label on this board; name connectivity only.
-                stub_pin("minus", "-", p(300.0, 210.0), Direction::West, "gnd"),
+                pin("minus", "\u{2212}", p(300.0, 210.0), Direction::West, "gnd"),
             ],
         });
     } else {
@@ -134,7 +133,7 @@ fn build(wiper: Option<f32>) -> Schematic {
             body: Rect::from_min_max(p(18.0, 210.0), p(96.0, 262.0)),
             pins: vec![
                 pin("plus", "+", p(96.0, 224.0), Direction::East, "vdd"),
-                stub_pin("minus", "-", p(96.0, 252.0), Direction::East, "gnd"),
+                pin("minus", "\u{2212}", p(96.0, 252.0), Direction::East, "gnd"),
             ],
         });
     }
@@ -207,7 +206,7 @@ fn build(wiper: Option<f32>) -> Schematic {
             Rect::from_min_max(p(8.0, 16.0), p(400.0, 50.0)),
         ]);
     } else {
-        keepouts.push(Rect::from_min_max(p(85.0, 260.0), p(107.0, 272.0))); // GND under PSU
+        keepouts.push(Rect::from_min_max(p(104.0, 256.0), p(128.0, 268.0))); // GND right of the PSU, under its return
     }
 
     let mut schematic = Schematic {
