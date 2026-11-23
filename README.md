@@ -23,6 +23,18 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 **Planned: editor integration.** Upload, serial monitor and debugging from VS Code and the Arduino IDE 2.x as if the simulator were a real board: a local control API, a virtual serial port, a GDB stub and hot reload in P3, then a VS Code extension and an Arduino board package in P4. The plan is in [`docs/design/editor-integration.md`](docs/design/editor-integration.md).
 
+**Planned: parts availability.** Keep BOMs current with stock, price breaks, lifecycle and alternates from global distributors and South African suppliers, checked on request (`ohmforge bom check`, or in the app) or on a schedule, using your own API keys and working offline from a dated cache, or entered by hand (P3 to P5). The plan is in [`docs/design/parts-availability.md`](docs/design/parts-availability.md).
+
+**Planned: AI link, scenario sweeps and datasheets.** Run thousands of variants of a circuit (tolerances, supply, temperature, load, firmware inputs) headlessly and in parallel, check them against pass/fail rules and graph the operating regions and thresholds; keep every part's datasheet on hand; and connect any AI model, local or cloud, through an MCP server to look up BOM details, run sweeps and review the design with cited datasheet pages. Read-only by default, with every change confirmed by you; no model is bundled (P3 to P5). The plan is in [`docs/design/ai-and-scenario-sweeps.md`](docs/design/ai-and-scenario-sweeps.md).
+
+**Planned: wires and traces.** Set each wire's size in mm² (AWG alongside), material and length, and each PCB trace's width and copper weight; the simulation then includes their resistance, heating and voltage drop and warns when a conductor is overloaded (P3 to P5). The plan is in [`docs/design/interconnects.md`](docs/design/interconnects.md).
+
+**Planned: buses.** I2C, SPI, full UART and CAN (the ESP32's TWAI) on the simulated chip, at transaction level for speed or edge by edge through the circuit so pull-ups, capacitance, baud mismatches and missing termination fail as on the bench; device models such as the BME280 and MPU-6050; protocol decoders with VCD and sigrok export (P3 to P5). The plan is in [`docs/design/buses.md`](docs/design/buses.md).
+
+**Planned: component stress states.** Parts show on the schematic when they approach or exceed their ratings, while running or paused (with a preview of an edit before resuming), with an optional mode in which they fail like real hardware (P3 to P5). The plan is in [`docs/design/component-stress-states.md`](docs/design/component-stress-states.md).
+
+**Planned: schematic themes and auto-layout.** Today's look stays the default; optional themes (Cyberpunk / Hacker, Wasteland Terminal, Blueprint, Paper and more), IEC or ANSI symbols, and automatic placement that cuts wire crossings while following schematic best practice (P3 and P4). The plans are in [`docs/design/schematic-themes.md`](docs/design/schematic-themes.md) and [`docs/design/schematic-layout.md`](docs/design/schematic-layout.md).
+
 ## Workspace layout
 
 | Crate | Purpose |

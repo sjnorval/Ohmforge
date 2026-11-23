@@ -161,7 +161,12 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
   - [ ] E5 (#49) Instruments as components: measurement service in `of-instruments` (trace store, period-aligned averages, duty/frequency), voltmeter, ammeter, scope, logger and UART console on any circuit. Needs E2 (E4 for the desktop panels)
   - [ ] E6 (#50) Parts library and BOM from components: `[symbol]`, pin kinds and `bom` in `part.toml`; the BOM comes from the circuit's components. Needs E4
 - [ ] Classic ESP32 (Xtensa LX6) through a QEMU sidecar process (`of-cpu-qemu-ipc`), kept out of process for licence and stability reasons
-- [ ] Peripherals: I2C, SPI, RMT, DAC (C3 and classic ESP32)
+- [ ] Peripherals: I2C, SPI, RMT, DAC (C3 and classic ESP32); the bus part is designed in [`design/buses.md`](design/buses.md), with TWAI/CAN in P4
+  - [ ] B1 Bus ports and device framework: typed I2C, SPI, UART and CAN ports in the component API, transaction-level and pin-level buses with one protocol model per device. Needs E2, E3, E4
+  - [ ] B2 I2C: C3 controller (master, then slave), open-drain pads, pull-ups and rise-time checks against the NXP UM10204 limits, BME280 I2C behaviour, MPU-6050 (GY-521) part. Needs B1
+  - [ ] B3 SPI: GPSPI2 master (modes 0 to 3, CS, DMA), then slave; SD card (SPI mode) and ST7735 models. Needs B1
+  - [ ] B4 UART complete: timed TX, UART1, data/parity/stop options, RTS/CTS and XON/XOFF, framing and parity errors at pin level, RS-485 direction; feeds the I2 virtual serial port. Needs B1
+  - [ ] B5 Logic analyser decoders (UART, I2C, SPI) and export to VCD and sigrok `.sr` (extends the P2 logic analyser item and UX decision d4). Needs E5, B2 to B4
 - [ ] Flash like real hardware: expose the simulated chip's UART0 (and later the C3's USB Serial/JTAG) as a virtual serial port (TCP/RFC 2217 first, then a host COM/PTY bridge), with the board's DTR/RTS auto-reset circuit driving EN and GPIO9 into the ROM's download mode, so unmodified `esptool`, `espflash`, the Arduino IDE and `idf.py flash` write the simulated SPI flash through the real ROM loader; flash contents persist with the project (editor-integration item I2, [`design/editor-integration.md`](design/editor-integration.md))
 - [ ] Editor integration foundations (design: [`design/editor-integration.md`](design/editor-integration.md); the plugins follow in P4)
   - [ ] I1 Control API and headless mode: `ohmforge serve` and the same server in `of-app`, JSON-RPC 2.0 over a named pipe / Unix socket or loopback TCP with a session token; open project, load and flash firmware, reset, run/pause, UART and readings; `ohmforge flash` client. Needs E3 (E4 for `project.open`)
@@ -173,6 +178,27 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
 - [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (exported wires use the same routed paths)
+- [ ] Parts availability, first slice (design: [`design/parts-availability.md`](design/parts-availability.md); builds on BOM v1 #59 and E6 #50)
+  - [ ] A1 Data model and offline cache: offers, price breaks (`Money` in millionths), lifecycle and alternates in `of-bom`; host-only `of-suppliers` with a SQLite cache, TTLs and `fetched_at`, ECB rates to ZAR, manual import; `ohmforge bom check --offline`; BOM v1's `part.toml` snapshot prices read as dated, lowest-priority offers; an `availability/` dataset kept apart from the CC-BY-SA `part.toml` definitions
+  - [ ] A2 LCSC, Mouser and DigiKey providers with the user's own keys in the OS keychain, per-provider rate budgets; `ohmforge parts refresh`
+  - [ ] A3 In-app “Check availability” with staleness badges and EOL / out-of-stock warnings, never blocking the simulation
+- [ ] Scenario sweeps, AI link and datasheets, first slice (design: [`design/ai-and-scenario-sweeps.md`](design/ai-and-scenario-sweeps.md); no model bundled, no AI vendor SDK linked)
+  - [ ] S1 Sweep spec, runner and checks: `of-sweep` TOML sweep files (grid and corner modes over component values and tolerances, supply, temperature, load), measures and pass/fail checks, parallel deterministic runner (`rayon`, per-run seeds), resumable SQLite results store, `ohmforge sweep run` and CSV export. Needs E4, E5
+  - [ ] AI1 MCP server, read-only: `ohmforge mcp` (stdio and loopback HTTP with a token) on top of the I1 control API; circuit, readings, BOM and cached availability tools; audit log. Needs I1, E4, A1
+  - [ ] AI2 BOM tools and proposals: `bom.check`, `parts.refresh` and alternates through the `of-suppliers` planner and the user's keychain keys and budgets (the model never sees keys); proposed BOM edits confirmed by the user, never overwriting hand entries. Needs AI1, A2
+  - [ ] D1 Datasheet sweep: datasheet URL, revision, date, SHA-256 and `fetched_at` for every part in the `availability/` dataset; PDFs cached per user, never committed; revision detection; `ohmforge parts datasheets refresh`. Needs A1 (A2 for supplier URLs)
+- [ ] Interconnects W1 (design: [`design/interconnects.md`](design/interconnects.md)): editable wire size in mm² (IEC 60228; AWG per ASTM B258 alongside), material, class, insulation and length per wire, and trace width and copper weight per trace in circuit files; conductor resistance with temperature in the simulation (nets without conductor data stay ideal); voltage-drop readings and warnings; wire lines in the BOM; breadboard jumper defaults. Needs E4, E6
+- [ ] Component stress states, first slice (design: [`design/component-stress-states.md`](design/component-stress-states.md))
+  - [ ] V1 Stress service: per-component stress from `Health`, `[electrical]` ratings and generic checks; normal, warning, over-limit and damaged states; readings, event log and CLI summary. Needs E2, E5, E6
+  - [ ] V2 Schematic visuals: outline, heat tint, shape-coded badges and tooltips with value, limit and source; colour-blind-safe; reduce-motion; optional auto-pause; the normal state unchanged. Needs V1, E4, T1
+  - [ ] V3 Paused edits with preview: DC re-solve of an edit while paused, preview of the new stress states, resume or cancel. Needs V1
+- [ ] Schematic themes, first slice (design: [`design/schematic-themes.md`](design/schematic-themes.md); today's look stays the default)
+  - [ ] T1 Theme model (TOML, CC-BY-SA-4.0) and the default theme, pixel-identical to today; theme picker with Ohmforge and Paper
+  - [ ] T2 Built-in themes and validator: Cyberpunk / Hacker first, Wasteland Terminal (green and amber phosphor; replaces the retro green CRT idea), Blueprint, Dark high-contrast, KiCad-like, colour-blind-safe; WCAG contrast checks; reduce-motion. Needs T1
+  - [ ] T3 Symbol styles: ANSI/IEEE 315 (zigzag, default) and IEC 60617 (rectangular resistor) as a separate setting. Needs T1, E6
+- [ ] Schematic auto-layout, first slice (design: [`design/schematic-layout.md`](design/schematic-layout.md); feeds the existing router)
+  - [ ] L1 Layout metrics and lint: crossings, bends, wire length and best-practice rule checks; `ohmforge layout check`. Needs E4
+  - [ ] L2 Full auto-layout: functional grouping, left-to-right signal flow, supply up and ground down, layered placement with port constraints to minimise crossings, power and ground symbols, net labels, decoupling capacitors next to their IC, grid-aligned and deterministic. Needs L1, E6
 - [ ] Explore compatibility with PCB fabrication services (JLCPCB, PCBWay, OSH Park and similar): export of board designs (Gerber/drill, BOM and pick-and-place/CPL for assembly), likely via the KiCad export
 - [ ] Release 0.2
 
@@ -186,16 +212,33 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Editor plugins (design: [`design/editor-integration.md`](design/editor-integration.md); need P3 items I1 to I4)
   - [ ] I5 VS Code extension MVP (TypeScript, AGPL-3.0-or-later, talks to the control API, never links Rust): start simulator, upload (on build), serial monitor, `ohmforge` debug type via cortex-debug or `cppdbg` against `of-gdb`, task provider, ESP-IDF / PlatformIO / Cargo snippets; Marketplace and Open VSX
   - [ ] I6 Arduino IDE 2.x board package: `package_ohmforge_index.json` with an “Ohmforge simulated ESP32-C3” board on the user's installed `esp32:esp32` core and toolchain (not redistributed), port discovery, upload through `ohmforge flash` or esptool, serial monitor and plotter over the virtual port
+- [ ] Parts availability A4 ([`design/parts-availability.md`](design/parts-availability.md)): Nexar, element14, TME, Arrow and JLCPCB providers after terms reviews, “find alternates” with variant swap, XLSX supplier sheets and supplier BOM/cart upload files
+- [ ] Scenario sweeps, AI link and datasheets, second slice ([`design/ai-and-scenario-sweeps.md`](design/ai-and-scenario-sweeps.md))
+  - [ ] S2 Sweep reports and panel: operating-region, shmoo, threshold, histogram, sensitivity and margin plots; `ohmforge sweep report` to HTML, PNG, SVG and CSV; adaptive boundary refinement; in-app sweep panel. Needs S1
+  - [ ] AI3 Sweep tools over MCP: validate, propose, run (with run caps) and read sweep results. Needs AI1, S1, S2
+  - [ ] D2 Limits table: reviewed abs-max and recommended limits per part with datasheet page references, used by rating checks and stress states; AI-extracted values stay unreviewed until a maintainer confirms them. Needs D1, E6, V1
+  - [ ] D3 Datasheet text extraction (page-chunked, MIT-licensed PDF crates; poppler only as an external tool) and limit proposals over MCP. Needs D1, D2, AI1
+  - [ ] AI4 Rule-based design review: `ohmforge review` (text, JSON, SARIF) and a Design review panel with ERC and checks for missing pull-ups, unterminated CAN, overvoltage on 3.3 V GPIOs, missing decoupling, LEDs without resistors and exceeded ratings; no AI needed. Needs E6, V1
+  - [ ] AI5 AI advisory review: models read the circuit, BOM, results and local datasheet text and submit cited findings that are never applied automatically; local (Ollama) or cloud model chosen by the user, with a notice before anything is sent off the machine. Needs AI4, D3
+- [ ] Interconnects W2 and W3 ([`design/interconnects.md`](design/interconnects.md)): wire ampacity and self-heating with insulation limits, a minimum-size suggestion; PCB traces with the IPC-2221 fit and an IPC-2152-informed board model, clearance checks against voltage (IPC-2221, IEC 60664-1), via current; copper weight in the PCB export
+- [ ] TWAI / CAN, bus item B6 ([`design/buses.md`](design/buses.md)): C3 TWAI controller (CAN 2.0A/B), SN65HVD230 and TJA1051 transceiver parts with CANH/CANL, 120 Ω termination, bit timing, arbitration, error frames and bus-off, multi-node with a second C3 or a scripted node, CAN decoder
+- [ ] Component stress states V4 ([`design/component-stress-states.md`](design/component-stress-states.md)): optional realistic damage (off by default, resettable): parts that exceed their absolute maximum fail open or short like real hardware
+- [ ] Schematic themes T4 ([`design/schematic-themes.md`](design/schematic-themes.md)): user themes from a folder with live reload, CRT curvature, flicker and bloom effects, theme-aware SVG, PNG and PDF export
+- [ ] Schematic auto-layout L3 and L4 ([`design/schematic-layout.md`](design/schematic-layout.md)): tidy selection and incremental layout with pinned parts, before/after preview with metrics and undo; labelled bus lines for I2C, SPI and CAN
 - [ ] Release 0.3
 
 ## P5 Realism (weeks 56 to 72), exit 0.4: validation report published
 
-- [ ] Monte Carlo runs over part tolerances
-- [ ] Optional GPU acceleration for batch runs (Monte Carlo, `.step` and parameter sweeps) through `wgpu`, behind a feature flag with CPU fallback. Single live simulations stay on the CPU: their matrices are too small for a GPU to beat the transfer cost.
+- [ ] Monte Carlo runs over part tolerances, as sweep item S3 ([`design/ai-and-scenario-sweeps.md`](design/ai-and-scenario-sweeps.md)): distributions, Monte Carlo and combined modes, yield with confidence interval, worst-case search
+- [ ] Optional GPU acceleration for batch runs (Monte Carlo, `.step` and parameter sweeps; sweep item S5) through `wgpu`, behind a feature flag with CPU fallback. Single live simulations stay on the CPU: their matrices are too small for a GPU to beat the transfer cost.
 - [ ] Thermal model (self-heating, ambient, tempco; MOSFET Rds(on) against temperature)
 - [ ] Fault injection (opens, shorts, brown-outs, noisy supplies)
+  - [ ] S4 Firmware, stimulus and fault sweeps ([`design/ai-and-scenario-sweeps.md`](design/ai-and-scenario-sweeps.md)): firmware images and inputs, stimuli and faults as sweep variables
+  - [ ] B7 Bus faults ([`design/buses.md`](design/buses.md)): stuck or open lines, wrong pull-ups, extra capacitance, noise, baud offset, missing CAN termination, as fault kinds and sweep variables
+- [ ] Interconnects W4 ([`design/interconnects.md`](design/interconnects.md)): wire and trace inductance and capacitance per length, coupled to the thermal model and the bus rise times
+- [ ] Component stress states V5 ([`design/component-stress-states.md`](design/component-stress-states.md)): temperature derating from the limits table and thermal stress from the thermal model
 - [ ] Hardware-in-the-loop lab: compare simulation with real boards
-- [ ] Supplier price plugins for the BOM
+- [ ] Supplier price plugins for the BOM, as parts availability A5 ([`design/parts-availability.md`](design/parts-availability.md)): a scheduled GitHub Action, using project Mouser, DigiKey and LCSC keys Stefan holds as Actions secrets (once each supplier's terms are checked to allow it), that opens PRs updating the shareable `availability/` facts (SKU liveness, lifecycle, alternates; never prices or stock), and South African suppliers (Micro Robotics, Communica, DIYElectronics, Mantech, RS South Africa; all five to be asked for permission or a feed) through agreed feeds or manual CSV import; providers from A2 and A4 are the plugins
 - [ ] Publish the validation report (simulation against hardware and ngspice); release 0.4
 
 ## P6 1.0 (weeks 70 to 84)
