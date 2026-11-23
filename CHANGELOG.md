@@ -10,6 +10,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Changed
 
+- **README roadmap:** replaced the long phase bullets with a short status table and a link to [`docs/ROADMAP.md`](docs/ROADMAP.md). The detailed checklists, including P0 leftovers and the P2 landed work, stay in the roadmap.
 - **Realtime (#61):** profiled the busy desktop demos after further hart hot-path work (ALU early-out, empty-breakpoint `run_tight`). Release factors stay about 0.17–0.22× (dimmer ~0.22×, button-poll ~0.17×); 1× needs a faster CPU execution strategy (documented in the roadmap). Dimmer release tests assert a 0.15× floor so #44 does not regress.
 - **Desktop window:** the app now opens maximised; restoring it falls back to the 980 × 720 default.
 - **Stub crate dependencies:** removed unused dependency lines from empty and placeholder crates, dropped unused `[workspace.dependencies]` path entries, and gated `of-ui`'s `of-instruments` behind the `gui` feature so `cargo check --workspace` stays free of unused-dependency warnings. Planned edges remain in the `AGENTS.md` crate map.

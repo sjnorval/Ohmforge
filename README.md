@@ -103,14 +103,17 @@ Contributions are accepted under the Developer Certificate of Origin; see [CONTR
 
 ## Roadmap
 
-The full checklist is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+The planned path from the work already on `main` through to 1.0 is below.
 
-- **P0 Foundations**: exit criteria met (repo public, CI green). Leftovers that remain: scheduler snapshot/replay, JSON Schema export for `part.toml`, and the project file format (circuit half lands with engine E4). The RFC template, `ohmforge validate-parts`, mdBook skeleton and unused-dependency cleanup are done.
-- **Phase one, RISC-V core**: done (RV32IMC core, 75 of 77 riscv-tests passing, 2 expected-unsupported).
-- **P1 Analog core**: done (sparse MNA with DC, AC and transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
-- **P2 ESP32-C3 MVP**: in progress. Landed: ELF boot, GPIO output, interrupts, timers, watchdogs, the flash image parser, SPI flash, cache MMU, real-ROM boot, an esp-hal blinky through the ROM and the ESP-IDF bootloader, GPIO inputs with a push button, the SAR ADC and LEDC PWM, a potentiometer part, and a live desktop demo (blink, pot dimmer, LED fade and push-button; the esp-hal demos need the fetched ROM) with a configurable bench supply on the schematic and click-to-place virtual voltmeters and ammeters. The live scope is a fixed-capacity ring tied to the visible time window (time/div zoom, playback down to 1e-6×; #33); the solver holds a settled DC network and the hart caches decoded instructions (#28). 1× realtime on the busy demos is not reachable with the instruction interpreter alone (~0.17–0.22× today; #61). The bench PSU and SW1 are electrically honest (#29; V_IH/V_IL track live Vset; SW1 bounce is the firmware-test train, toggleable and seeded). UART0 RX is baud-timed, with C3 RX interrupts and a hex/find serial monitor (#30). The schematic router with hops and rip-up (#35 to #41) and the EILIi load screen (#40, #42) are in. Further CPU/solver speedups (#44) raise release realtime on the dimmer to about 0.23×. Green and blue 0603 LEDs are in the library (#52). The base engine and plug-in component design is merged (phase E1, #43). The bench PSU return path and period-averaged current readouts are in (#45, closed by #54). Engine E2 and E3 are in (`of-engine`, `Esp32c3Component`, #46 / #47). BOM v1 CSV and build checklist from the demo boards are in (`ohmforge bom`, #59). Next: 1× realtime (#61), Arduino/ESP-IDF demos (#60). Engine phases E4 to E6 (circuit files, instruments, parts library and BOM from components) and the editor work that builds on them follow in P3; 0.1 does not wait for them.
-- **P3 Breadth**: planned (classic ESP32 through a QEMU sidecar, I2C/SPI/RMT/DAC, breadboard view, about 50 parts, electromechanical models, KiCad export, and base engine phases E4 to E6: circuit files, instruments on any circuit, part symbols and the BOM from components; exit 0.2).
-- **P4 Own Xtensa core and web**: planned (own Xtensa core, browser web app, Wi-Fi virtual radio, power profiler, energy parts; exit 0.3).
-- **P5 Realism**: planned (Monte Carlo, thermal model, fault injection, hardware-in-the-loop lab, published validation report; exit 0.4).
-- **P6 1.0**: planned (stable component API and WASM SDK, ESP32-S3 and ESP32-C6, complete documentation, BLE as a stretch goal).
-- **Future ideas (parked)**: optional cloud accounts for sync, and toggleable thermal and electromagnetic interaction layers. These are untracked and need design discussion first.
+| Phase | Status | What it covers | Release |
+| --- | --- | --- | --- |
+| P0 Foundations | ✅ Done | Repo, CI, RFCs, parts validation | n/a |
+| Phase one, RISC-V core | ✅ Done | RV32IMC, 75 of 77 riscv-tests | n/a |
+| P1 Analog core | ✅ Done | DC, AC and transient analyses within 1 % of ngspice | n/a |
+| P2 ESP32-C3 MVP | 🚧 In progress | Boot, GPIO, ADC, PWM, UART, live demo, BOM | 0.1 |
+| P3 Breadth | 📋 Planned | Classic ESP32, I2C/SPI, breadboard view, engine E4–E6 | 0.2 |
+| P4 Own Xtensa core and web | 📋 Planned | Own Xtensa core, web app, Wi-Fi | 0.3 |
+| P5 Realism | 📋 Planned | Monte Carlo, thermal model, fault injection | 0.4 |
+| P6 1.0 | 📋 Planned | Stable API, ESP32-S3 and ESP32-C6 | 1.0 |
+
+The full checklist is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
