@@ -622,6 +622,12 @@ mod tests {
                     d.time
                 );
                 assert!(rt > 0.0, "realtime factor must be positive");
+                // Release floor from #44 / #61 (interpreter-bound; ~0.22× typical).
+                #[cfg(not(debug_assertions))]
+                assert!(
+                    rt > 0.15,
+                    "dimmer release realtime regressed below the #44 floor: {rt:.3}×"
+                );
             }
             Err(e) if skip_without_rom(&e) => {}
             Err(e) => panic!("{e}"),
