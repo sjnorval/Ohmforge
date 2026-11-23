@@ -4,7 +4,7 @@ A living list of the parts a hobbyist or maker ESP32 project most often needs in
 
 Every Ohmforge part is a real, orderable part: data lives in `parts/<category>/…/part.toml` (CC-BY-SA-4.0), and behaviour is a Rust, WASM or SPICE model (AGPL-3.0-or-later). Request a part with the [New part or model](https://github.com/sjnorval/Ohmforge/issues/new?template=new_part.yml) issue form, or add one by following [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-part).
 
-Status: 20 November 2026 (Africa/Johannesburg), checked against `main` after the ADC, LEDC and potentiometer (#24); statuses updated 23 November 2026 for UART0 RX (#25, #30) and the engine plan (#43). Checkboxes and "already in the library" notes were taken from the tree, not from plans.
+Status: 20 November 2026 (Africa/Johannesburg), checked against `main` after the ADC, LEDC and potentiometer (#24); statuses updated 23 November 2026 for UART0 RX (#25, #30), the engine plan (#43), green and blue 0603 LEDs (#52) and the PSU return and averaging fix (#54). Checkboxes and "already in the library" notes were taken from the tree, not from plans.
 
 ## How to read the list
 
