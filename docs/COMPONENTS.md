@@ -4,7 +4,7 @@ A living list of the parts a hobbyist or maker ESP32 project most often needs in
 
 Every Ohmforge part is a real, orderable part: data lives in `parts/<category>/…/part.toml` (CC-BY-SA-4.0), and behaviour is a Rust, WASM or SPICE model (AGPL-3.0-or-later). Request a part with the [New part or model](https://github.com/sjnorval/Ohmforge/issues/new?template=new_part.yml) issue form, or add one by following [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-part).
 
-Status: 20 November 2026 (Africa/Johannesburg), from branch `p2-adc-pwm` (`main` at `df7814e`, which includes GPIO inputs and the push button (#22), plus the ADC, LEDC and the potentiometer; not yet merged). Checkboxes and "already in the library" notes were taken from the tree, not from plans.
+Status: 20 November 2026 (Africa/Johannesburg), checked against `main` after the ADC, LEDC and potentiometer (#24); statuses updated 23 November 2026 for UART0 RX (#25, #30) and the engine plan (#43). Checkboxes and "already in the library" notes were taken from the tree, not from plans.
 
 ## How to read the list
 
@@ -49,13 +49,15 @@ Taken from `of-analog`, `of-components`, `of-soc-esp32c3` and the roadmap. This 
 - UART0: TX capture, configuration registers and the configured baud rate; baud-timed RX FIFO (frame timing at the configured baud), RX interrupts (`RXFIFO_FULL`, `RXFIFO_TOUT`, `RXFIFO_OVF`) and a 64 KiB TX log cap. TX still lands instantly in the capture log.
 - USB Serial/JTAG: TX byte capture only. USB itself is not modelled, and there is no data from a host.
 - SPI0/SPI1: the flash memory controllers and a 4 MiB SPI NOR chip, used to boot firmware. This is not general-purpose SPI for sensors, displays or SD cards.
-- ADC (branch `p2-adc-pwm`): SAR ADC one-shot conversions on ADC1 channels 0 to 4 (GPIO0 to GPIO4) and ADC2 channel 0 (GPIO5), four attenuations, sampling the circuit node at the conversion start. Codes follow Espressif's calibration curve with the chip's eFuse values, so calibrated readings (esp-hal `AdcCalCurve`) come back within 3 mV of the node voltage. Not modelled: noise and nonlinearity beyond the calibration curve, the input's sampling-capacitor load on the node, the ADC2 errata, continuous (DMA/pattern-table) mode, filters, thresholds and the temperature sensor.
-- LEDC PWM (branch `p2-adc-pwm`): four timers and six channels (fractional dividers, 1- to 14-bit duty, Hpoint, dither, hardware fades, overflow counters, interrupts), each PWM edge at its exact counter tick in the circuit. The cost grows with PWM frequency (one kernel event per edge); there is no averaged mode.
+- ADC (#24): SAR ADC one-shot conversions on ADC1 channels 0 to 4 (GPIO0 to GPIO4) and ADC2 channel 0 (GPIO5), four attenuations, sampling the circuit node at the conversion start. Codes follow Espressif's calibration curve with the chip's eFuse values, so calibrated readings (esp-hal `AdcCalCurve`) come back within 3 mV of the node voltage. Not modelled: noise and nonlinearity beyond the calibration curve, the input's sampling-capacitor load on the node, the ADC2 errata, continuous (DMA/pattern-table) mode, filters, thresholds and the temperature sensor.
+- LEDC PWM (#24): four timers and six channels (fractional dividers, 1- to 14-bit duty, Hpoint, dither, hardware fades, overflow counters, interrupts), each PWM edge at its exact counter tick in the circuit. The cost grows with PWM frequency (one kernel event per edge); there is no averaged mode.
 - Also present: SYSTIMER, timer groups, watchdogs, the interrupt matrix, the SYSTEM CPU clock, RNG, and ROM/bootloader boot.
 
-**Not modelled on the C3 (no register block in `of-soc-esp32c3` yet):** I2C, general-purpose SPI, RMT, TWAI/CAN, and UART RX. The roadmap places I2C, SPI, RMT and DAC on phase P3. The ESP32-C3 has no DAC; a DAC model is for classic ESP32 / S3. 1-Wire is not a C3 peripheral; it would be bit-banged GPIO (or RMT) once inputs and timing are honest.
+**Not modelled on the C3 (no register block in `of-soc-esp32c3` yet):** I2C, general-purpose SPI, RMT and TWAI/CAN (UART0 RX is modelled: #25, #30). The roadmap places I2C, SPI, RMT and DAC on phase P3. The ESP32-C3 has no DAC; a DAC model is for classic ESP32 / S3. 1-Wire is not a C3 peripheral; it would be bit-banged GPIO (or RMT) once inputs and timing are honest.
 
-**Other chips and the breadboard view.** `of-soc-esp32` is a placeholder. Classic ESP32 through a QEMU sidecar is phase P3; an owned Xtensa core is P4; ESP32-S3 and ESP32-C6 are P6. The breadboard view sits in P3 beside the schematic editor, which is itself still to do (the desktop app today is a demo picker for the blink, pot dimmer and LED fade).
+**Other chips and the breadboard view.** `of-soc-esp32` is a placeholder. Classic ESP32 through a QEMU sidecar is phase P3; an owned Xtensa core is P4; ESP32-S3 and ESP32-C6 are P6. The breadboard view sits in P3 beside the schematic editor, which is itself still to do (the desktop app today is a demo picker for the blink, pot dimmer, LED fade and push-button).
+
+**Engine plan.** Under [`design/engine-components.md`](design/engine-components.md) every part here becomes a component on one engine API (E2 and E3 in P2, E4 to E6 in P3; #46 to #50): its `part.toml` declares all pins, including supply and ground pins (no hidden connections to ground), names a registered model, and later gains a `[symbol]` and a `bom` flag. The bench supply (`bench.psu`, E2, #46) and the ESP32-C3 itself (`espressif.esp32-c3`, E3, #47) are planned components too; the bench supply is bench equipment and stays out of the BOM.
 
 ---
 
