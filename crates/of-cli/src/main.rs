@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! ohmforge run <netlist.cir> [--out results.csv] [--vcd waves.vcd]
+//! ohmforge validate-parts <parts-dir>
 //! ```
 //!
 //! Runs every analysis in a SPICE netlist (`.op`, `.dc` including nested
@@ -9,6 +10,9 @@
 //! and transients are written as CSV to `--out` (or standard output) and
 //! optionally as a VCD file; `.ac` results are written as CSV with
 //! magnitude and phase (degrees) columns.
+//!
+//! `validate-parts` walks a parts tree, parses every `part.toml`, runs the
+//! loader consistency checks and requires the CC-BY-SA-4.0 licence fields.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -17,9 +21,11 @@ use std::process::ExitCode;
 
 use of_analog::{analysis, netlist};
 use of_netlist::spice::{self, Analysis};
+use of_parts::load_dir;
 
 const USAGE: &str = "Usage:
   ohmforge run <netlist.cir> [--out FILE.csv] [--vcd FILE.vcd]
+  ohmforge validate-parts <parts-dir>
   ohmforge --version";
 
 #[derive(Debug, Default)]
@@ -157,6 +163,43 @@ fn run(args: &RunArgs) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_parts(dir: &Path) -> Result<usize, String> {
+    let loaded = load_dir(dir).map_err(|e| e.to_string())?;
+    if loaded.is_empty() {
+        return Err(format!("no part.toml files under {}", dir.display()));
+    }
+    let mut errors = 0usize;
+    for (part_dir, part) in &loaded {
+        let path = part_dir.join("part.toml");
+        let mut problems = part.check();
+        if part.license.data != "CC-BY-SA-4.0" {
+            problems.push(format!(
+                "license.data must be CC-BY-SA-4.0, got '{}'",
+                part.license.data
+            ));
+        }
+        if part.license.artwork != "CC-BY-SA-4.0" {
+            problems.push(format!(
+                "license.artwork must be CC-BY-SA-4.0, got '{}'",
+                part.license.artwork
+            ));
+        }
+        if problems.is_empty() {
+            println!("ok  {} ({})", part.part.id, path.display());
+        } else {
+            errors += 1;
+            eprintln!("FAIL {} ({})", part.part.id, path.display());
+            for p in problems {
+                eprintln!("  - {p}");
+            }
+        }
+    }
+    if errors > 0 {
+        return Err(format!("{errors} of {} part(s) failed", loaded.len()));
+    }
+    Ok(loaded.len())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -171,6 +214,26 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("validate-parts") => {
+            let dir = args.get(1).map(Path::new);
+            match dir {
+                None => {
+                    eprintln!("error: validate-parts needs a parts directory");
+                    eprintln!("{USAGE}");
+                    ExitCode::from(2)
+                }
+                Some(d) => match validate_parts(d) {
+                    Ok(n) => {
+                        eprintln!("validated {n} part(s)");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        ExitCode::FAILURE
+                    }
+                },
+            }
+        }
         Some("--help" | "-h") => {
             println!("{USAGE}");
             ExitCode::SUCCESS

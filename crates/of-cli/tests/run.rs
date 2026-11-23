@@ -52,3 +52,17 @@ fn reports_errors_with_a_failure_code() {
     let out = ohmforge().arg("bogus").output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
+
+#[test]
+fn validate_parts_accepts_the_library() {
+    let parts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parts");
+    let out = ohmforge().args(["validate-parts"]).arg(&parts).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("ok  "), "{stdout}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("validated"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

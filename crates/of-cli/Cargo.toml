@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 of-analog.workspace = true
 of-netlist.workspace = true
+of-parts.workspace = true
 
 [[bin]]
 name = "ohmforge"
