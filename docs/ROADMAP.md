@@ -126,7 +126,7 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
     - [ ] Optional 45° PCB-style mode (off by default)
     - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs; needs the E4 circuit files and E6 symbols, so it follows them in P3)
     - [ ] Interactive trace re-edit mode in the schematic editor: manually re-route or adjust auto-generated traces (drag segments; move, add or remove waypoints/bends; re-run autoroute on a net); edits keep the same invariants (no body crossings, no foreign-net overlap, T-junctions)
-- [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist (for 0.1 from the demo boards' placements; moves onto components with E6, #50, in P3)
+- [x] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist (for 0.1 from the demo boards' placements via `of-bom` / `ohmforge bom`; moves onto components with E6, #50, in P3) (#59)
 - [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer, fade and push-button demos; Arduino and ESP-IDF builds still to do)
 
 ### First milestone: blinky end to end
@@ -150,7 +150,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Oscilloscope, logic analyser with UART decode, multimeter probe, serial monitor
   - [x] Virtual voltmeter/ammeter on the live schematic (click two probe points; non-disturbing ammeter on a unique branch) on `main` (#27)
   - [~] Serial monitor: lean console (TX log, Send delivers to UART0 RX at the configured baud when attached; hex view and find, #30). d5 shell hosting still to do (d7)
-- [ ] BOM CSV export with MPNs, supplier links and ZAR cost, plus build checklist
+- [x] BOM CSV export with MPNs, supplier links and ZAR cost, plus build checklist (#59)
 - [x] EILIi startup animation as the desktop app load screen (packed 24 fps JPEG frames, no video decoder; click/Esc/any key skips; persistent "Show startup animation" setting; `--no-splash` / `OF_NO_SPLASH` still override).
 - [ ] Desktop builds on Windows, macOS, Linux; deterministic headless runs in CI
 
@@ -173,8 +173,8 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
 - [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (exported wires use the same routed paths)
-- [ ] Parts availability, first slice (design: [`design/parts-availability.md`](design/parts-availability.md); after BOM v1 #59 and E6 #50)
-  - [ ] A1 Data model and offline cache: offers, price breaks (`Money` in millionths), lifecycle and alternates in `of-bom`; host-only `of-suppliers` with a SQLite cache, TTLs and `fetched_at`, ECB rates to ZAR, manual import; `ohmforge bom check --offline`; an `availability/` dataset kept apart from the CC-BY-SA `part.toml` definitions
+- [ ] Parts availability, first slice (design: [`design/parts-availability.md`](design/parts-availability.md); builds on BOM v1 #59 and E6 #50)
+  - [ ] A1 Data model and offline cache: offers, price breaks (`Money` in millionths), lifecycle and alternates in `of-bom`; host-only `of-suppliers` with a SQLite cache, TTLs and `fetched_at`, ECB rates to ZAR, manual import; `ohmforge bom check --offline`; BOM v1's `part.toml` snapshot prices read as dated, lowest-priority offers; an `availability/` dataset kept apart from the CC-BY-SA `part.toml` definitions
   - [ ] A2 LCSC, Mouser and DigiKey providers with the user's own keys in the OS keychain, per-provider rate budgets; `ohmforge parts refresh`
   - [ ] A3 In-app “Check availability” with staleness badges and EOL / out-of-stock warnings, never blocking the simulation
 - [ ] Explore compatibility with PCB fabrication services (JLCPCB, PCBWay, OSH Park and similar): export of board designs (Gerber/drill, BOM and pick-and-place/CPL for assembly), likely via the KiCad export

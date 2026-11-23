@@ -11,3 +11,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+of-parts.workspace = true
+thiserror.workspace = true

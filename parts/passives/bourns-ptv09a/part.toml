@@ -43,6 +43,9 @@ label = "PTV09A rear mount, bushingless, 20 mm flatted shaft, 10 kOhm linear"
 mpn = "PTV09A-4020F-B103"
 manufacturer = "Bourns"
 footprint = "Potentiometer_THT:Potentiometer_Bourns_PTV09A-1_Single_Vertical"
+offers = [
+  { supplier = "mouser", sku = "652-PTV09A-4020F-B103", url = "https://www.mouser.com/ProductDetail/652-PTV09A-4020F-B103", price_zar_cents = 1850 },
+]
 
 [license]
 data = "CC-BY-SA-4.0"

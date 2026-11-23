@@ -43,8 +43,8 @@ mpn = "BME280"
 manufacturer = "Bosch Sensortec"
 footprint = "Module:GY-BME280"
 offers = [
-  { supplier = "lcsc", sku = "C92489" },
-  { supplier = "mouser", sku = "262-BME280" },
+  { supplier = "lcsc", sku = "C92489", url = "https://www.lcsc.com/product-detail/C92489.html", price_zar_cents = 890 },
+  { supplier = "mouser", sku = "262-BME280", url = "https://www.mouser.com/ProductDetail/262-BME280" },
 ]
 
 [license]
