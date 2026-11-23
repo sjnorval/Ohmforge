@@ -30,6 +30,9 @@ label = "Red 0603 LED"
 mpn = "APT1608EC"
 manufacturer = "Kingbright"
 footprint = "LED_SMD:LED_0603_1608Metric"
+offers = [
+  { supplier = "lcsc", sku = "C72038", url = "https://www.lcsc.com/product-detail/C72038.html", price_zar_cents = 45 },
+]
 
 [license]
 data = "CC-BY-SA-4.0"

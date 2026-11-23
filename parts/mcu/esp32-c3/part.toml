@@ -109,6 +109,16 @@ kind = "io"
 vdd = { min = 3.0, typ = 3.3, max = 3.6, unit = "V" }
 idd_modem_sleep = { typ = 5e-3, unit = "A", note = "quiescent load used by Esp32c3Component" }
 
+# Module used as U1 on the 0.1 demos (open question 5: module before a full DevKit).
+[[variant]]
+label = "ESP32-C3-MINI-1-N4 module, 4 MB flash"
+mpn = "ESP32-C3-MINI-1-N4"
+manufacturer = "Espressif"
+footprint = "Module:ESP32-C3-MINI-1"
+offers = [
+  { supplier = "lcsc", sku = "C2934560", url = "https://www.lcsc.com/product-detail/C2934560.html", price_zar_cents = 4590 },
+]
+
 [license]
 data = "CC-BY-SA-4.0"
 artwork = "CC-BY-SA-4.0"

@@ -21,11 +21,15 @@ kind = "resistor"
 pins = ["1", "2"]
 params = { resistance = { typ = 1000.0, tol = 0.01, unit = "ohm" }, tc1 = { typ = 100e-6, unit = "1/K", note = "thick film, +/-100 ppm/K" } }
 
+# Demo boards use 330 Ω. Other values need their own variant / offer when added.
 [[variant]]
-label = "0603, 1 %, 100 mW, thick film (value per placement)"
-mpn = "RC0603FR-07*L"
+label = "0603, 330 ohm, 1 %, 100 mW, thick film (demo boards)"
+mpn = "RC0603FR-07330RL"
 manufacturer = "Yageo"
 footprint = "Resistor_SMD:R_0603_1608Metric"
+offers = [
+  { supplier = "lcsc", sku = "C22805", url = "https://www.lcsc.com/product-detail/C22805.html", price_zar_cents = 12 },
+]
 
 [license]
 data = "CC-BY-SA-4.0"

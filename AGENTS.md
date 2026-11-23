@@ -44,13 +44,13 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-plugin-wasm` | Sandboxed WASM component host | Empty |
 | `of-instruments` | Measurement service (trace store, period-aligned averages) and instruments: scope, logic analyser, decoders, DMM, logger; serial monitor model (`serial::SerialMonitor`, lean console) | Serial monitor (text, hex, find, 64 KiB cap); the rest still to do (phase E5 in P3, #49). The bench PSU is planned as a component (`bench.psu`, E2), not an instrument |
 | `of-engine` | Base engine: elaborates components into `of-analog`, checks invariants (one ground, source return paths, KCL, no floating nets) | E2 (#46): `EngineBuilder`, KCL checks; ESP32-C3 component in of-soc (E3); circuit files still E4 |
-| `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
+| `of-bom` | BOM aggregation, ZAR costing, CSV export, demo-board placements and build checklist | Working + tests (#59) |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |
 | `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, two-terminal bench PSU (+ to VDD, − routed to GND) whose Vset is tracked by GPIO V_IH/V_IL and whose current is period-averaged with the LED, virtual V/A meters, serial monitor for UART0 with hex view and find). Load-screen splash (packed EILIi frames, skip, persistent Show startup animation setting, and `--no-splash` / `OF_NO_SPLASH`) |
 | `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui demo picker, with the EILIi load screen |
 | `of-web` | WASM entry point | Empty |
-| `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD); `ohmforge validate-parts parts/` |
+| `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD); `ohmforge validate-parts parts/`; `ohmforge bom <demo>` |
 
 Internal dependencies point downwards only: `of-core` depends on nothing internal; UI crates may depend on engines, never the reverse. Simulation crates must stay free of UI and OS dependencies and must build for `wasm32-unknown-unknown`.
 
@@ -134,6 +134,7 @@ bash firmware/esp32c3-timer-irq/build.sh
 bash firmware/esp32c3-xip-blinky/build.sh
 cargo run -p of-cli -- --version
 cargo run -p of-cli -- validate-parts parts/
+cargo run -p of-cli -- bom dimmer --checklist dimmer.md
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv
 cargo run -p of-app --features gui      # desktop app: EILIi load screen (or skip via setting / --no-splash), then blink, dimmer, fade and push-button (click Play)

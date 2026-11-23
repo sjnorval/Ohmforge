@@ -3,6 +3,7 @@
 //! ```text
 //! ohmforge run <netlist.cir> [--out results.csv] [--vcd waves.vcd]
 //! ohmforge validate-parts <parts-dir>
+//! ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out bom.csv] [--checklist FILE.md]
 //! ```
 //!
 //! Runs every analysis in a SPICE netlist (`.op`, `.dc` including nested
@@ -13,6 +14,9 @@
 //!
 //! `validate-parts` walks a parts tree, parses every `part.toml`, runs the
 //! loader consistency checks and requires the CC-BY-SA-4.0 licence fields.
+//!
+//! `bom` builds the 0.1 demo-board bill of materials (MPN, supplier links,
+//! ZAR snapshots) and an optional Markdown build checklist.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -26,6 +30,7 @@ use of_parts::load_dir;
 const USAGE: &str = "Usage:
   ohmforge run <netlist.cir> [--out FILE.csv] [--vcd FILE.vcd]
   ohmforge validate-parts <parts-dir>
+  ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out FILE.csv] [--checklist FILE.md]
   ohmforge --version";
 
 #[derive(Debug, Default)]
@@ -234,6 +239,13 @@ fn main() -> ExitCode {
                 },
             }
         }
+        Some("bom") => match bom_cmd(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Some("--help" | "-h") => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -243,4 +255,50 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn bom_cmd(args: &[String]) -> Result<(), String> {
+    let mut demo = None;
+    let mut parts_dir = PathBuf::from("parts");
+    let mut out: Option<PathBuf> = None;
+    let mut checklist: Option<PathBuf> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--parts" => parts_dir = it.next().ok_or("--parts needs a directory")?.into(),
+            "--out" | "-o" => out = Some(it.next().ok_or("--out needs a file name")?.into()),
+            "--checklist" => checklist = Some(it.next().ok_or("--checklist needs a file name")?.into()),
+            s if s.starts_with('-') => return Err(format!("unknown option '{s}'")),
+            s if demo.is_none() => demo = Some(s.to_owned()),
+            s => return Err(format!("unexpected argument '{s}'")),
+        }
+    }
+    let demo = demo.ok_or_else(|| format!("bom needs a demo name ({})", of_bom::demos::names().join("|")))?;
+    let placements = of_bom::demos::by_name(&demo)
+        .ok_or_else(|| format!("unknown demo '{demo}' (expected {})", of_bom::demos::names().join(", ")))?;
+    let parts = of_bom::load_parts_map(&parts_dir).map_err(|e| format!("{}: {e}", parts_dir.display()))?;
+    let bom = of_bom::Bom::from_placements(&parts, &placements)
+        .map_err(|e| e.to_string())?
+        .with_title(&demo);
+    let csv = bom.to_csv();
+    match out {
+        Some(path) => {
+            std::fs::write(&path, &csv).map_err(|e| format!("{}: {e}", path.display()))?;
+            eprintln!(
+                "wrote {} ({} lines, total {})",
+                path.display(),
+                bom.lines.len(),
+                of_bom::Bom::format_zar(bom.total_zar_cents())
+            );
+        }
+        None => {
+            print!("{csv}");
+        }
+    }
+    if let Some(path) = checklist {
+        let md = bom.checklist();
+        std::fs::write(&path, md).map_err(|e| format!("{}: {e}", path.display()))?;
+        eprintln!("wrote checklist {}", path.display());
+    }
+    Ok(())
 }

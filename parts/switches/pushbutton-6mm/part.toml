@@ -36,6 +36,9 @@ label = "6 x 6 mm through-hole tactile switch"
 mpn = "PTS645SM43SMTR92"
 manufacturer = "C&K"
 footprint = "Button_Switch_THT:SW_PUSH_6mm"
+offers = [
+  { supplier = "lcsc", sku = "C318954", url = "https://www.lcsc.com/product-detail/C318954.html", price_zar_cents = 85 },
+]
 
 [license]
 data = "CC-BY-SA-4.0"
