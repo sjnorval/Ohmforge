@@ -361,7 +361,7 @@ impl OhmforgeDemo {
                 ui.monospace(format!(
                     "PSU  {:.2} V  {:.2} mA  {}",
                     status.volts,
-                    status.amps * 1e3,
+                    status.display_amps() * 1e3,
                     supply::mode_label(status.mode)
                 ));
             });

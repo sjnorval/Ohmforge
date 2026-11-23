@@ -220,7 +220,7 @@ fn draw(
         &painter,
         psu_origin,
         supply.volts,
-        supply.amps,
+        supply.display_amps(),
         supply.mode != supply::SupplyMode::Off,
         supply::mode_label(supply.mode),
         plus_left,

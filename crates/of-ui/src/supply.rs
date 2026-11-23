@@ -74,8 +74,11 @@ pub enum SupplyMode {
 pub struct SupplyStatus {
     /// Voltage on the `vdd` rail (V).
     pub volts: f64,
-    /// Current delivered into the rail (A).
+    /// Current delivered into the rail (A), instantaneous.
     pub amps: f64,
+    /// Period-averaged current (A) for the instrument face and sidebar.
+    /// `None` means "use [`Self::amps`]".
+    pub amps_avg: Option<f64>,
     /// Regulation mode.
     pub mode: SupplyMode,
     /// Set point or rail is outside 3.0–3.6 V.
@@ -135,6 +138,7 @@ pub fn regulate(
         return Ok(SupplyStatus {
             volts: v,
             amps: 0.0,
+            amps_avg: None,
             mode: SupplyMode::Off,
             outside_rated: !(RATED_MIN_V..=RATED_MAX_V).contains(&v) && v > 0.05,
         });
@@ -163,9 +167,18 @@ pub fn regulate(
     Ok(SupplyStatus {
         volts: v,
         amps,
+        amps_avg: None,
         mode: applied,
         outside_rated: !(RATED_MIN_V..=RATED_MAX_V).contains(&s.volts) || !(RATED_MIN_V..=RATED_MAX_V).contains(&v),
     })
+}
+
+impl SupplyStatus {
+    /// Current shown on the PSU face: a period average when the demo has
+    /// filled [`Self::amps_avg`], otherwise the instantaneous value.
+    pub fn display_amps(self) -> f64 {
+        self.amps_avg.unwrap_or(self.amps)
+    }
 }
 
 /// Short warning when the supply is outside the modelled chip's ratings.

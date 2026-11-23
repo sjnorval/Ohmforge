@@ -32,6 +32,7 @@ pub(crate) struct Blink {
     cpu: EngineId,
     analog: EngineId,
     samples: TraceBuf,
+    psu_samples: TraceBuf,
     sample_clock: SampleClock,
     supply: SupplySettings,
     supply_mode: SupplyMode,
@@ -93,6 +94,7 @@ impl Blink {
             cpu,
             analog: analog_id,
             samples: TraceBuf::default_scope(),
+            psu_samples: TraceBuf::default_scope(),
             sample_clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
@@ -104,6 +106,7 @@ impl Blink {
 
     pub(crate) fn set_scope_window(&mut self, visible: f64) {
         self.samples.set_visible_window(visible);
+        self.psu_samples.set_visible_window(visible);
         self.sample_clock.set_step(self.samples.sample_step(), self.time());
     }
 
@@ -145,6 +148,7 @@ impl Blink {
         };
         self.supply_mode = status.mode;
         self.supply_status = status;
+        self.psu_samples.push(t, status.amps * 1e3);
         Ok(())
     }
 
@@ -158,7 +162,20 @@ impl Blink {
     }
 
     pub(crate) fn supply_status(&self) -> SupplyStatus {
-        self.supply_status
+        let mut status = self.supply_status;
+        let led = self.samples.to_vec();
+        let psu = self.psu_samples.to_vec();
+        status.amps_avg = Some(
+            crate::trace::average_periods(
+                &psu,
+                &led,
+                self.time(),
+                crate::trace::PWM_EDGE_HIGH,
+                crate::trace::PWM_AVG_PERIODS,
+                crate::trace::LED_AVG_WINDOW,
+            ) * 1e-3,
+        );
+        status
     }
 
     pub(crate) fn set_supply(&mut self, settings: SupplySettings) -> Result<(), Box<dyn Error>> {
@@ -261,7 +278,7 @@ impl Blink {
             meters::take_nodes(analog, &["gpio8", "led_a", "vdd"], &mut out);
         }
         meters::add_led_series(&mut out, "R1", "D1", "gpio8", "led_a", R_SERIES);
-        meters::add_psu(&mut out, self.supply_status.amps);
+        meters::add_psu(&mut out, self.supply_status().display_amps());
         out
     }
 

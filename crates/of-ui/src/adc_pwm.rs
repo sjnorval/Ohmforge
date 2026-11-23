@@ -102,6 +102,8 @@ pub(crate) struct PwmSim {
     origin: SimTime,
     /// Instantaneous LED current samples (t relative to `origin`, mA).
     samples: TraceBuf,
+    /// Instantaneous PSU output current samples (same times, mA).
+    psu_samples: TraceBuf,
     sample_clock: SampleClock,
     supply: SupplySettings,
     supply_mode: SupplyMode,
@@ -201,6 +203,7 @@ impl PwmSim {
             position,
             origin,
             samples: TraceBuf::default_scope(),
+            psu_samples: TraceBuf::default_scope(),
             sample_clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             supply,
             supply_mode: if supply.on { SupplyMode::Cv } else { SupplyMode::Off },
@@ -224,16 +227,46 @@ impl PwmSim {
 
     pub(crate) fn set_scope_window(&mut self, visible: f64) {
         self.samples.set_visible_window(visible);
+        self.psu_samples.set_visible_window(visible);
         self.sample_clock.set_step(self.samples.sample_step(), self.time());
+    }
+
+    fn next_pwm_event(&mut self) -> Option<SimTime> {
+        self.kernel
+            .engine_as::<Esp32c3Engine>(self.cpu)
+            .and_then(|cpu| cpu.soc.bus.ledc.next_event())
     }
 
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), Box<dyn Error>> {
         let until = self.origin.saturating_add(SimTime::from_secs_f64(seconds.max(0.0)));
         while self.kernel.now() < until {
+            let now = self.kernel.now();
             let grid_abs = self
                 .origin
                 .saturating_add(SimTime::from_secs_f64(self.sample_clock.next().max(0.0)));
-            let next = grid_abs.min(until);
+            let pwm_abs = self.next_pwm_event();
+            // If the grid is already due (the first tick is at t = 0, or the clock
+            // lagged a jump), record and step it. Never run straight to `until` —
+            // that would skip the 50 µs grid and every LEDC edge.
+            if grid_abs <= now {
+                if self.sample_clock.take(self.time()) {
+                    self.record_sample()?;
+                } else if now < until {
+                    let nudge = now.saturating_add(SimTime::from_ns(1)).min(until);
+                    let stop = self.kernel.run_until(nudge)?;
+                    if !matches!(stop, Stop::Reached(_)) {
+                        return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
+                    }
+                }
+                continue;
+            }
+            let mut next = grid_abs.min(until);
+            if let Some(pwm) = pwm_abs
+                && pwm > now
+                && pwm < next
+            {
+                next = pwm;
+            }
             if next > self.kernel.now() {
                 let stop = self.kernel.run_until(next)?;
                 if !matches!(stop, Stop::Reached(_)) {
@@ -245,7 +278,9 @@ impl PwmSim {
                     return Err(format!("ESP32-C3 stopped at {:.3} ms ({stop:?})", self.time() * 1e3).into());
                 }
             }
-            if self.sample_clock.take(self.time()) {
+            let hit_grid = self.sample_clock.take(self.time());
+            let hit_pwm = pwm_abs.is_some_and(|pwm| pwm <= self.kernel.now());
+            if hit_grid || hit_pwm {
                 self.record_sample()?;
             }
         }
@@ -266,6 +301,7 @@ impl PwmSim {
         };
         self.supply_mode = status.mode;
         self.supply_status = status;
+        self.psu_samples.push(t, status.amps * 1e3);
         Ok(())
     }
 
@@ -289,9 +325,38 @@ impl PwmSim {
         Ok((gpio - anode) * 1e3 / R_SERIES)
     }
 
-    /// Average LED current over the last [`AVG_WINDOW`], for display only.
+    fn led_points(&self) -> Vec<(f64, f64)> {
+        self.samples.to_vec()
+    }
+
+    fn psu_points(&self) -> Vec<(f64, f64)> {
+        self.psu_samples.to_vec()
+    }
+
+    /// Average LED current over whole PWM periods, for display only.
     pub(super) fn average_ma(&self) -> f64 {
-        average_window(&self.samples, self.time(), AVG_WINDOW)
+        let pts = self.led_points();
+        trace::average_periods(
+            &pts,
+            &pts,
+            self.time(),
+            trace::PWM_EDGE_HIGH,
+            trace::PWM_AVG_PERIODS,
+            AVG_WINDOW,
+        )
+    }
+
+    fn averaged_psu_amps(&self) -> f64 {
+        let led = self.led_points();
+        let psu = self.psu_points();
+        trace::average_periods(
+            &psu,
+            &led,
+            self.time(),
+            trace::PWM_EDGE_HIGH,
+            trace::PWM_AVG_PERIODS,
+            AVG_WINDOW,
+        ) * 1e-3
     }
 
     pub(super) fn wiper_volts(&mut self) -> Result<f64, Box<dyn Error>> {
@@ -303,10 +368,14 @@ impl PwmSim {
     pub(super) fn trace(&self) -> Vec<(f64, f64)> {
         // A moving average of the raw samples, so 1 kHz / 5 kHz PWM is a
         // brightness line rather than a blur of edges.
+        let pts = self.led_points();
         let mut out = Vec::new();
         for i in 0..self.samples.len() {
             let t = self.samples[i].0;
-            out.push((t, average_window(&self.samples, t, AVG_WINDOW)));
+            out.push((
+                t,
+                trace::average_periods(&pts, &pts, t, trace::PWM_EDGE_HIGH, trace::PWM_AVG_PERIODS, AVG_WINDOW),
+            ));
         }
         out
     }
@@ -337,7 +406,9 @@ impl PwmSim {
     }
 
     pub(super) fn supply_status(&self) -> SupplyStatus {
-        self.supply_status
+        let mut status = self.supply_status;
+        status.amps_avg = Some(self.averaged_psu_amps());
+        status
     }
 
     pub(super) fn set_supply(&mut self, settings: SupplySettings) -> Result<(), Box<dyn Error>> {
@@ -413,7 +484,7 @@ impl PwmSim {
             meters::add_resistor(&mut out, "RV1 (1–W)", "0", "gpio2", ra);
             meters::add_resistor(&mut out, "RV1 (W–3)", "gpio2", "vdd", rb);
         }
-        meters::add_psu(&mut out, self.supply_status.amps);
+        meters::add_psu(&mut out, self.supply_status().display_amps());
         out
     }
 
@@ -422,27 +493,6 @@ impl PwmSim {
         let time = self.time();
         let samples = self.samples.len();
         crate::stats::PerfSnapshot::from_kernel(&mut self.kernel, self.cpu, self.analog, time, samples)
-    }
-}
-
-fn average_window(samples: &TraceBuf, t: f64, window: f64) -> f64 {
-    let start = t - window;
-    let pts: Vec<(f64, f64)> = samples.iter().filter(|(tt, _)| *tt >= start && *tt <= t).collect();
-    match pts.len() {
-        0 => 0.0,
-        1 => pts[0].1,
-        _ => {
-            let mut area = 0.0;
-            for w in pts.windows(2) {
-                area += (w[0].1 + w[1].1) * 0.5 * (w[1].0 - w[0].0);
-            }
-            let span = pts.last().unwrap().0 - pts[0].0;
-            if span <= 0.0 {
-                pts.last().unwrap().1
-            } else {
-                area / span
-            }
-        }
     }
 }
 
@@ -573,6 +623,39 @@ mod tests {
             "limit did not clamp: status={status:?} avg={avg} mA"
         );
         assert!(status.amps <= 0.7e-3, "{status:?}");
+    }
+
+    #[test]
+    fn dimmer_averaged_led_current_is_steady_at_constant_duty() {
+        let Some(mut sim) = maybe_dimmer(0.5) else { return };
+        sim.advance(25e-3).unwrap();
+        let readings = uart_readings(&mut sim);
+        assert!(
+            readings.iter().any(|&(_, duty)| duty > 0),
+            "expected a UART duty print, got {readings:?}"
+        );
+        let trace = sim.trace();
+        let late: Vec<f64> = trace
+            .iter()
+            .filter(|(t, _)| *t >= sim.time() - 8e-3)
+            .map(|(_, i)| *i)
+            .collect();
+        assert!(late.len() >= 8, "not enough averaged samples: {}", late.len());
+        let mean = late.iter().sum::<f64>() / late.len() as f64;
+        let peak = late.iter().fold(0.0_f64, |m, v| m.max((v - mean).abs()));
+        assert!(mean > 1.5, "expected a mid-duty LED average, got {mean} mA");
+        assert!(
+            peak < 0.08,
+            "averaged LED current ripple {peak} mA around {mean} mA (bound 0.08 mA) at constant duty"
+        );
+        let vdd = sim.circuit_readout().volts("vdd").unwrap();
+        let i_pot = vdd / 10_000.0;
+        let i_psu = sim.supply_status().display_amps();
+        let i_led = sim.average_ma() * 1e-3;
+        assert!(
+            (i_psu - (i_led + i_pot)).abs() < 2e-4,
+            "averaged PSU {i_psu} A should be LED {i_led} A plus pot {i_pot} A"
+        );
     }
 
     fn uart_readings(sim: &mut PwmSim) -> Vec<(u32, u32)> {

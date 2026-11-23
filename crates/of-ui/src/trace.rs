@@ -16,8 +16,12 @@ pub const MIN_SAMPLE_STEP: f64 = 1e-6;
 pub const MAX_TRACE_SAMPLES: usize = 32_768;
 /// Default spacing of recorded samples (seconds) when the window fits it.
 pub const SAMPLE_STEP: f64 = 50e-6;
-/// Window used for the LED current readout (seconds).
+/// Window used for the LED current readout (seconds) when a PWM period is not yet known.
 pub const LED_AVG_WINDOW: f64 = 0.002;
+/// Complete PWM cycles in the period-aligned display average (two 1 kHz periods, ten 5 kHz).
+pub const PWM_AVG_PERIODS: usize = 2;
+/// Instantaneous current (mA) that counts as PWM high when locating period edges.
+pub const PWM_EDGE_HIGH: f64 = 0.5;
 /// `pwm_duty_freq` looks at the last 20 ms, so retention never shrinks below this.
 pub const MIN_RETENTION: f64 = 0.02;
 /// Margin past the left edge before a sample may be dropped (one division).
@@ -351,10 +355,15 @@ pub fn average_window(samples: &[(f64, f64)], now: f64, window: f64) -> f64 {
             prev_v = v;
             continue;
         }
+        let t_clip = t.min(now);
         let t0 = if used { prev_t } else { start.max(prev_t) };
-        if t > t0 {
-            sum += prev_v * (t - t0);
+        if t_clip > t0 {
+            sum += prev_v * (t_clip - t0);
             used = true;
+        }
+        if t >= now {
+            prev_t = now;
+            break;
         }
         prev_t = t;
         prev_v = v;
@@ -368,6 +377,62 @@ pub fn average_window(samples: &[(f64, f64)], now: f64, window: f64) -> f64 {
         sum / span
     } else {
         samples.last().map(|s| s.1).unwrap_or(0.0)
+    }
+}
+
+/// Rising-edge times of a two-level waveform, at or before `now`.
+///
+/// An edge is recorded at the first sample that crosses `high` from below.
+pub fn rising_edges(samples: &[(f64, f64)], now: f64, high: f64) -> Vec<f64> {
+    let mut out = Vec::new();
+    for w in samples.windows(2) {
+        if w[1].0 > now + 1e-15 {
+            break;
+        }
+        if w[0].1 <= high && w[1].1 > high {
+            out.push(w[1].0);
+        }
+    }
+    out
+}
+
+/// Start and end of the last `periods` complete PWM cycles ending at or before `now`.
+pub fn last_period_window(samples: &[(f64, f64)], now: f64, high: f64, periods: usize) -> Option<(f64, f64)> {
+    if periods == 0 {
+        return None;
+    }
+    let rises = rising_edges(samples, now, high);
+    if rises.len() > periods {
+        let t0 = rises[rises.len() - 1 - periods];
+        let t1 = rises[rises.len() - 1];
+        if t1 - t0 > 1e-15 {
+            return Some((t0, t1));
+        }
+    }
+    None
+}
+
+/// Time-weighted average over the last `periods` complete PWM cycles.
+///
+/// The window is a boxcar aligned to rising edges, so a constant-duty PWM
+/// averages to a constant (apart from any modelled noise in the samples).
+/// If fewer than `periods` cycles have been seen, falls back to
+/// [`average_window`] of `fallback` seconds ending at `now`.
+///
+/// Pass `values` to average a different trace (for example PSU current) over
+/// the same LED-derived period window: `edge_samples` locates the edges.
+pub fn average_periods(
+    values: &[(f64, f64)],
+    edge_samples: &[(f64, f64)],
+    now: f64,
+    high: f64,
+    periods: usize,
+    fallback: f64,
+) -> f64 {
+    if let Some((t0, t1)) = last_period_window(edge_samples, now, high, periods) {
+        average_window(values, t1, t1 - t0)
+    } else {
+        average_window(values, now, fallback)
     }
 }
 
@@ -468,6 +533,63 @@ impl SampleClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn period_aligned_average_is_flat_at_constant_duty() {
+        // 1 kHz, 65 % duty, 4 mA high, sampled every 50 us and at exact edges.
+        let duty: f64 = 0.65;
+        let period: f64 = 1e-3;
+        let on: f64 = 4.0;
+        let mut pts: Vec<(f64, f64)> = Vec::new();
+        let end: f64 = 0.08;
+        let mut cycle: f64 = 0.0;
+        pts.push((0.0, on));
+        while cycle < end {
+            let t_fall = cycle + duty * period;
+            let t_rise = cycle + period;
+            let mut g = cycle + 50e-6;
+            while g < t_rise - 1e-12 && g <= end {
+                if (g - t_fall).abs() > 1e-12 {
+                    pts.push((g, if g < t_fall { on } else { 0.0 }));
+                }
+                g += 50e-6;
+            }
+            if t_fall <= end {
+                pts.push((t_fall, 0.0));
+            }
+            if t_rise <= end {
+                pts.push((t_rise, on));
+            }
+            cycle = t_rise;
+        }
+        pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut avgs = Vec::new();
+        for &(t, _) in &pts {
+            if t < 0.01 {
+                continue;
+            }
+            avgs.push(average_periods(
+                &pts,
+                &pts,
+                t,
+                PWM_EDGE_HIGH,
+                PWM_AVG_PERIODS,
+                LED_AVG_WINDOW,
+            ));
+        }
+        assert!(!avgs.is_empty());
+        let mean = avgs.iter().sum::<f64>() / avgs.len() as f64;
+        let peak = avgs.iter().fold(0.0_f64, |m, v| m.max((v - mean).abs()));
+        assert!(
+            (mean - on * duty).abs() < 0.02,
+            "mean {mean} mA, expected {}",
+            on * duty
+        );
+        assert!(
+            peak < 0.02,
+            "period-aligned ripple {peak} mA around {mean} (bound 0.02)"
+        );
+    }
 
     #[test]
     fn average_and_pwm_from_a_square_wave() {

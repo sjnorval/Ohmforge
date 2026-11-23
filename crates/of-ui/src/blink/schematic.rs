@@ -184,7 +184,7 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
         &painter,
         point(psu.body.min.x, psu.body.min.y),
         supply.volts,
-        supply.amps,
+        supply.display_amps(),
         supply.mode != supply::SupplyMode::Off,
         supply::mode_label(supply.mode),
         false,
