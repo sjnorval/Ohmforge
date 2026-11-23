@@ -17,6 +17,10 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 - Native desktop app and a WASM web app from one codebase.
 - Every part is a real, orderable part, so the BOM, cost (ZAR) and build checklist come straight from the design.
 
+## Planned changes: base engine and plug-in components
+
+> **Architecture in progress (planning stage, nothing changed in the code yet).** Ohmforge is moving to a **base engine** that stands in for the real world: it owns the nets, the analog and digital solvers, simulated time and events, and the wiring, readings, logging and measuring services. **Every part with a real-world counterpart becomes a plug-in component** on one engine API: resistors, LEDs, pots and buttons, the **bench PSU** (with real `+` and `−` terminals and an explicit return path) and the **ESP32-C3 itself**. Meters, the scope, the logger and the UART console become instruments that work on any circuit; demos become circuit files drawn by the existing schematic router; and the BOM comes straight from the components. The design and the migration phases (E1 to E6, in P2 before the schematic editor) are in [`docs/design/engine-components.md`](docs/design/engine-components.md).
+
 ## Workspace layout
 
 | Crate | Purpose |
