@@ -2,7 +2,7 @@
 
 Status: proposed (design only, no code). Nothing in this document is implemented yet; section 1 lists what exists today. Phases I1 to I4 are planned in P3 / 0.2, I5 and I6 in P4 / 0.3 and I7 in P6 (section 6).
 Date: 2026-11-23.
-Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §8 (firmware loading, steps 1 to 6), §9 (user interface and instruments), §13.1 (licensing); [`engine-components.md`](engine-components.md) (the base engine, the ESP32-C3 component and circuit files this builds on); roadmap items “`of-gdb`” (phase one), “Flash like real hardware” (P3) and “Editor integration” (P3, P4, P6).
+Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §8 (firmware loading, steps 1 to 6), §9 (user interface and instruments), §13.1 (licensing); [`engine-components.md`](engine-components.md) (the base engine, the ESP32-C3 component and circuit files this builds on); [`arduino-idf-mvp-demos.md`](arduino-idf-mvp-demos.md) (P2 committed Arduino/ESP-IDF MVP test firmware, #60 — not I6); roadmap items “`of-gdb`” (phase one), “Flash like real hardware” (P3) and “Editor integration” (P3, P4, P6).
 
 Ohmforge is a simulator, not an editor. People write ESP32 firmware in VS Code (often with the ESP-IDF or PlatformIO extensions) or in the Arduino IDE 2.x, and they expect to press Upload, open a serial monitor and start a debugger. This note plans how those editors drive Ohmforge the way they drive a real board: a small shared foundation in the simulator (a control API, a virtual serial port, a GDB stub and a build watcher), a VS Code extension, and Arduino IDE support through a board package. The plugins never link Rust code; they talk to the running simulator over local sockets.
 
