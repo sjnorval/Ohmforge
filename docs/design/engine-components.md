@@ -1,6 +1,6 @@
 # Base engine and plug-in components
 
-Status: E1 (this document) merged in #43. E2 and E3 are planned in P2 (#46, #47), after the PSU return fix (#45); E4 to E6 are planned in P3 / 0.2 (#48, #49, #50). Nothing here is implemented yet beyond what section 1 lists as existing.
+Status: E1 (this document) merged in #43. The PSU return and current-averaging fix (#45) landed in #54. E2 and E3 are next in P2 (#46, #47). E4 to E6 are planned in P3 / 0.2 (#48, #49, #50). The engine API itself is not implemented yet; section 1 lists the existing pieces, including the #54 PSU routing and averaging work.
 Date: 2026-11-22 (status updated 2026-11-23).
 Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §5 (mixed-signal co-simulation), §6 (system architecture), §7 (component model and library), §11 (BOM); [`wire-routing.md`](wire-routing.md) (the shared schematic router); [`COMPONENTS.md`](../COMPONENTS.md) (the parts the library should grow to); roadmap P2 item “Base engine and plug-in components”.
 
@@ -20,9 +20,9 @@ Most of the pieces exist; what is missing is one API that joins them. Today each
 | `part.toml` schema: pins, `[electrical]` ratings, `[analog]` model with min/typ/max/tol, `[[variant]]` (MPN, manufacturer, footprint, offers), `[license]` | `of-parts`, `parts/` | Parts library (extended with symbol and component fields) |
 | `Esp32c3` SoC and `Esp32c3Engine` (pin changes as kernel events, `link_pin`, `link_input`, `link_adc`, PWM edges at exact ticks, deferred input reads) | `of-soc-esp32c3` | The ESP32-C3 component wraps it |
 | GPIO half-bridge `PinDriver`s (`add_pin_drivers`, `pin_actions`), `hook_pin`, V_IH/V_IL `watch_relative` setup | `of-ui` (`pins.rs`, each demo module) | Moves inside the ESP32-C3 component |
-| Bench PSU: `add_supply` (Thevenin `psu` from `vdd` to node 0, current source `psu_cc`), CV/CC switching in `regulate`, `SupplyStatus` | `of-ui` (`supply.rs`) | PSU component |
+| Bench PSU: `add_supply` (Thevenin `psu` from `vdd` to node 0, current source `psu_cc`), CV/CC switching in `regulate`, `SupplyStatus`; schematic `+`/`−` pins with `−` routed to GND; `source_return_paths` and `label-on-body` checks; face and sidebar show period-averaged current (`display_amps`) | `of-ui` (`supply.rs`) | PSU component |
 | Meters: `CircuitReadout` filled per demo (`add_led_series`, `add_resistor`, `add_psu`), `read_meter` | `of-ui` (`meters.rs`) | Measurement service plus meter instruments |
-| Scope ring, windowed averages, PWM duty and frequency | `of-ui` (`trace.rs`) | Measurement service (trace store) |
+| Scope ring, period-aligned PWM averages, PWM duty and frequency | `of-ui` (`trace.rs`) | Measurement service (trace store) |
 | Serial monitor model | `of-instruments::serial` | UART console instrument |
 | BOM lines, ZAR totals, CSV | `of-bom` | BOM from components |
 | Schematic model (components with body rects and pins, nets, keepouts) and the shared router | `of-ui::wiring` (`blink.rs`, `dimmer.rs`, `button.rs`, `router.rs`) | Drawn from the circuit file |
@@ -350,7 +350,7 @@ After E6: the schematic editor (place, wire, probe; wire-routing PRs 6 and 7) ed
 - **P2 gains E1 to E3; P3 gains E4 to E6** (decided 23 November 2026: release 0.1 does not wait for E4 to E6). The editor's place and wire steps need circuit files (E4) and symbols (E6), so they follow in P3; BOM v1 for 0.1 comes from the demo boards' placements and moves onto components with E6.
 - **P0 “Project file format v0”** is partly delivered by the E4 circuit file; `project.toml` (firmware, settings, BOM options) can follow on top.
 - **P6 “Stable component API and WASM SDK”** stays in P6. E2 gives an in-tree, unstable API; stabilising it and the WASM SDK remain the 1.0 work.
-- **Paused `p2-psu-return` (#45).** Its fixes (PSU minus terminal drawn and routed to GND, the supply-connection check, the `+`/`−` current balance test, period-aligned LED and PSU averaging) are compatible with this plan and can land first as a small PR; E2 and E5 then generalise them.
+- **PSU return and averaging (#45, closed by #54).** The PSU minus terminal is drawn and routed to GND, a supply-connection check and the `+`/`−` current balance test are in, and LED and PSU currents are averaged over whole PWM periods. E2 and E5 generalise these.
 - **Performance work** (realtime factor on the busy demos; #44 merged, about 0.17–0.23× on the busy demos) is orthogonal; E2 to E4 must not regress it, and a realtime benchmark joins the acceptance checks.
 - **MVP 0.1 exit criteria** do not change in content, and 0.1 does not wait for E4 to E6.
 - **Physics layers** stay parked, but section 3j gives them an agreed place to attach.
@@ -389,6 +389,6 @@ Internal dependencies still point downwards; simulation crates stay free of UI a
 5. **ESP32-C3 part granularity:** bare chip, a module (ESP32-C3-MINI-1) or a dev board (DevKitM-1, SuperMini) for the demos? It changes the BOM line and which supply pins exist. Proposal: a module part first, dev boards as sub-circuits later.
 6. **Sub-circuits:** support hierarchical circuit files (a dev board as a reusable block) in E4, or later?
 7. **0.1 scope:** resolved on 23 November 2026: 0.1 does not wait; E1 to E3 stay in P2 and E4 to E6 move to P3 / 0.2.
-8. **Order with the paused PSU fix:** land `p2-psu-return` first (recommended) or fold it into E2?
+8. **Order with the PSU fix:** resolved on 23 November 2026: `p2-psu-return` landed first (#45, closed by #54).
 9. **Chip supply current:** a fixed quiescent load from the datasheet in E3, or wait for activity-dependent current with the P4 power profiler?
 10. **RFCs:** `CONTRIBUTING.md` asks for an RFC in `rfcs/` for component API and file format changes. Does this document count as that RFC for E2 (component API) and E4 (circuit file), or should each phase open a short RFC first? Proposal: this document is the umbrella design; E2 and E4 each get a short RFC once the RFC template exists.
