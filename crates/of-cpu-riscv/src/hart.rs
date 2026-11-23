@@ -464,7 +464,7 @@ impl Hart {
     }
 
     /// Execute one instruction (or take one interrupt).
-    pub fn step(&mut self, bus: &mut dyn Bus) -> StepOutcome {
+    pub fn step<B: Bus + ?Sized>(&mut self, bus: &mut B) -> StepOutcome {
         match self.state {
             HartState::Halted(r) => return StepOutcome::Halted(r),
             HartState::WaitingForInterrupt => {
@@ -508,12 +508,23 @@ impl Hart {
     }
 
     /// Fetch the instruction at `pc`: returns the raw parcel(s) and length.
-    pub fn fetch(&self, bus: &mut dyn Bus, pc: u32) -> Result<(u32, u32), (Exception, u32)> {
+    pub fn fetch<B: Bus + ?Sized>(&self, bus: &mut B, pc: u32) -> Result<(u32, u32), (Exception, u32)> {
         let c = self.config.extensions.c;
         if pc & 1 != 0 || (!c && pc & 3 != 0) {
             return Err((Exception::InstructionAddressMisaligned, pc));
         }
         let fault = |e: BusError| (Exception::InstructionAccessFault, e.addr);
+        // A 4-byte-aligned PC always has room for a word inside a 64 KiB
+        // flash page (and any contiguous RAM/ROM region), so one bus read
+        // covers both the common 32-bit case and a compressed parcel.
+        if pc & 3 == 0 {
+            let word = bus.read(pc, Size::Word, AccessKind::Fetch).map_err(fault)?;
+            let lo = word & 0xffff;
+            if compressed::is_compressed(lo as u16) {
+                return Ok((lo, 2));
+            }
+            return Ok((word, 4));
+        }
         let lo = bus.read(pc, Size::Half, AccessKind::Fetch).map_err(fault)?;
         if compressed::is_compressed(lo as u16) {
             return Ok((lo, 2));
@@ -526,24 +537,26 @@ impl Hart {
 
     /// Fetch and decode the instruction at `pc` without executing it
     /// (debugger disassembly view). Compressed instructions are expanded.
-    pub fn disassemble_at(&self, bus: &mut dyn Bus, pc: u32) -> Option<(u32, u32, Instr)> {
+    pub fn disassemble_at<B: Bus + ?Sized>(&self, bus: &mut B, pc: u32) -> Option<(u32, u32, Instr)> {
         let (raw, len) = self.fetch(bus, pc).ok()?;
         let word = if len == 2 { compressed::expand(raw as u16)? } else { raw };
         Some((raw, len, decode(word)?))
     }
 
     #[allow(clippy::type_complexity)]
-    fn fetch_execute(&mut self, bus: &mut dyn Bus, pc: u32) -> Result<(u32, Instr, Flow, u32), (Exception, u32, u32)> {
+    fn fetch_execute<B: Bus + ?Sized>(
+        &mut self,
+        bus: &mut B,
+        pc: u32,
+    ) -> Result<(u32, Instr, Flow, u32), (Exception, u32, u32)> {
         let no_cycles = |(e, v): (Exception, u32)| (e, v, 0);
-        let (raw, len) = self.fetch(bus, pc).map_err(no_cycles)?;
-        let mut wait = bus.wait_states(pc, AccessKind::Fetch);
-        let illegal = (Exception::IllegalInstruction, raw, 0);
-        let (_word, instr) = if let Some((craw, clen, word, instr)) = self.dcache.lookup(pc)
-            && craw == raw
-            && clen == len
-        {
-            (word, instr)
+        // On a hit, skip the bus fetch: the cache is an I-cache that follows
+        // RISC-V `fence.i` coherence (stores alone do not invalidate it).
+        let (raw, len, instr) = if let Some((raw, len, _word, instr)) = self.dcache.lookup(pc) {
+            (raw, len, instr)
         } else {
+            let (raw, len) = self.fetch(bus, pc).map_err(no_cycles)?;
+            let illegal = (Exception::IllegalInstruction, raw, 0);
             let word = if len == 2 {
                 if !self.config.extensions.c {
                     return Err(illegal);
@@ -554,8 +567,10 @@ impl Hart {
             };
             let instr = decode(word).ok_or(illegal)?;
             self.dcache.insert(pc, raw, len, word, instr);
-            (word, instr)
+            (raw, len, instr)
         };
+        let mut wait = bus.wait_states(pc, AccessKind::Fetch);
+        let illegal = (Exception::IllegalInstruction, raw, 0);
         let ext = self.config.extensions;
         match instr {
             Instr::MulDiv { .. } if !ext.m => return Err(illegal),
@@ -588,9 +603,9 @@ impl Hart {
         Ok(target)
     }
 
-    fn load(
+    fn load<B: Bus + ?Sized>(
         &mut self,
-        bus: &mut dyn Bus,
+        bus: &mut B,
         addr: u32,
         size: Size,
         kind: AccessKind,
@@ -623,9 +638,9 @@ impl Hart {
         Ok((v, bus.wait_states(addr, kind)))
     }
 
-    fn store(
+    fn store<B: Bus + ?Sized>(
         &mut self,
-        bus: &mut dyn Bus,
+        bus: &mut B,
         addr: u32,
         size: Size,
         value: u32,
@@ -661,9 +676,9 @@ impl Hart {
         }
     }
 
-    fn csr_op(
+    fn csr_op<B: Bus + ?Sized>(
         &mut self,
-        bus: &mut dyn Bus,
+        bus: &mut B,
         op: CsrOp,
         rd: u8,
         csr: u16,
@@ -707,7 +722,7 @@ impl Hart {
         Ok(())
     }
 
-    fn execute(&mut self, bus: &mut dyn Bus, instr: Instr, pc: u32, len: u32, raw: u32) -> ExecResult {
+    fn execute<B: Bus + ?Sized>(&mut self, bus: &mut B, instr: Instr, pc: u32, len: u32, raw: u32) -> ExecResult {
         let seq = pc.wrapping_add(len);
         let mut flow = Flow {
             next_pc: seq,
@@ -767,7 +782,6 @@ impl Hart {
                     StoreOp::Sw => Size::Word,
                 };
                 flow.wait = self.store(bus, addr, size, self.x(rs2), AccessKind::Store)?;
-                self.dcache.invalidate();
             }
             Instr::OpImm { op, rd, rs1, imm } => {
                 let v = alu(op, self.x(rs1), imm as u32);
@@ -802,7 +816,6 @@ impl Hart {
                         if self.reservation == Some(addr) {
                             flow.wait = self.store(bus, addr, Size::Word, self.x(rs2), AccessKind::Atomic)?;
                             self.wr(rd, 0);
-                            self.dcache.invalidate();
                         } else {
                             self.wr(rd, 1);
                         }
@@ -826,7 +839,6 @@ impl Hart {
                         let w2 = self.store(bus, addr, Size::Word, new, AccessKind::Atomic)?;
                         self.wr(rd, old);
                         flow.wait = w1 + w2;
-                        self.dcache.invalidate();
                     }
                 }
             }
@@ -862,7 +874,7 @@ impl Hart {
 
     /// Run until `max_cycles` have elapsed or something stops the hart.
     /// A breakpoint at the starting PC is ignored so that resuming works.
-    pub fn run(&mut self, bus: &mut dyn Bus, max_cycles: u64) -> RunExit {
+    pub fn run<B: Bus + ?Sized>(&mut self, bus: &mut B, max_cycles: u64) -> RunExit {
         let limit = self.elapsed_cycles.saturating_add(max_cycles);
         let mut first = true;
         while self.elapsed_cycles < limit {
@@ -892,7 +904,7 @@ impl Hart {
 
     /// Run until the hart's local time reaches `deadline` (it may overshoot
     /// by at most one instruction) or something stops it.
-    pub fn run_until(&mut self, bus: &mut dyn Bus, deadline: SimTime) -> RunExit {
+    pub fn run_until<B: Bus + ?Sized>(&mut self, bus: &mut B, deadline: SimTime) -> RunExit {
         let now = self.local_time();
         if deadline <= now {
             return RunExit::BudgetExhausted;
@@ -954,10 +966,10 @@ pub fn muldiv(op: MulOp, a: u32, b: u32) -> u32 {
     }
 }
 
-/// Direct-mapped decode cache, invalidated by `fence.i` and stores (including
-/// stores to instruction memory). The fetch itself still goes to the bus so
-/// wait-states and access faults stay exact.
-const DECODE_CACHE_LINES: usize = 1024;
+/// Direct-mapped decode cache, invalidated by `fence.i` (RISC-V instruction
+/// stream coherence). Hits skip the bus fetch; `wait_states` for the PC are
+/// still applied so a future timed I-cache model stays honest.
+const DECODE_CACHE_LINES: usize = 4096;
 
 #[derive(Clone, Copy, Debug)]
 struct DecodeSlot {

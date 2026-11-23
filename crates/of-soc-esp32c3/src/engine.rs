@@ -315,6 +315,13 @@ impl Engine for Esp32c3Engine {
         self.idle_claim.map_or(t, |c| c.max(t))
     }
 
+    fn is_quiescent(&self) -> bool {
+        // Pin and UART side-effects are posted as kernel events; they do not
+        // by themselves move watched input pads. The analog engine's own
+        // quiescence gate decides whether GPIO polls may batch.
+        true
+    }
+
     fn on_event(&mut self, ev: &Event, _cx: &mut SyncCtx<'_>) -> Result<(), EngineError> {
         if ev.code >> 31 == 1 {
             let pad = ((ev.code >> 24) & 0x7f) as u8;
@@ -335,7 +342,16 @@ impl Engine for Esp32c3Engine {
     fn advance_to(&mut self, limit: SimTime, cx: &mut SyncCtx<'_>) -> Result<SimTime, EngineError> {
         self.idle_to(cx.now());
         let linked = self.inputs != 0;
-        self.soc.bus.set_input_horizon(linked.then(|| cx.now()));
+        // Exact-time GPIO reads only matter when a later engine (the analog
+        // solver) might still move a watched node. On a settled DC network
+        // the pad level cannot change before the next stimulus event, so
+        // the hart may batch instruction stepping through the whole slice.
+        let horizon = if linked && !cx.peers_quiescent() {
+            Some(cx.now())
+        } else {
+            None
+        };
+        self.soc.bus.set_input_horizon(horizon);
         let limit = match self.max_lead {
             Some(lead) if linked => limit.min(cx.now().saturating_add(lead)),
             _ => limit,

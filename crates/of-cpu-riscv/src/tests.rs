@@ -1104,3 +1104,75 @@ fn deferred_loads_stop_before_the_instruction() {
     ));
     assert_eq!((h.reg(3), h.reg(4)), (0x1234, 1));
 }
+
+/// Counts instruction fetches so the decode-cache hit path can be checked.
+struct FetchCounter {
+    ram: Ram,
+    fetches: u64,
+}
+
+impl Bus for FetchCounter {
+    fn read(&mut self, addr: u32, size: Size, kind: AccessKind) -> Result<u32, BusError> {
+        if kind == AccessKind::Fetch {
+            self.fetches += 1;
+        }
+        self.ram.read(addr, size, kind)
+    }
+    fn write(&mut self, addr: u32, size: Size, value: u32, kind: AccessKind) -> Result<(), BusError> {
+        self.ram.write(addr, size, value, kind)
+    }
+}
+
+#[test]
+fn decode_cache_skips_fetch_and_survives_stores() {
+    // A tiny loop that stores every iteration: without an I-cache that
+    // ignores data-side stores, every store would force a re-fetch.
+    //   addi x1, x0, DATA
+    //   addi x2, x0, 32
+    // 1: sw   x2, 0(x1)
+    //   addi x2, x2, -1
+    //   bne  x2, x0, 1b
+    //   ebreak
+    let [l1, a1] = li(1, DATA);
+    let [l2, a2] = li(2, 32);
+    let prog = [l1, a1, l2, a2, sw(2, 1, 0), addi(2, 2, -1), bne(2, 0, -8), EBREAK];
+    let mut ram = Ram::new(BASE, 0x10000);
+    ram.load_words(BASE, &prog).unwrap();
+    let mut bus = FetchCounter { ram, fetches: 0 };
+    let mut h = Hart::new(cfg());
+    assert!(matches!(
+        h.run(&mut bus, 100_000),
+        RunExit::Halted(HaltReason::Ebreak { .. })
+    ));
+    assert_eq!(h.reg(2), 0);
+    // 8 instructions in the image; the loop body is three words run 32 times.
+    // A cold fill is a handful of word/half fetches; after that hits dominate.
+    assert!(
+        bus.fetches < 80,
+        "decode cache should skip almost all fetches after warm-up, got {}",
+        bus.fetches
+    );
+}
+
+#[test]
+fn fence_i_makes_patched_code_visible() {
+    // Write a new instruction at `target` and execute it only after fence.i.
+    //   addi x1, 0, target
+    //   lui/addi x2, addi x3,0,99
+    //   sw x2, 0(x1)
+    //   fence.i
+    // target: addi x3, 0, 1   (overwritten with addi x3,0,99)
+    //   ebreak
+    let target = BASE + 0x20;
+    let [l1, a1] = li(1, target);
+    let [l2, a2] = li(2, addi(3, 0, 99));
+    let mut prog = vec![l1, a1, l2, a2, sw(2, 1, 0), FENCE_I];
+    while (BASE + (prog.len() as u32) * 4) < target {
+        prog.push(addi(0, 0, 0)); // nop padding
+    }
+    assert_eq!(BASE + (prog.len() as u32) * 4, target);
+    prog.push(addi(3, 0, 1));
+    prog.push(EBREAK);
+    let h = exec_with(cfg(), &prog).0;
+    assert_eq!(h.reg(3), 99, "fence.i must observe the patched instruction");
+}

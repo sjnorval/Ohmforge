@@ -286,9 +286,9 @@ impl Stepper {
             return;
         }
         self.t = target;
-        if let Some(last) = self.hist.back_mut()
-            && (target - last.t) < self.h_min
-        {
+        // The solution is unchanged, so only the timestamp moves. Avoid
+        // cloning `x`/`q` on every quiet kernel slice.
+        if let Some(last) = self.hist.back_mut() {
             last.t = target;
         } else {
             self.hist.push_back(Point {
@@ -296,9 +296,6 @@ impl Stepper {
                 x: self.x.clone(),
                 q: self.states.now.clone(),
             });
-            while self.hist.len() > 4 {
-                self.hist.pop_front();
-            }
         }
     }
 
