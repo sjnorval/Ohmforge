@@ -188,11 +188,12 @@ Conductors are components to the engine (two pins, a temperature-dependent resis
 
 ## 10. Decided and open questions
 
-Decided (proposed; Stefan to confirm): metric mm² is the default unit with AWG alongside; conductors are components; ideal wires remain the default for circuits without conductor data.
+Decided (23 November 2026, Stefan):
 
-Open questions:
+- Metric mm² is the default unit with AWG alongside; conductors are components; ideal wires remain the default for circuits without conductor data.
+- **Default model for new projects** (former open question 1). Ideal wires.
+- **Small sizes** (former open question 2). ISO 6722-1 and small hook-up sizes are listed only once each has been checked against the standard.
+- **Fab profiles** (former open question 3). Ship profiles for common fabs (minimum trace and space, copper weights, plating) and allow user-defined profiles.
+- **IPC-2152 calibration** (former open question 4). Parked. The board conduction model is not calibrated until verified, openly usable data exists; until then it is uncalibrated and says so, and the IPC-2221 fit is shown beside it.
 
-1. **Default model for new projects.** Ideal (proposed) or resistive with the breadboard defaults?
-2. **Which ISO 6722-1 and small hook-up sizes** to list, once checked against the standard?
-3. **Fab profiles.** Ship profiles for common fabs (minimum trace, space, copper weights, plating), or user-entered only?
-4. **IPC-2152 data.** Is there an openly licensed data set or paper we can calibrate the board conduction model against, or do we bench-measure our own (with the P5 hardware-in-the-loop lab)?
+Open questions: none at present.

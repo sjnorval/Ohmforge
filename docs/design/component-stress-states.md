@@ -48,7 +48,7 @@ Non-goals:
 | State | Rule (defaults, configurable) | Latched? |
 |---|---|---|
 | Normal | below 80 % of every limit | — |
-| Warning | 80 % to 100 % of a limit, or above a recommended operating limit | No |
+| Warning | 80 % to 100 % of a limit (80 % configurable globally and per quantity), or above a recommended operating limit | No |
 | Over-limit | above an absolute maximum, or above a continuous limit for longer than a grace time | No (shows the time over limit) |
 | Damaged | over-limit long enough for the part's damage rule (energy or time above abs-max), only counted, never applied, unless realistic damage is on | Yes, until reset |
 
@@ -101,9 +101,13 @@ The normal state is unchanged. Above it, layers are added in the active theme's 
 4. **Stress never changes the simulation** unless realistic damage is on.
 5. **Shape as well as colour** for every state.
 
-## 9. Open questions
+## 9. Decided and open questions
 
-1. **Warning threshold**: 80 % of a limit (proposed) or per-quantity defaults (for example 70 % for power)?
-2. **Damage rules**: simple time-above-abs-max rules (proposed) or energy-based rules per part kind?
-3. **Assumed limits**: show stress for parts with no limit data using generic package ratings (proposed, marked “assumed”), or show nothing?
-4. **Preview depth**: DC preview only (proposed), or a short transient preview for capacitive and inductive changes?
+Decided (23 November 2026, Stefan):
+
+- **Warning threshold** (former open question 1). 80 % of a limit by default, configurable globally and per quantity.
+- **Damage rules** (former open question 2). Simple time-above-abs-max rules.
+- **Assumed limits** (former open question 3). Parts with no limit data show stress from generic package ratings, marked “assumed”.
+- **Preview depth** (former open question 4). DC preview only.
+
+Open questions: none at present.

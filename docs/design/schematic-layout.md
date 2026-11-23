@@ -83,8 +83,10 @@ Shown in the editor status bar and the preview, and from the CLI: `ohmforge layo
 | Crossing minimisation is NP-hard | Slow on large schematics | Heuristics with an iteration budget; incremental mode for edits |
 | Port constraints from symbols vary | Poor orientation for some parts | Pin kinds and sides from `[symbol]`; validator for missing kinds |
 
-Open questions:
+Decided (23 November 2026, Stefan):
 
-1. **Replace the hand-placed demo layouts** with accepted auto layouts once L2 lands, or keep them as hand-made references (proposed)?
-2. **Rails or symbols** on small boards: always power and ground symbols, or keep a short drawn VDD rail as today's demos do (proposed: keep rails when the board is small and the rail has no crossings)?
-3. **`layout-rs` or own code** for layering, after the licence and quality check?
+- **Demo layouts** (former open question 1). The hand-placed demo layouts stay as hand-made references.
+- **Rails or symbols** (former open question 2). Small boards keep a short drawn rail when it has no crossings; otherwise power and ground symbols.
+- **Layering code** (former open question 3). `layout-rs` if it passes the licence and quality checks, otherwise our own implementation.
+
+Open questions: none at present.

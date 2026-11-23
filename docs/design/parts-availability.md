@@ -118,7 +118,7 @@ AI models can ask for the same lookups through Ohmforge's MCP server (items AI1 
 | Data | Where | Licence and review |
 |---|---|---|
 | Part identity: MPN, manufacturer, footprint, curated offers (`supplier`, `sku`, `url`, and BOM v1's hand-entered `price_zar_cents` snapshot) | `parts/**/part.toml` | CC-BY-SA-4.0; normal PRs. Hand-entered snapshot prices stay supported (decided 23 November 2026, section 9); A1 adds their date and treats them as the lowest-priority library source, and no automated job writes them |
-| Shareable availability facts: SKU mappings per supplier, lifecycle with a source and date (manufacturer PCN/EOL notices), alternates, SKU last-seen dates | A separate dataset, `availability/` beside `parts/` (one TOML file per part id), proposed as CC-BY-SA-4.0 for the facts we compile ourselves | Updated by reviewed PRs, including bot PRs |
+| Shareable availability facts: SKU mappings per supplier, lifecycle with a source and date (manufacturer PCN/EOL notices), alternates, SKU last-seen dates | A separate dataset, `availability/` beside `parts/` (one TOML file per part id) in this repository, CC-BY-SA-4.0 for the facts we compile ourselves (decided 23 November 2026, section 9) | Updated by reviewed PRs, including bot PRs |
 | Prices, stock, price breaks, lead times | Each user's local cache only | Fetched with the user's own keys under the supplier's terms; never committed |
 | Hand-entered BOM lines and prices for one project | The project's `bom.toml` beside its circuit file (demo boards: the user's config folder) | The user's own data; committed only if the user commits their project |
 
@@ -211,7 +211,7 @@ pub struct Alternate {
 ```
 
 - **Money.** Integer millionths of the currency unit, not floats: resistor price breaks are often fractions of a cent. `of-bom`'s `unit_price_zar_cents` becomes a `Money` in the display currency, keeping today's CSV column.
-- **Currency conversion.** Prices are stored as quoted; conversion happens at display and export, to the user's preferred currency (default ZAR). Rates come from the ECB's daily euro reference rates, which include ZAR, USD and CNY ([ECB daily XML](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml)), cached with their date; the BOM states the rate date. A supplier that quotes ZAR directly (the SA stores, possibly DigiKey or Mouser regional sites) is used as quoted. Duties, VAT and shipping are out of scope for the unit price; the BOM can add a user-set landed-cost factor per supplier (open question 2).
+- **Currency conversion.** Prices are stored as quoted; conversion happens at display and export, to the user's preferred currency (default ZAR). Rates come from the ECB's daily euro reference rates, which include ZAR, USD and CNY ([ECB daily XML](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml)), cached with their date; the BOM states the rate date. A supplier that quotes ZAR directly (the SA stores, possibly DigiKey or Mouser regional sites) is used as quoted. Duties, VAT and shipping are out of scope for the unit price; the BOM can add a user-set landed-cost factor per supplier (decided, section 9).
 - **Alternates linked to `part.toml`.** An alternate that is itself a library part carries its `part_id`, so “use this instead” can swap the placement's variant and re-run the simulation with the substitute's own model. `DropIn` requires the same footprint string and pin mapping; `Footprint` the same footprint only; `Functional` neither (a reviewer's note says what changes). Alternates for library parts are curated in the `availability/` dataset; provider-reported substitutes (DigiKey, Nexar) are shown as unreviewed suggestions.
 - **Value-dependent parts.** BOM v1 gave the resistor a fixed 330 Ω variant (`RC0603FR-07330RL`). When other values arrive, either one variant per value or a value-to-MPN rule (Yageo's `RC0603FR-07<value>L`) is needed before lookup; that rule belongs with E6's `bom` fields.
 
@@ -267,12 +267,11 @@ Decided (23 November 2026, Stefan):
 - **Project keys for the scheduled job.** Stefan holds project API keys for Mouser, DigiKey and LCSC as GitHub Actions secrets for the A5 job. This is subject to each supplier's terms allowing that use (a public library, run from CI): **action item** before A5, check and record each supplier's terms for this use, and leave a supplier out of the job if its terms do not allow it. The job still publishes only shareable facts (SKU liveness, lifecycle, alternates) to `availability/`, never prices or stock.
 - **South African suppliers to approach first:** all five, Micro Robotics, Communica, DIYElectronics, Mantech and RS South Africa. Each is asked for permission or a product feed (no supplier has been contacted yet); until one agrees, its offers come in through manual CSV import. PartServe stays a later candidate.
 - **Hand-entered BOMs and prices stay possible.** Users can enter or override any BOM line by hand (section 6), and the hand-entered `price_zar_cents` snapshots in `part.toml` stay, dated from A1 (this settles former open question 7).
+- **Shareable dataset licence and home** (former open question 1). `availability/` lives in this repository under CC-BY-SA-4.0, beside `parts/`.
+- **Landed cost** (former open question 2). Distributor prices plus a user-set factor per supplier for shipping, duties and VAT; free-shipping thresholds are not modelled.
+- **Preferred-supplier policy** (former open question 3). A user setting; the default is fewest suppliers, with SA suppliers first on ties.
+- **Lifecycle source of truth** (former open question 4). When providers disagree, both values are shown with their sources and the warning follows the most severe.
+- **Web app** (former open question 5). `of-web` imports a cache exported from the desktop app and makes no supplier calls of its own: supplier APIs need secret keys that their terms forbid in browser code and that cross-origin (CORS) rules block; a keyless public API, if one exists, may be called directly.
+- **Offer entries in `part.toml`** (former open question 6). Curated `offers` stay in `part.toml` for the one or two canonical SKUs; all other SKU mappings go in the `availability/` dataset.
 
-Open questions:
-
-1. **Shareable dataset licence and home.** `availability/` in this repository under CC-BY-SA-4.0 (proposed), or a separate repository so the weekly bot PRs do not clutter the code history? (Not decided yet.)
-2. **Landed cost.** Show distributor prices plus a user-set factor for shipping, duties and VAT, or try to model DigiKey/Mouser free-shipping thresholds for South Africa? Proposal: factor only.
-3. **Preferred-supplier policy.** Rank by lowest total, by SA-first, or by fewest suppliers (one order)? Proposal: user setting, default fewest suppliers with SA-first ties.
-4. **Lifecycle source of truth** when providers disagree (one says NRND, another Active). Proposal: show both with sources; warn on the most severe.
-5. **Web app.** Should `of-web` (P4) get availability at all, given most APIs do not allow browser-side calls with a secret? Proposal: cache import only.
-6. **Offer entries in `part.toml`.** Keep curated `offers` there as today (the dataset adds to them), or move all SKU mappings to `availability/` and leave `part.toml` with MPN and manufacturer only? Proposal: keep `offers` for the one or two canonical SKUs; everything else in the dataset.
+Open questions: none at present.
