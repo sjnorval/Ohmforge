@@ -46,6 +46,7 @@ The [pull request template](.github/pull_request_template.md) has the full check
 3. Link the datasheet; do not commit it. Do not commit vendor SPICE models with restrictive terms.
 4. If the part needs behaviour beyond the generic models, add a Rust model in `crates/of-components` or a WASM model. Under the engine plan ([`docs/design/engine-components.md`](docs/design/engine-components.md), phases E2 to E6, issues #46 to #50), once the engine API exists every part is a component on it: declare all pins, including supply and ground pins (no hidden connections to ground), and do not add per-demo glue in `of-ui`.
 5. Add a small test circuit with expected readings (see `crates/of-components/tests/`). Bench-measured parts should include a capture.
+6. Run `cargo run -p of-cli -- validate-parts parts/` and confirm your part prints `ok`.
 
 ## Labels
 

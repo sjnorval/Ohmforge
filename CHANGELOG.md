@@ -8,8 +8,15 @@ Add a line under **Unreleased** in every pull request with a user-visible change
 
 Nothing has been released yet. Everything below is on `main` and will ship in 0.1.
 
+### Changed
+
+- **Stub crate dependencies:** removed unused dependency lines from empty and placeholder crates, dropped unused `[workspace.dependencies]` path entries, and gated `of-ui`'s `of-instruments` behind the `gui` feature so `cargo check --workspace` stays free of unused-dependency warnings. Planned edges remain in the `AGENTS.md` crate map.
+
 ### Added
 
+- **`ohmforge validate-parts`:** walks a parts tree, parses every `part.toml`, runs loader consistency checks and requires CC-BY-SA-4.0 licence fields (`cargo run -p of-cli -- validate-parts parts/`).
+- **mdBook skeleton:** `docs/book.toml` and `docs/src/` with a SUMMARY that points at the living guides (full user guide remains P6).
+- **RFC template:** `rfcs/0000-template.md` with the sections required by `CONTRIBUTING.md`; `rfcs/README.md` describes numbering (`NNNN-short-title.md`).
 - **Green and blue 0603 LEDs:** `generic.led-green-0603` (Kingbright APT1608SGC, typical 2.2 V at 20 mA, 568 nm) and `generic.led-blue-0603` (APT1608QBC/D, typical 3.3 V at 20 mA, 465 nm), same Shockley/`popt` model as the red 0603 part, with bridge tests that check datasheet forward voltage.
 - **Dimmer realtime-factor report:** `of-ui` release tests print the pot-dimmer simulation-seconds per wall-second (`dimmer_realtime_factor_report`, and the existing `realtime_capacity_report` counters) so CPU/solver speedups stay measurable.
 - **Base engine and plug-in component plan:** [`docs/design/engine-components.md`](docs/design/engine-components.md) plans the move to a base engine (nets, analog and digital solvers, time, events, measurement) with every real part, the ESP32-C3 and the bench PSU as components on one API, circuit files drawn by the shared router, instruments on any circuit and the BOM from components. The roadmap gains P2 phases E1 to E6 before the schematic editor; the README, `docs/DESIGN_AND_PLAN.md` §7 and the agent guides point to it. No code change.
