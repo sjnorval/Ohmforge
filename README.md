@@ -23,6 +23,8 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 **Planned: editor integration.** Upload, serial monitor and debugging from VS Code and the Arduino IDE 2.x as if the simulator were a real board: a local control API, a virtual serial port, a GDB stub and hot reload in P3, then a VS Code extension and an Arduino board package in P4. The plan is in [`docs/design/editor-integration.md`](docs/design/editor-integration.md).
 
+**Planned: parts availability.** Keep BOMs current with stock, price breaks, lifecycle and alternates from global distributors and South African suppliers, checked on request (`ohmforge bom check`, or in the app) or on a schedule, using your own API keys and working offline from a dated cache (P3 to P5). The plan is in [`docs/design/parts-availability.md`](docs/design/parts-availability.md).
+
 ## Workspace layout
 
 | Crate | Purpose |

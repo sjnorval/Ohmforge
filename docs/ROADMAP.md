@@ -173,6 +173,10 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
 - [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (exported wires use the same routed paths)
+- [ ] Parts availability, first slice (design: [`design/parts-availability.md`](design/parts-availability.md); after BOM v1 #59 and E6 #50)
+  - [ ] A1 Data model and offline cache: offers, price breaks (`Money` in millionths), lifecycle and alternates in `of-bom`; host-only `of-suppliers` with a SQLite cache, TTLs and `fetched_at`, ECB rates to ZAR, manual import; `ohmforge bom check --offline`; an `availability/` dataset kept apart from the CC-BY-SA `part.toml` definitions
+  - [ ] A2 LCSC, Mouser and DigiKey providers with the user's own keys in the OS keychain, per-provider rate budgets; `ohmforge parts refresh`
+  - [ ] A3 In-app “Check availability” with staleness badges and EOL / out-of-stock warnings, never blocking the simulation
 - [ ] Explore compatibility with PCB fabrication services (JLCPCB, PCBWay, OSH Park and similar): export of board designs (Gerber/drill, BOM and pick-and-place/CPL for assembly), likely via the KiCad export
 - [ ] Release 0.2
 
@@ -186,6 +190,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Editor plugins (design: [`design/editor-integration.md`](design/editor-integration.md); need P3 items I1 to I4)
   - [ ] I5 VS Code extension MVP (TypeScript, AGPL-3.0-or-later, talks to the control API, never links Rust): start simulator, upload (on build), serial monitor, `ohmforge` debug type via cortex-debug or `cppdbg` against `of-gdb`, task provider, ESP-IDF / PlatformIO / Cargo snippets; Marketplace and Open VSX
   - [ ] I6 Arduino IDE 2.x board package: `package_ohmforge_index.json` with an “Ohmforge simulated ESP32-C3” board on the user's installed `esp32:esp32` core and toolchain (not redistributed), port discovery, upload through `ohmforge flash` or esptool, serial monitor and plotter over the virtual port
+- [ ] Parts availability A4 ([`design/parts-availability.md`](design/parts-availability.md)): Nexar, element14, TME, Arrow and JLCPCB providers after terms reviews, “find alternates” with variant swap, XLSX supplier sheets and supplier BOM/cart upload files
 - [ ] Release 0.3
 
 ## P5 Realism (weeks 56 to 72), exit 0.4: validation report published
@@ -195,7 +200,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Thermal model (self-heating, ambient, tempco; MOSFET Rds(on) against temperature)
 - [ ] Fault injection (opens, shorts, brown-outs, noisy supplies)
 - [ ] Hardware-in-the-loop lab: compare simulation with real boards
-- [ ] Supplier price plugins for the BOM
+- [ ] Supplier price plugins for the BOM, as parts availability A5 ([`design/parts-availability.md`](design/parts-availability.md)): a scheduled GitHub Action, using project Mouser, DigiKey and LCSC keys Stefan holds as Actions secrets (once each supplier's terms are checked to allow it), that opens PRs updating the shareable `availability/` facts (SKU liveness, lifecycle, alternates; never prices or stock), and South African suppliers (Micro Robotics, Communica, DIYElectronics, Mantech, RS South Africa; all five to be asked for permission or a feed) through agreed feeds or manual CSV import; providers from A2 and A4 are the plugins
 - [ ] Publish the validation report (simulation against hardware and ngspice); release 0.4
 
 ## P6 1.0 (weeks 70 to 84)
