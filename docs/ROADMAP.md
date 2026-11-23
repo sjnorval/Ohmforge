@@ -127,7 +127,7 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
     - [ ] User-editable waypoints and click-to-wire (editor slice; no editor chrome in the earlier PRs; needs the E4 circuit files and E6 symbols, so it follows them in P3)
     - [ ] Interactive trace re-edit mode in the schematic editor: manually re-route or adjust auto-generated traces (drag segments; move, add or remove waypoints/bends; re-run autoroute on a net); edits keep the same invariants (no body crossings, no foreign-net overlap, T-junctions)
 - [x] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist (for 0.1 from the demo boards' placements via `of-bom` / `ohmforge bom`; moves onto components with E6, #50, in P3) (#59)
-- [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer, fade and push-button demos; Arduino and ESP-IDF builds still to do, #60)
+- [ ] MVP demo: blink, button interrupt, potentiometer to ADC, LED dimming, all from unmodified Arduino/ESP-IDF/esp-hal ELFs (all four run from esp-hal: blink, the button polled and on an interrupt (#22), and the pot dimmer and LED fade (#24); the desktop app can play the blink, dimmer, fade and push-button demos; Arduino and ESP-IDF builds still to do, design [#60](https://github.com/sjnorval/Ohmforge/issues/60) / [`design/arduino-idf-mvp-demos.md`](design/arduino-idf-mvp-demos.md))
 
 ### First milestone: blinky end to end
 
@@ -140,12 +140,12 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 5. [x] Blinky firmware (`firmware/esp32c3-blinky`, RV32IMC asm, SYSTIMER-timed): edges every 250 µs without drift (`tests/blinky.rs`)
 6. [x] `Esp32c3Engine` + `PinDriver` + parts-library LED and resistor under the kernel: LED current switches with a 500 µs period, about 4 mA on (`tests/blinky_led.rs`)
 7. [x] Same blinky from esp-hal (Rust, `riscv32imc-unknown-none-elf`, #21): `firmware/esp32c3-esp-hal-blinky` (esp-hal 1.2.2, unmodified `esp_hal::init` with `CpuClock::max()`, 500 µs half period) boots through the real ROM and the ESP-IDF bootloader, prints its banner at 160 MHz and drives the LED circuit (`tests/esp_hal_blinky.rs`); CI rebuilds it byte for byte
-8. [ ] Arduino-ESP32 / ESP-IDF blink through the real ROM and a flash image (#60; deferred: needs an ESP-IDF or Arduino toolchain in CI; the bootloader path it uses already works)
+8. [ ] Arduino-ESP32 / ESP-IDF blink through the real ROM and a flash image (design: [`design/arduino-idf-mvp-demos.md`](design/arduino-idf-mvp-demos.md), #60; bootloader path already works; CI installs pinned ESP-IDF / `arduino-cli` to rebuild committed images — no longer deferred as design-only)
 
 ### MVP definition (exit criteria for 0.1)
 
-- [ ] Unmodified ESP32-C3 ELF (Arduino-ESP32, ESP-IDF or esp-hal) boots from the real ROM
-- [ ] Blink, button with interrupt, potentiometer into ADC, LED dimming via LEDC behave as on hardware
+- [ ] Unmodified ESP32-C3 ELF (Arduino-ESP32, ESP-IDF or esp-hal) boots from the real ROM (Arduino/IDF side: [`design/arduino-idf-mvp-demos.md`](design/arduino-idf-mvp-demos.md), #60)
+- [ ] Blink, button with interrupt, potentiometer into ADC, LED dimming via LEDC behave as on hardware (esp-hal done; Arduino/IDF: same design note)
 - [x] RC filter, LED with series resistor, transistor switch, AMS1117 regulator within 1 % of ngspice
 - [ ] Oscilloscope, logic analyser with UART decode, multimeter probe, serial monitor
   - [x] Virtual voltmeter/ammeter on the live schematic (click two probe points; non-disturbing ammeter on a unique branch) on `main` (#27)
