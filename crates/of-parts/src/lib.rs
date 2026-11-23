@@ -33,6 +33,12 @@ pub struct Offer {
     pub supplier: String,
     /// Supplier SKU.
     pub sku: String,
+    /// Product page URL, if known.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Snapshot unit price in ZAR cents (dated; not live).
+    #[serde(default)]
+    pub price_zar_cents: Option<u64>,
 }
 
 /// A purchasable variant of a part.

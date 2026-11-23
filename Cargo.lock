@@ -2015,12 +2015,17 @@ dependencies = [
 [[package]]
 name = "of-bom"
 version = "0.0.1"
+dependencies = [
+ "of-parts",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "of-cli"
 version = "0.0.1"
 dependencies = [
  "of-analog",
+ "of-bom",
  "of-netlist",
  "of-parts",
 ]
