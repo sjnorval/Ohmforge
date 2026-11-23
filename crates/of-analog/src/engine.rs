@@ -127,6 +127,10 @@ pub struct AnalogEngine {
     time: SimTime,
     resolution: f64,
     watches: Vec<Watch>,
+    /// Reused across slices so a busy PWM/GPIO run does not allocate per step.
+    active_watches: Vec<(usize, Crossing)>,
+    /// Crossing list passed to the stepper (same lifetime as `active_watches`).
+    crossing_buf: Vec<Crossing>,
     actions: BTreeMap<u32, Vec<SetParam>>,
     samples: BTreeMap<u32, Sample>,
     rec: Option<Waveforms>,
@@ -167,6 +171,8 @@ impl AnalogEngine {
             time: SimTime::ZERO,
             resolution: cfg.resolution,
             watches: Vec::new(),
+            active_watches: Vec::new(),
+            crossing_buf: Vec::new(),
             actions: BTreeMap::new(),
             samples: BTreeMap::new(),
             rec,
@@ -342,6 +348,10 @@ impl Engine for AnalogEngine {
         self.time
     }
 
+    fn is_quiescent(&self) -> bool {
+        AnalogEngine::is_quiescent(self)
+    }
+
     fn advance_to(&mut self, limit: SimTime, cx: &mut SyncCtx<'_>) -> Result<SimTime, EngineError> {
         if limit <= self.time {
             return Ok(self.time.max(limit));
@@ -355,25 +365,25 @@ impl Engine for AnalogEngine {
             self.time = limit;
             return Ok(limit);
         }
-        let active: Vec<(usize, Crossing)> = self
-            .watches
-            .iter()
-            .enumerate()
-            .filter(|(_, w)| w.enabled)
-            .map(|(i, w)| (i, w.crossing))
-            .collect();
-        let crossings: Vec<Crossing> = active.iter().map(|(_, c)| *c).collect();
+        self.active_watches.clear();
+        self.crossing_buf.clear();
+        for (i, w) in self.watches.iter().enumerate() {
+            if w.enabled {
+                self.active_watches.push((i, w.crossing));
+                self.crossing_buf.push(w.crossing);
+            }
+        }
         while self.st.t < target - self.st.h_min {
             let end = self
                 .st
-                .step(&mut self.ckt, &self.opts, target, &crossings, self.resolution)
+                .step(&mut self.ckt, &self.opts, target, &self.crossing_buf, self.resolution)
                 .map_err(|e| self.error(e))?;
             if let Some(w) = self.rec.as_mut() {
                 w.push(&self.ckt, self.st.t, &self.st.x);
             }
             if let StepEnd::Crossing(k) = end {
                 let at = SimTime::from_secs_f64(self.st.t).clamp(SimTime(cx.now().0 + 1), limit);
-                let w = &self.watches[active[k].0];
+                let w = &self.watches[self.active_watches[k].0];
                 cx.schedule(at, w.target, w.code);
                 self.time = at;
                 return Ok(at);

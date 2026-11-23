@@ -68,6 +68,10 @@ impl Engine for Stimulus {
     fn local_time(&self) -> SimTime {
         self.t
     }
+    fn is_quiescent(&self) -> bool {
+        // Pending mid-slice discoveries act like analog threshold crossings.
+        self.events.is_empty()
+    }
     fn advance_to(&mut self, limit: SimTime, cx: &mut SyncCtx<'_>) -> Result<SimTime, EngineError> {
         if let Some(&(at, code)) = self.events.first().filter(|e| e.0 <= limit) {
             self.events.remove(0);

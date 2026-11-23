@@ -597,6 +597,37 @@ mod tests {
         }
     }
 
+    /// Dedicated dimmer realtime-factor report (release builds are the
+    /// meaningful number; debug is accepted so CI still exercises the path).
+    #[test]
+    fn dimmer_realtime_factor_report() {
+        const SPAN: f64 = 0.200;
+        match crate::adc_pwm::PwmSim::new(crate::adc_pwm::PwmKind::Dimmer, 0.5) {
+            Ok(mut sim) => {
+                // Warm the ROM/boot path and the decode cache before timing.
+                sim.advance(sim.time() + 0.020).unwrap();
+                let s0 = sim.perf_snapshot();
+                let t0 = Instant::now();
+                sim.advance(sim.time() + SPAN).unwrap();
+                let wall = t0.elapsed().as_secs_f64().max(1e-9);
+                let d = s0.delta(sim.perf_snapshot());
+                let rt = d.time / wall;
+                eprintln!(
+                    "dimmer realtime factor: {rt:.3}× ({:.3} s sim in {wall:.3} s wall; minstret={} analog_steps={})",
+                    d.time, d.minstret, d.accepted
+                );
+                assert!(
+                    d.time > SPAN * 0.95,
+                    "expected about {SPAN} s of sim progress, got {}",
+                    d.time
+                );
+                assert!(rt > 0.0, "realtime factor must be positive");
+            }
+            Err(e) if skip_without_rom(&e) => {}
+            Err(e) => panic!("{e}"),
+        }
+    }
+
     #[test]
     fn long_run_keeps_the_scope_bounded() {
         // button-irq sleeps in wfi, so several simulated minutes are cheap

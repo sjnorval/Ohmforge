@@ -57,6 +57,10 @@ pub struct SyncCtx<'a> {
     now: SimTime,
     id: EngineId,
     stop: bool,
+    /// Every registered engine reported [`Engine::is_quiescent`] at the
+    /// start of this slice (after due events). Used to skip exact-time
+    /// GPIO input deferrals when the analog side will only hold.
+    peers_quiescent: bool,
 }
 
 impl SyncCtx<'_> {
@@ -67,6 +71,10 @@ impl SyncCtx<'_> {
     /// The id of the engine being called.
     pub fn id(&self) -> EngineId {
         self.id
+    }
+    /// Whether every engine was quiescent when this slice started.
+    pub fn peers_quiescent(&self) -> bool {
+        self.peers_quiescent
     }
     /// Schedule an event for engine `target` (or [`HOST`]). Times before
     /// the slice start are clamped to it.
@@ -108,6 +116,14 @@ pub trait Engine: Any + Send {
     /// Handle an event addressed to this engine.
     fn on_event(&mut self, _ev: &Event, _cx: &mut SyncCtx<'_>) -> Result<(), EngineError> {
         Ok(())
+    }
+
+    /// Whether this engine will not spontaneously change the circuit or
+    /// post events if advanced from its current state (for example a
+    /// settled DC analog network). Defaults to `false`; engines that are
+    /// known to be idle (or that never wake the network) override it.
+    fn is_quiescent(&self) -> bool {
+        false
     }
 }
 
@@ -241,6 +257,7 @@ impl Kernel {
             now: self.now,
             id: EngineId(ev.target),
             stop: false,
+            peers_quiescent: false,
         };
         engine.on_event(ev, &mut cx)?;
         Ok(cx.stop)
@@ -277,6 +294,7 @@ impl Kernel {
                     limit = limit.min(t);
                 }
             }
+            let peers_quiescent = self.engines.iter().all(|e| e.is_quiescent());
             let mut stop = None;
             for (i, e) in self.engines.iter_mut().enumerate() {
                 if e.local_time() >= limit {
@@ -287,6 +305,7 @@ impl Kernel {
                     now: start,
                     id: EngineId(i as u32),
                     stop: false,
+                    peers_quiescent,
                 };
                 let reached = e.advance_to(limit, &mut cx)?;
                 if cx.stop {
