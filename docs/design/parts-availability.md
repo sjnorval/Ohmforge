@@ -102,11 +102,14 @@ pub trait SupplierProvider: Send + Sync {
 | `ohmforge parts refresh [parts/…] [--provider P]` | Refreshes the cache for library parts (or a subset), within each provider's budget |
 | `ohmforge parts alternates <part id or MPN>` | Lists alternates from the dataset and from providers that offer them |
 | `ohmforge parts import <file> --supplier <id>` | The manual provider: imports a CSV or a saved supplier quote |
+| `ohmforge bom import <csv> [--project P]` / `ohmforge bom set <ref> --price R12.50 --supplier S [--sku X]` | Hand-entered BOM: imports a BOM written by hand (any columns the v1 CSV has, matched by header) or sets one line's supplier, SKU and price by reference designator; writes the project's `bom.toml` (section 6) |
 | `ohmforge suppliers login <id>` / `logout` / `status` | Stores, removes and tests API keys in the OS keychain; shows remaining daily budget |
 
 ### 3d. In the app
 
 A “Check availability” action in the BOM view (and on a part's info panel) runs the same planner on a background worker; badges show freshness (fresh, stale with age, never fetched, offline). The app may refresh stale facts once on launch if the user has opted in; it never refreshes on a timer while simulating unless asked.
+
+AI models can ask for the same lookups through Ohmforge's MCP server (items AI1 and AI2 in [`ai-and-scenario-sweeps.md`](ai-and-scenario-sweeps.md)): Ohmforge runs them through this planner with the user's keychain keys and budgets, the model sees only the results and never the keys, and its BOM changes are proposals the user confirms that never overwrite hand entries. Datasheet URLs, revisions and hashes join the `availability/` dataset there (item D1).
 
 ### 3e. Scheduled refresh and where the data lives
 
@@ -114,9 +117,10 @@ A “Check availability” action in the BOM view (and on a part's info panel) r
 
 | Data | Where | Licence and review |
 |---|---|---|
-| Part identity: MPN, manufacturer, footprint, curated offers (`supplier`, `sku`, `url`, and BOM v1's hand-entered `price_zar_cents` snapshot) | `parts/**/part.toml` | CC-BY-SA-4.0; normal PRs. The snapshot price stays for offline 0.1 BOMs; A1 adds its date and treats it as the lowest-priority, always-stale source, and no automated job writes it (open question 7) |
+| Part identity: MPN, manufacturer, footprint, curated offers (`supplier`, `sku`, `url`, and BOM v1's hand-entered `price_zar_cents` snapshot) | `parts/**/part.toml` | CC-BY-SA-4.0; normal PRs. Hand-entered snapshot prices stay supported (decided 23 November 2026, section 9); A1 adds their date and treats them as the lowest-priority library source, and no automated job writes them |
 | Shareable availability facts: SKU mappings per supplier, lifecycle with a source and date (manufacturer PCN/EOL notices), alternates, SKU last-seen dates | A separate dataset, `availability/` beside `parts/` (one TOML file per part id), proposed as CC-BY-SA-4.0 for the facts we compile ourselves | Updated by reviewed PRs, including bot PRs |
 | Prices, stock, price breaks, lead times | Each user's local cache only | Fetched with the user's own keys under the supplier's terms; never committed |
+| Hand-entered BOM lines and prices for one project | The project's `bom.toml` beside its circuit file (demo boards: the user's config folder) | The user's own data; committed only if the user commits their project |
 
 - **Scheduled CI job (A5).** A GitHub Action (weekly, plus manual dispatch) runs `ohmforge parts refresh` for the library with project keys for Mouser, DigiKey and LCSC that Stefan holds as GitHub Actions secrets (decided 23 November 2026, subject to each supplier's terms; section 9), and opens one PR that updates only the shareable facts: a SKU no longer found, a lifecycle change, a new alternate a provider reports. It never commits prices or stock. Whether this CI use, and committing SKU and lifecycle facts derived from a provider's API, is allowed depends on that provider's terms; checking them is an action item before A5, and providers whose terms do not allow it are excluded from the CI job (section 9).
 - **Per user.** The app's opt-in refresh on launch and `ohmforge parts refresh` (which a user can put in their own scheduler) keep the local cache warm.
@@ -186,7 +190,7 @@ pub struct SupplierOffer {
     pub packaging: Option<String>,        // cut tape, reel, bag
     pub breaks: Vec<PriceBreak>,
     pub fetched_at: Timestamp,            // UTC
-    pub source: Source,                   // provider API, manual import (file and date), dataset
+    pub source: Source,                   // provider API, manual import (file and date), hand entry (bom.toml, date), dataset
 }
 
 pub struct PriceBreak {
@@ -216,6 +220,7 @@ pub struct Alternate {
 **Proposed.**
 
 - **BOM view** (CLI table and the app's BOM panel): per line the best offer for the build quantity (lowest extended cost among suppliers with enough stock; ties to the user's preferred suppliers; SA suppliers can be ranked first), stock, lifecycle, the offer's age, and a staleness badge. Totals per supplier and for a best-mix basket.
+- **Hand-entered BOM (always available).** A project's `bom.toml` holds what the user types or pastes: a price, supplier, SKU or URL for a line (for example a shelf price from a local store, or a quote), a note, a `do not fit` or `already have` flag, and extra lines with no part in the library or circuit (enclosure, wire, headers, the bench PSU, shipping). Each entry carries `entered_at`. Hand entries win over library snapshots and over fetched offers for that line unless the user picks another offer, and are shown with a `hand-entered` badge and their age instead of a stale warning. Editing happens in the app's BOM panel (cells for supplier, SKU, price, quantity and note; an Add line button), with `ohmforge bom set` and `bom import`, or in the file directly. The BOM works with no providers, no keys and no network: a fully hand-entered BOM is a supported end state, not a fallback.
 - **Warnings:** out of stock everywhere, stock below the build quantity, EOL, obsolete or last-time-buy, NRND (softer), a curated SKU no longer found, facts older than the configured limit, and no offer at all. `ohmforge bom check` turns these into exit codes for CI.
 - **Find alternates:** from a warning, list alternates with their availability; picking a library alternate swaps the variant in the project (a project edit, not a `part.toml` edit) and marks the simulation results stale.
 - **Exports:** CSV (today's columns plus supplier, SKU, URL, unit price with currency, extended price, stock, lifecycle and `fetched_at`) and XLSX (the P3 `rust_xlsxwriter` item) with one sheet per supplier. The export states the data date and that prices are indicative.
@@ -230,6 +235,7 @@ pub struct Alternate {
 5. **No supplier data committed** except the shareable facts in `availability/`, and only from providers whose terms allow it.
 6. **Terms first.** A provider ships only with official API access or written permission, and paces itself within published limits.
 7. **Determinism of outputs.** Given the same cache file and rates, the BOM view and exports are byte-identical (ordered maps, stable sorting), so they can have golden tests.
+8. **Hand entries are never overwritten.** No refresh, import or scheduled job changes a value in `bom.toml` or a hand-entered `part.toml` price; a newer fetched offer is shown beside it.
 
 ## 8. Phasing
 
@@ -238,7 +244,7 @@ Small PRs with tests; providers are tested against recorded responses (fixtures 
 | Item | Phase | Work | Depends on | Acceptance criteria |
 |---|---|---|---|---|
 | **A0** Design | P2 (now) | This document; roadmap, README, mdBook and changelog pointers. | — | Reviewed and merged by Stefan. No code change. |
-| **A1** Data model, cache and offline CLI | P3 | `Money`, `SupplierOffer`, `PriceBreak`, `Lifecycle`, `Alternate` in `of-bom` (pure); `of-suppliers` with the SQLite cache, TTLs, ECB rates and the manual provider; `ohmforge bom check --offline` and `ohmforge parts import`; the `availability/` dataset format with a validator in `validate-parts`. | BOM v1 (#59, done); E6 (#50) for circuit-file BOMs (demo boards until then) | `ohmforge bom check dimmer --offline` reads today's `part.toml` snapshots as dated library offers, and a manual import of a saved quote for the dimmer's parts (U1, R1, D1, RV1) produces a BOM table and CSV with ZAR totals, supplier columns and `fetched_at`; ages and stale badges follow the TTLs; golden test of the CSV from a fixed cache; no network code reached with `--offline`; wasm32 check of simulation crates unchanged. |
+| **A1** Data model, cache and offline CLI | P3 | `Money`, `SupplierOffer`, `PriceBreak`, `Lifecycle`, `Alternate` in `of-bom` (pure); `of-suppliers` with the SQLite cache, TTLs, ECB rates and the manual provider; the hand-entered project `bom.toml` with `ohmforge bom set` and `bom import`; `ohmforge bom check --offline` and `ohmforge parts import`; the `availability/` dataset format with a validator in `validate-parts`. | BOM v1 (#59, done); E6 (#50) for circuit-file BOMs (demo boards until then) | `ohmforge bom check dimmer --offline` reads today's `part.toml` snapshots as dated library offers, and a manual import of a saved quote for the dimmer's parts (U1, R1, D1, RV1) produces a BOM table and CSV with ZAR totals, supplier columns and `fetched_at`; ages and stale badges follow the TTLs; golden test of the CSV from a fixed cache; no network code reached with `--offline`; a hand-entered price set with `ohmforge bom set R1 --price R1.20 --supplier communica` and an extra hand-entered line (an enclosure) appear in the BOM and CSV, and survive a `parts import` of a newer quote unchanged; wasm32 check of simulation crates unchanged. |
 | **A2** First API providers and refresh | P3 | Provider trait, lookup planner with per-provider budgets and `Retry-After`; LCSC, Mouser and DigiKey providers; keychain-backed `ohmforge suppliers login/status`; `ohmforge parts refresh`. | A1 | Recorded-response tests per provider (parse, price breaks, currency, 429 handling); a library refresh with all three keys stays within each published daily limit (planner test); keys never appear in logs (test with a sentinel key). |
 | **A3** In-app availability | P3, with the BOM view | “Check availability” and staleness badges in the app's BOM panel; opt-in refresh on launch; warnings for EOL, NRND, out of stock and stale. | A2; the app's BOM panel (BOM v1 / E6) | Refresh runs without changing the simulation's realtime factor (measured with the existing dimmer realtime report); offline start shows cached values with ages; warnings appear for a fixture EOL part. |
 | **A4** More providers, alternates and supplier exports | P4 | Nexar, element14, TME, Arrow and JLCPCB providers (each after a terms review); `ohmforge parts alternates` and “find alternates” with variant swap; XLSX with supplier sheets; supplier BOM/cart upload CSVs. | A2, A3; P3 XLSX export | Each provider passes recorded-response tests and documents its terms version; swapping RV1 or D1 for a library alternate re-runs the demo with the substitute's model; each upload CSV matches a sample accepted by that supplier's upload tool (checked manually once, then golden-tested). |
@@ -260,6 +266,7 @@ Decided (23 November 2026, Stefan):
 
 - **Project keys for the scheduled job.** Stefan holds project API keys for Mouser, DigiKey and LCSC as GitHub Actions secrets for the A5 job. This is subject to each supplier's terms allowing that use (a public library, run from CI): **action item** before A5, check and record each supplier's terms for this use, and leave a supplier out of the job if its terms do not allow it. The job still publishes only shareable facts (SKU liveness, lifecycle, alternates) to `availability/`, never prices or stock.
 - **South African suppliers to approach first:** all five, Micro Robotics, Communica, DIYElectronics, Mantech and RS South Africa. Each is asked for permission or a product feed (no supplier has been contacted yet); until one agrees, its offers come in through manual CSV import. PartServe stays a later candidate.
+- **Hand-entered BOMs and prices stay possible.** Users can enter or override any BOM line by hand (section 6), and the hand-entered `price_zar_cents` snapshots in `part.toml` stay, dated from A1 (this settles former open question 7).
 
 Open questions:
 
@@ -269,4 +276,3 @@ Open questions:
 4. **Lifecycle source of truth** when providers disagree (one says NRND, another Active). Proposal: show both with sources; warn on the most severe.
 5. **Web app.** Should `of-web` (P4) get availability at all, given most APIs do not allow browser-side calls with a secret? Proposal: cache import only.
 6. **Offer entries in `part.toml`.** Keep curated `offers` there as today (the dataset adds to them), or move all SKU mappings to `availability/` and leave `part.toml` with MPN and manufacturer only? Proposal: keep `offers` for the one or two canonical SKUs; everything else in the dataset.
-7. **BOM v1 snapshot prices in `part.toml`.** Keep `price_zar_cents` there (with a date added in A1) as the offline fallback, or move snapshot prices out of the part definitions once the cache exists, so CC-BY-SA part files carry no prices? Proposal: keep them, dated, for the demo parts only.
