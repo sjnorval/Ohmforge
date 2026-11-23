@@ -1,0 +1,114 @@
+# Espressif ESP32-C3 (bare chip / module footprint). Only pins that are
+# wired in the circuit are elaborated (design §3c). The Rust model is
+# `Esp32c3Component` in of-soc-esp32c3 (`model = "rust:esp32c3"`).
+[part]
+id = "espressif.esp32-c3"
+name = "ESP32-C3"
+category = "ic/mcu"
+model = "rust:esp32c3"
+verification = "community"
+
+[[pin]]
+number = "1"
+name = "3V3"
+kind = "power"
+[[pin]]
+number = "2"
+name = "GND"
+kind = "ground"
+[[pin]]
+number = "3"
+name = "GPIO0"
+kind = "io"
+[[pin]]
+number = "4"
+name = "GPIO1"
+kind = "io"
+[[pin]]
+number = "5"
+name = "GPIO2"
+kind = "io"
+[[pin]]
+number = "6"
+name = "GPIO3"
+kind = "io"
+[[pin]]
+number = "7"
+name = "GPIO4"
+kind = "io"
+[[pin]]
+number = "8"
+name = "GPIO5"
+kind = "io"
+[[pin]]
+number = "9"
+name = "GPIO6"
+kind = "io"
+[[pin]]
+number = "10"
+name = "GPIO7"
+kind = "io"
+[[pin]]
+number = "11"
+name = "GPIO8"
+kind = "io"
+[[pin]]
+number = "12"
+name = "GPIO9"
+kind = "io"
+[[pin]]
+number = "13"
+name = "GPIO10"
+kind = "io"
+[[pin]]
+number = "14"
+name = "GPIO11"
+kind = "io"
+[[pin]]
+number = "15"
+name = "GPIO12"
+kind = "io"
+[[pin]]
+number = "16"
+name = "GPIO13"
+kind = "io"
+[[pin]]
+number = "17"
+name = "GPIO14"
+kind = "io"
+[[pin]]
+number = "18"
+name = "GPIO15"
+kind = "io"
+[[pin]]
+number = "19"
+name = "GPIO16"
+kind = "io"
+[[pin]]
+number = "20"
+name = "GPIO17"
+kind = "io"
+[[pin]]
+number = "21"
+name = "GPIO18"
+kind = "io"
+[[pin]]
+number = "22"
+name = "GPIO19"
+kind = "io"
+[[pin]]
+number = "23"
+name = "GPIO20"
+kind = "io"
+[[pin]]
+number = "24"
+name = "GPIO21"
+kind = "io"
+
+[electrical]
+vdd = { min = 3.0, typ = 3.3, max = 3.6, unit = "V" }
+idd_modem_sleep = { typ = 5e-3, unit = "A", note = "quiescent load used by Esp32c3Component" }
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

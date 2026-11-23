@@ -2130,10 +2130,13 @@ name = "of-soc-esp32c3"
 version = "0.0.1"
 dependencies = [
  "of-analog",
+ "of-component-api",
  "of-components",
  "of-core",
  "of-cpu-riscv",
+ "of-engine",
  "of-firmware",
+ "of-parts",
  "thiserror 2.0.21",
 ]
 

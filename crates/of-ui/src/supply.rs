@@ -311,8 +311,9 @@ mod tests {
 
     #[test]
     fn sourced_current_returns_through_ground_and_includes_the_load() {
-        use crate::pins::{add_pin_drivers, pin_driver_names};
+        use crate::pins::add_pin_drivers;
         use of_soc_esp32c3::gpio::PinOut;
+        use of_soc_esp32c3::pin_driver_names;
 
         let settings = SupplySettings::default();
         let mut c = Circuit::new();
@@ -355,7 +356,7 @@ mod tests {
                 status.amps
             );
 
-            let (hs, ls) = pin_driver_names(8);
+            let (hs, ls) = pin_driver_names("U1", 8);
             a.set(&hs, "r", PinDriver::HI_Z).unwrap();
             a.set(&ls, "r", 120.0).unwrap();
         }
