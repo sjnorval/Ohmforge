@@ -14,25 +14,20 @@ authors = ["Stefan Norval and Ohmforge contributors"]
 publish = false
 
 [workspace.dependencies]
-# Internal crates
+# Internal crates currently depended on by another crate via `x.workspace = true`.
+# Stub crates (of-digital, of-cpu-xtensa, of-cpu-qemu-ipc, of-soc-esp32, of-plugin-wasm,
+# of-kicad, of-gdb) stay workspace members; re-add them here when a consumer lands.
+# Planned dependency direction: see AGENTS.md crate map.
 of-core = { path = "crates/of-core" }
 of-netlist = { path = "crates/of-netlist" }
 of-analog = { path = "crates/of-analog" }
-of-digital = { path = "crates/of-digital" }
 of-component-api = { path = "crates/of-component-api" }
 of-components = { path = "crates/of-components" }
 of-parts = { path = "crates/of-parts" }
 of-cpu-riscv = { path = "crates/of-cpu-riscv" }
-of-cpu-xtensa = { path = "crates/of-cpu-xtensa" }
-of-cpu-qemu-ipc = { path = "crates/of-cpu-qemu-ipc" }
 of-soc-esp32c3 = { path = "crates/of-soc-esp32c3" }
-of-soc-esp32 = { path = "crates/of-soc-esp32" }
 of-firmware = { path = "crates/of-firmware" }
-of-plugin-wasm = { path = "crates/of-plugin-wasm" }
 of-instruments = { path = "crates/of-instruments" }
-of-bom = { path = "crates/of-bom" }
-of-kicad = { path = "crates/of-kicad" }
-of-gdb = { path = "crates/of-gdb" }
 of-ui = { path = "crates/of-ui" }
 
 # Third-party (permissive licences, all AGPL-compatible; checked by deny.toml)

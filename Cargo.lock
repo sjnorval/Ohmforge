@@ -2015,17 +2015,12 @@ dependencies = [
 [[package]]
 name = "of-bom"
 version = "0.0.1"
-dependencies = [
- "of-parts",
-]
 
 [[package]]
 name = "of-cli"
 version = "0.0.1"
 dependencies = [
  "of-analog",
- "of-bom",
- "of-core",
  "of-netlist",
  "of-parts",
 ]
@@ -2056,9 +2051,6 @@ version = "0.0.1"
 [[package]]
 name = "of-cpu-qemu-ipc"
 version = "0.0.1"
-dependencies = [
- "of-core",
-]
 
 [[package]]
 name = "of-cpu-riscv"
@@ -2070,16 +2062,10 @@ dependencies = [
 [[package]]
 name = "of-cpu-xtensa"
 version = "0.0.1"
-dependencies = [
- "of-core",
-]
 
 [[package]]
 name = "of-digital"
 version = "0.0.1"
-dependencies = [
- "of-core",
-]
 
 [[package]]
 name = "of-firmware"
@@ -2091,9 +2077,6 @@ dependencies = [
 [[package]]
 name = "of-gdb"
 version = "0.0.1"
-dependencies = [
- "of-core",
-]
 
 [[package]]
 name = "of-instruments"
@@ -2106,17 +2089,10 @@ dependencies = [
 [[package]]
 name = "of-kicad"
 version = "0.0.1"
-dependencies = [
- "of-bom",
- "of-netlist",
-]
 
 [[package]]
 name = "of-netlist"
 version = "0.0.1"
-dependencies = [
- "of-core",
-]
 
 [[package]]
 name = "of-parts"
@@ -2130,18 +2106,10 @@ dependencies = [
 [[package]]
 name = "of-plugin-wasm"
 version = "0.0.1"
-dependencies = [
- "of-component-api",
-]
 
 [[package]]
 name = "of-soc-esp32"
 version = "0.0.1"
-dependencies = [
- "of-core",
- "of-cpu-qemu-ipc",
- "of-cpu-xtensa",
-]
 
 [[package]]
 name = "of-soc-esp32c3"
@@ -2162,7 +2130,6 @@ dependencies = [
  "egui",
  "image",
  "of-analog",
- "of-bom",
  "of-components",
  "of-core",
  "of-firmware",
@@ -2176,9 +2143,6 @@ dependencies = [
 [[package]]
 name = "of-web"
 version = "0.0.1"
-dependencies = [
- "of-core",
-]
 
 [[package]]
 name = "once_cell"

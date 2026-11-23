@@ -11,7 +11,3 @@ publish.workspace = true
 
 [lints]
 workspace = true
-
-[dependencies]
-of-netlist.workspace = true
-of-bom.workspace = true

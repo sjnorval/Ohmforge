@@ -11,8 +11,3 @@ publish.workspace = true
 
 [lints]
 workspace = true
-
-[dependencies]
-of-core.workspace = true
-of-cpu-xtensa.workspace = true
-of-cpu-qemu-ipc.workspace = true

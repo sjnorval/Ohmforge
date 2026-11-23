@@ -13,11 +13,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-of-core.workspace = true
 of-analog.workspace = true
 of-netlist.workspace = true
-of-parts.workspace = true
-of-bom.workspace = true
 
 [[bin]]
 name = "ohmforge"

@@ -14,8 +14,7 @@ workspace = true
 
 [dependencies]
 of-core = { workspace = true, optional = true }
-of-instruments.workspace = true
-of-bom.workspace = true
+of-instruments = { workspace = true, optional = true }
 egui = { workspace = true, optional = true }
 of-analog = { workspace = true, optional = true }
 of-components = { workspace = true, optional = true }
@@ -33,6 +32,7 @@ gui = [
     "dep:of-components",
     "dep:of-core",
     "dep:of-firmware",
+    "dep:of-instruments",
     "dep:of-parts",
     "dep:of-soc-esp32c3",
     "dep:image",
