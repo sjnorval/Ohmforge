@@ -1,0 +1,37 @@
+# Blue 0603 LED. The diode parameters give about 3.3 V at 20 mA, the
+# datasheet's typical forward voltage (Kingbright APT1608QBC/D).
+# Datasheet: https://www.kingbrightusa.com/images/catalog/SPEC/APT1608QBC-D.pdf
+[part]
+id = "generic.led-blue-0603"
+name = "LED, blue, 0603"
+category = "optoelectronic/led"
+model = "rust:led"
+verification = "community"
+
+[[pin]]
+number = "1"
+name = "K"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "A"
+kind = "passive"
+
+[electrical]
+vf = { typ = 3.3, max = 4.0, unit = "V", note = "at 20 mA" }
+if_max = { max = 30e-3, unit = "A" }
+
+[analog]
+kind = "led"
+pins = ["A", "K"]
+params = { is = 1e-22, n = 2.5, rs = 13.1, cjo = 20e-12, wavelength = 465e-9, eqe = 0.15, if = 20e-3 }
+
+[[variant]]
+label = "Blue 0603 LED"
+mpn = "APT1608QBC/D"
+manufacturer = "Kingbright"
+footprint = "LED_SMD:LED_0603_1608Metric"
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"
