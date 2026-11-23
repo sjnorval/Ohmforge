@@ -22,7 +22,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 - CPU cores execute firmware in instruction quanta and stop early on any I/O register access; the analog solver advances to that exact instant first.
 - Nets with only digital endpoints are solved by the event-driven logic kernel (`of-digital`); any net touching an analog part is promoted to the MNA solver (`of-analog`).
 - ESP32-C3 (RISC-V) runs on our own core first. Classic ESP32/S3 (Xtensa) uses Espressif's QEMU as a **separate GPL process** through `of-cpu-qemu-ipc` until our own Xtensa core exists.
-- Parts are data (`parts/**/part.toml`, parsed by `of-parts`) plus behaviour (Rust in `of-components`, or sandboxed WASM via `of-plugin-wasm`) implementing the `Component` trait in `of-component-api`. Planned: a base engine (`of-engine`) that elaborates components and circuit files into the solvers ([`docs/design/engine-components.md`](docs/design/engine-components.md)); today the demos still assemble their circuits in `of-ui`.
+- Parts are data (`parts/**/part.toml`, parsed by `of-parts`) plus behaviour (Rust in `of-components`, or sandboxed WASM via `of-plugin-wasm`) implementing the `Component` trait in `of-component-api`. The base engine (`of-engine`) elaborates components into the solvers ([`docs/design/engine-components.md`](docs/design/engine-components.md), RFC 0001); today the demos still assemble their circuits in `of-ui` until E3/E4.
 
 ## 3. Crate map
 
@@ -32,7 +32,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-netlist` | Circuit graph, nets, analog/digital partitioning; SPICE netlist subset parser (`spice`) | Net types; SPICE parser implemented |
 | `of-analog` | MNA, Newton-Raphson, sparse LU (faer), trapezoidal/Gear-2, LTE timestep, device models | Implemented: DC op, DC sweeps (nested), AC, transient; R C L K V I E G F H (incl. POLY) S W, diode/LED, BJT (full SPICE3 Gummel-Poon), MOSFET L1/L3 with Meyer caps; temperature; `PinDriver`; `AnalogEngine` for the kernel; ngspice-checked |
 | `of-digital` | 4-state event-driven logic kernel | Logic type + test |
-| `of-component-api` | `Component` trait, `Health`, `FaultKind`; becomes the engine's component API (`docs/design/engine-components.md`) | Draft API; extended in phase E2 (#46), stable from P6 |
+| `of-component-api` | `Component` trait (`elaborate`, `terminal_currents`, …), `ElabCtx` / `EventCtx`, `Health`, `FaultKind` ([`docs/design/engine-components.md`](docs/design/engine-components.md), RFC 0001) | E2 API in progress (#46); stable from P6 |
 | `of-components` | Built-in part models; `analog`: parts-to-devices bridge (`Library`, `Board`, `build`, `to_spice`) | Bridge implemented + tests |
 | `of-parts` | `part.toml` schema (pins, `[analog]`, tolerances/corners) and loader | Implemented + tests |
 | `of-cpu-riscv` | RV32IMC(+A) core, Zicsr, M-mode traps/interrupts, cycle timing, debugger API | Implemented: 63 unit tests, 75/77 riscv-tests |
@@ -43,7 +43,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-firmware` | ELF, flash images, UF2, DWARF | ELF32 RISC-V reader (segments, sections, symbols), ESP image parser/writer (checksum, SHA-256, 64 KiB flash alignment), partition tables (MD5 row) + tests |
 | `of-plugin-wasm` | Sandboxed WASM component host | Empty |
 | `of-instruments` | Measurement service (trace store, period-aligned averages) and instruments: scope, logic analyser, decoders, DMM, logger; serial monitor model (`serial::SerialMonitor`, lean console) | Serial monitor (text, hex, find, 64 KiB cap); the rest still to do (phase E5 in P3, #49). The bench PSU is planned as a component (`bench.psu`, E2), not an instrument |
-| `of-engine` (planned) | Base engine: elaborates components and circuit files into `of-analog` / `of-digital`, checks invariants (one ground, source return paths, KCL), registers active components before the analog engine | Not created yet (phase E2, #46) |
+| `of-engine` | Base engine: elaborates components into `of-analog`, checks invariants (one ground, source return paths, KCL, no floating nets) | E2 first slice (#46): `EngineBuilder`, KCL checks; circuit files and ESP32 component still E3/E4 |
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |

@@ -24,6 +24,7 @@ of-analog = { path = "crates/of-analog" }
 of-component-api = { path = "crates/of-component-api" }
 of-components = { path = "crates/of-components" }
 of-parts = { path = "crates/of-parts" }
+# of-engine: re-add to [workspace.dependencies] when a crate takes `of-engine.workspace = true`.
 of-cpu-riscv = { path = "crates/of-cpu-riscv" }
 of-soc-esp32c3 = { path = "crates/of-soc-esp32c3" }
 of-firmware = { path = "crates/of-firmware" }
