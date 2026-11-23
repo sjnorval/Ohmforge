@@ -18,6 +18,7 @@
 - [AI link, sweeps and datasheets](design/ai-and-scenario-sweeps.md)
 - [Interconnects](design/interconnects.md)
 - [Buses](design/buses.md)
+- [Arduino and ESP-IDF MVP demos](design/arduino-idf-mvp-demos.md)
 - [Component stress states](design/component-stress-states.md)
 - [Schematic themes](design/schematic-themes.md)
 - [Schematic layout](design/schematic-layout.md)
