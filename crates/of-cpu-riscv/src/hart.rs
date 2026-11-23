@@ -401,6 +401,30 @@ impl Hart {
         }
     }
 
+    /// Hot-path counter update when no CSR write just happened and both
+    /// cycle/instret counters are enabled (the common firmware case).
+    #[inline(always)]
+    fn account_retired(&mut self, cycles: u32) {
+        self.elapsed_cycles += u64::from(cycles);
+        if self.csr.counter_written != 0 {
+            let written = std::mem::take(&mut self.csr.counter_written);
+            if self.csr.mcountinhibit & 1 == 0 && written & 1 == 0 {
+                self.csr.mcycle = self.csr.mcycle.wrapping_add(u64::from(cycles));
+            }
+            if self.csr.mcountinhibit & 4 == 0 && written & 4 == 0 {
+                self.csr.minstret = self.csr.minstret.wrapping_add(1);
+            }
+            return;
+        }
+        let inhibit = self.csr.mcountinhibit;
+        if inhibit & 1 == 0 {
+            self.csr.mcycle = self.csr.mcycle.wrapping_add(u64::from(cycles));
+        }
+        if inhibit & 4 == 0 {
+            self.csr.minstret = self.csr.minstret.wrapping_add(1);
+        }
+    }
+
     /// While waiting for an interrupt, let time pass up to `deadline`
     /// (the counters keep running, as the core clock is not gated).
     pub fn idle_until(&mut self, deadline: SimTime) {
@@ -569,7 +593,67 @@ impl Hart {
             self.dcache.insert(pc, raw, len, word, instr);
             (raw, len, instr)
         };
-        let mut wait = bus.wait_states(pc, AccessKind::Fetch);
+        // Fetch wait states (flash miss model later). Default / SoC today: 0;
+        // still applied so a timed I-cache stays honest.
+        let wait = bus.wait_states(pc, AccessKind::Fetch);
+        // Hot path: pure ALU / LUI / AUIPC never touch the bus after fetch.
+        let seq = pc.wrapping_add(len);
+        let alu_cycles = self.config.timing.alu + wait;
+        match instr {
+            Instr::Lui { rd, imm } => {
+                self.wr(rd, imm);
+                return Ok((
+                    raw,
+                    instr,
+                    Flow {
+                        next_pc: seq,
+                        taken: false,
+                        wait: 0,
+                    },
+                    alu_cycles,
+                ));
+            }
+            Instr::Auipc { rd, imm } => {
+                self.wr(rd, pc.wrapping_add(imm));
+                return Ok((
+                    raw,
+                    instr,
+                    Flow {
+                        next_pc: seq,
+                        taken: false,
+                        wait: 0,
+                    },
+                    alu_cycles,
+                ));
+            }
+            Instr::OpImm { op, rd, rs1, imm } => {
+                self.wr(rd, alu(op, self.x(rs1), imm as u32));
+                return Ok((
+                    raw,
+                    instr,
+                    Flow {
+                        next_pc: seq,
+                        taken: false,
+                        wait: 0,
+                    },
+                    alu_cycles,
+                ));
+            }
+            Instr::Op { op, rd, rs1, rs2 } => {
+                self.wr(rd, alu(op, self.x(rs1), self.x(rs2)));
+                return Ok((
+                    raw,
+                    instr,
+                    Flow {
+                        next_pc: seq,
+                        taken: false,
+                        wait: 0,
+                    },
+                    alu_cycles,
+                ));
+            }
+            _ => {}
+        }
         let illegal = (Exception::IllegalInstruction, raw, 0);
         let ext = self.config.extensions;
         match instr {
@@ -581,8 +665,7 @@ impl Hart {
             let c = self.config.timing.cycles(instr.class(), false);
             (e, v, c)
         })?;
-        wait += flow.wait;
-        let cycles = self.config.timing.cycles(instr.class(), flow.taken) + wait;
+        let cycles = self.config.timing.cycles(instr.class(), flow.taken) + wait + flow.wait;
         Ok((raw, instr, flow, cycles))
     }
 
@@ -876,6 +959,11 @@ impl Hart {
     /// A breakpoint at the starting PC is ignored so that resuming works.
     pub fn run<B: Bus + ?Sized>(&mut self, bus: &mut B, max_cycles: u64) -> RunExit {
         let limit = self.elapsed_cycles.saturating_add(max_cycles);
+        // Empty breakpoint set and a running hart: stay in a tight loop that
+        // skips the `step` outcome enum and the BTreeSet probe (release demos).
+        if self.breakpoints.is_empty() && self.state == HartState::Running {
+            return self.run_tight(bus, limit);
+        }
         let mut first = true;
         while self.elapsed_cycles < limit {
             if !first && self.state == HartState::Running && self.breakpoints.contains(&self.pc) {
@@ -888,6 +976,60 @@ impl Hart {
                 StepOutcome::Waiting => return RunExit::WaitingForInterrupt,
                 StepOutcome::Deferred { pc } => return RunExit::Deferred(pc),
                 StepOutcome::Retired { .. } | StepOutcome::Trapped { .. } => {}
+            }
+            if let HartState::Halted(r) = self.state {
+                return RunExit::Halted(r);
+            }
+            if bus.take_sync_request() {
+                return RunExit::SyncRequested(pc);
+            }
+            if self.state == HartState::WaitingForInterrupt {
+                return RunExit::WaitingForInterrupt;
+            }
+        }
+        RunExit::BudgetExhausted
+    }
+
+    /// Fast quantum loop: no breakpoints, starts in [`HartState::Running`].
+    #[inline(always)]
+    fn run_tight<B: Bus + ?Sized>(&mut self, bus: &mut B, limit: u64) -> RunExit {
+        while self.elapsed_cycles < limit {
+            if self.csr.mstatus & MSTATUS_MIE != 0
+                && self.csr.mip != 0
+                && let Some(line) = select_interrupt(self.pending_enabled())
+            {
+                let pc = self.pc;
+                let cause = TrapCause::Interrupt(line);
+                self.trap(cause, pc);
+                let cycles = self.config.timing.trap_entry;
+                self.account(cycles, false);
+                if bus.take_sync_request() {
+                    return RunExit::SyncRequested(pc);
+                }
+                continue;
+            }
+
+            let pc = self.pc;
+            match self.fetch_execute(bus, pc) {
+                Ok((raw, instr, flow, cycles)) => {
+                    self.pc = flow.next_pc;
+                    self.account_retired(cycles);
+                    if let (Instr::Ebreak, EbreakAction::Halt) = (instr, self.config.ebreak) {
+                        self.state = HartState::Halted(HaltReason::Ebreak { pc });
+                        return RunExit::Halted(HaltReason::Ebreak { pc });
+                    }
+                    // Silence unused in non-ebreak path (raw kept for parity with step).
+                    let _ = raw;
+                }
+                Err(_) if std::mem::take(&mut self.deferred) => {
+                    return RunExit::Deferred(pc);
+                }
+                Err((exc, tval, cycles)) => {
+                    let cause = TrapCause::Exception(exc, tval);
+                    self.trap(cause, pc);
+                    let cycles = cycles + self.config.timing.trap_entry;
+                    self.account(cycles, false);
+                }
             }
             if let HartState::Halted(r) = self.state {
                 return RunExit::Halted(r);
