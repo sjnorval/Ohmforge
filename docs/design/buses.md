@@ -120,7 +120,7 @@ Faults per bus, as `FaultKind` extensions and sweep variables ([`ai-and-scenario
 | Item | Phase | Work | Depends on | Acceptance criteria |
 |---|---|---|---|---|
 | **B0** Design | P2 (now) | This document; roadmap, README, mdBook and changelog pointers. | — | Reviewed and merged by Stefan. No code change. |
-| **B1** Bus ports and device framework | P3 | Typed bus ports in `of-component-api` (amending RFC 0001 or a follow-up RFC); transaction-level routing in `of-engine`; shared bit-level front ends; per-bus level setting. | E2, E3; E4 for circuit files; `of-digital` scheduler or pad events | A scripted master exchanges bytes with a test device at both levels and the decoded traffic matches. |
+| **B1** Bus ports and device framework | P3 | Typed bus ports in `of-component-api` through RFC 0002; transaction-level routing in `of-engine`; shared bit-level front ends; per-bus level setting. | E2, E3; E4 for circuit files; `of-digital` scheduler or pad events | A scripted master exchanges bytes with a test device at both levels and the decoded traffic matches. |
 | **B2** I2C | P3 (the I2C half of “Peripherals”) | C3 I2C controller (master, then slave); open-drain pads, pull-ups and rise-time checks against UM10204; BME280 I2C behaviour; MPU-6050 (GY-521) part and model. | B1 | The esp-hal and ESP-IDF BME280 and MPU-6050 examples read plausible values; at pin level, a 10 kΩ pull-up with 400 pF fails the fast-mode rise-time check and corrupts reads, and 2.2 kΩ passes; an absent address NACKs. |
 | **B3** SPI | P3 (the SPI half of “Peripherals”) | GPSPI2 master (modes 0 to 3, CS, DMA), then slave; SD card (SPI mode) and ST7735 models. | B1 | An ESP-IDF SD card example mounts a FAT image and reads a file; the ST7735 shows the frame the firmware draws; each SPI mode is tested against a reference device. |
 | **B4** UART complete | P3 | Timed TX, UART1, data/parity/stop options, flow control, framing and parity errors at pin level, RS-485 direction control. | B1; I2 for the virtual port | A 115200 baud sender into a 9600 baud receiver produces framing errors and the error interrupt; RTS/CTS stops transmission when CTS is high; the I2 port shows the configured line settings. |
@@ -138,9 +138,11 @@ Classic ESP32 and S3 buses follow their SoC items (P3 QEMU sidecar, P4 own Xtens
 | Driver behaviour depends on undocumented controller details | Firmware hangs | Test with unmodified esp-hal and ESP-IDF drivers; compare with a real C3 in the P5 hardware-in-the-loop lab |
 | Multi-chip sessions are new | B6 slips | Scripted CAN node first; second C3 when multi-chip sessions land |
 
-Open questions:
+Decided (23 November 2026, Stefan):
 
-1. **Bus ports in RFC 0001.** Amend RFC 0001 or write RFC 0002 for bus ports?
-2. **Default level.** Transaction level everywhere by default (proposed), or pin level for I2C because its electrical failures are the most common hobby bug?
-3. **Should B6 move into P3** if multi-chip sessions arrive early?
-4. **sigrok format.** `.sr` export only (proposed), or also live streaming to PulseView?
+- **Bus ports** (former open question 1). A new RFC 0002 defines the bus ports; RFC 0001 is not amended.
+- **Default level** (former open question 2). Transaction level by default, with pin level available per bus.
+- **B6 timing** (former open question 3). B6 moves into P3 only if multi-chip sessions arrive early.
+- **sigrok format** (former open question 4). `.sr` export only for now; no live streaming.
+
+Open questions: none at present.

@@ -33,7 +33,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 **Planned: component stress states.** Parts show on the schematic when they approach or exceed their ratings, while running or paused (with a preview of an edit before resuming), with an optional mode in which they fail like real hardware (P3 to P5). The plan is in [`docs/design/component-stress-states.md`](docs/design/component-stress-states.md).
 
-**Planned: schematic themes and auto-layout.** Today's look stays the default; optional themes (Cyberpunk / Hacker, Wasteland Terminal, Blueprint, Paper and more), IEC or ANSI symbols, and automatic placement that cuts wire crossings while following schematic best practice (P3 and P4). The plans are in [`docs/design/schematic-themes.md`](docs/design/schematic-themes.md) and [`docs/design/schematic-layout.md`](docs/design/schematic-layout.md).
+**Planned: schematic themes and auto-layout.** Today's colours stay the default; optional themes (Cyberpunk / Hacker, Wasteland Terminal, Blueprint, Paper and more), IEC symbols by default (ANSI selectable), and automatic placement that cuts wire crossings while following schematic best practice (P3 and P4). The plans are in [`docs/design/schematic-themes.md`](docs/design/schematic-themes.md) and [`docs/design/schematic-layout.md`](docs/design/schematic-layout.md).
 
 ## Workspace layout
 
@@ -79,6 +79,8 @@ cargo run -p of-app --features gui -- --no-splash   # skip the EILIi load screen
 ```
 
 On Windows, build from a shell with the MSVC Build Tools environment loaded (see `AGENTS.md` section 9).
+
+New to Ohmforge? [Your first schematic](docs/src/guide/first-schematic.md) previews the planned workflow for creating a new schematic from scratch (coming soon; it does not work yet) and ends with what works today: the demos, SPICE netlists with `ohmforge run`, and adding parts.
 
 ## Licence
 

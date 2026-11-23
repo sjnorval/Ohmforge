@@ -19,7 +19,7 @@ What exists on `main` (23 November 2026) that this plan builds on:
 | Piece | Where it lives today | What it gives this plan |
 |---|---|---|
 | Analyses: DC operating point (Newton with gmin and source stepping), single and nested DC sweeps (`dc_sweep`, `dc_sweep_nested`), AC, transient | `of-analog::analysis` | The per-scenario solves. Device models have SPICE3 temperature scaling; resistors take `tc1`/`tc2` |
-| SPICE deck front end with `.temp`, `.dc`, `.tran`, `.options` (no `.step`, `.param` or `.mc`) | `of-netlist::spice` | Temperature already reaches the models; there is no parameter or Monte Carlo statement |
+| SPICE deck front end with `.param` expressions, `.temp`, `.dc`, `.tran`, `.options` (no `.step` or `.mc`) | `of-netlist::spice` | Temperature already reaches the models; there is no parameter-step or Monte Carlo statement |
 | Toleranced parameters: `ParamSpec { min, typ, max, tol, unit, note }` and `Corner::{Typical, Min, Max, Deviation(k)}` (documented “for Monte Carlo and sweeps”) | `of-parts` | Corner and Monte Carlo values per parameter, from data already in `part.toml` |
 | Ratings in `part.toml` `[electrical]` (for example `if_max` on the LEDs, `vceo` / `ic_max` on the NPN, `vdd` min/max on the ESP32-C3 and BME280) | `parts/**/part.toml`, read as free-form keys | The first limits for pass/fail checks (section 6c) |
 | Datasheet field: `[part] datasheet = Option<String>` | `of-parts::PartMeta` | Set on 3 of 12 library parts: `bourns.ptv09a` and `ams1117` (PDF links) and `bosch.bme280` (a product page, not the PDF). The three 0603 LEDs name their datasheet only in a comment; the resistor, capacitors, NPN, push button and ESP32-C3 have none. No revision, date or hash is stored |
@@ -130,7 +130,7 @@ Resources expose the circuit file, the BOM, the latest sweep report and the data
 - **Hand entries win.** No AI tool changes a hand-entered value in `bom.toml` or a hand-entered `part.toml` price ([`parts-availability.md`](parts-availability.md) §7 invariant 8). A model may propose a new hand entry; the old one is kept and shown beside it until the user accepts.
 - **Keys stay home.** The model never sees supplier API keys or keychain entries. `bom.check` and `parts.refresh` run inside Ohmforge with the user's keys and the planner's per-provider budgets; the model sees results only. A per-session lookup cap (default: the planner's daily budget share) stops a looping model from exhausting the user's quota.
 - **Run caps.** `sweep.run` takes a maximum run count and wall-time limit (defaults 10,000 runs, 10 minutes, user-configurable); larger sweeps need the user's confirmation.
-- **Cloud notice.** Ohmforge cannot tell where an MCP client's model runs, so the first time a session asks for datasheet text or the full circuit, the app shows which client is asking and what will be sent, with allow once, allow for this project, or deny. The in-app reviewer (section 7c) shows the same notice before anything goes to a non-loopback endpoint.
+- **Cloud notice.** Ohmforge cannot tell where an MCP client's model runs, so the first time a session asks for datasheet text or the full circuit, the app shows which client is asking and what will be sent, with allow once, allow for this project, or deny. An in-app model connector, if one is added later (section 7c), must show the same notice before anything goes to a non-loopback endpoint.
 - **Audit log.** Every tool call (time, client name, tool, arguments without secrets, result size, accepted or rejected) goes to `ohmforge-ai.log` in the project's `.ohmforge/` folder, viewable in the app.
 
 ## 5. Scenario sweeps
@@ -213,7 +213,7 @@ keep_waveforms = "failing"   # none | failing | all | sample(50)
 
 - **Grid** (parameter sweep, the `.step` equivalent): the Cartesian product of all `grid`/`values` lists.
 - **Corners**: every combination of min and max (and optionally typical) per toleranced variable; 2ⁿ runs, capped with a warning above a set n.
-- **Monte Carlo**: N samples per grid point; per-variable distributions (uniform within tolerance by default, normal with σ = tol/3 on request, or the part's own distribution if `part.toml` declares one).
+- **Monte Carlo**: N samples per grid point. Distributions aim to be as true to life as possible (decided 23 November 2026, section 12): each part kind has a default shaped by how such parts are really made and sorted, for example a tight-tolerance resistor bin selected out of a wider batch (a distribution with a gap at the centre, or bimodal) or a truncated normal for parts screened to limits. A distribution published by the manufacturer or in the datasheet is used when one exists, with its source recorded. No numbers are invented: where the real distribution is unknown, the fallback is uniform within the tolerance (conservative) and the run marks it as assumed. Users can override the distribution per part and per sweep.
 - **Worst case**: a sensitivity pass (one-at-a-time ± deltas) picks the direction per variable that pushes each check towards failure, then runs those extreme combinations; reported next to Monte Carlo so the difference between statistical and absolute limits is visible.
 - **Combined**: grid outside, Monte Carlo inside (for example yield at each supply voltage).
 
@@ -327,7 +327,7 @@ Each finding has an id, severity (`error`, `warning`, `info`), affected referenc
 ### 7c. Choosing the model
 
 - External MCP clients bring their own model (any vendor or local).
-- For people who do not run an MCP client, the app can call a model directly through one generic HTTP connector speaking the widely used OpenAI-compatible chat-completions format (Ollama serves it locally on `127.0.0.1:11434`). This is plain HTTP and JSON, not a vendor SDK. The endpoint, model name and optional key (kept in the OS keychain) are user settings; the default is a local Ollama address, and nothing is preconfigured to a cloud service.
+- **MCP only for now** (decided 23 November 2026, section 12). The app does not call models itself. A generic in-app connector (plain HTTP to an OpenAI-compatible endpoint such as a local Ollama, no vendor SDK, loopback default, key in the OS keychain) stays a possible later addition and would need its own decision.
 - Before any content goes to a non-loopback endpoint, the app shows what will be sent (schematic, BOM, datasheet pages) and to which host, and asks once per project.
 
 ## 8. Data model (sketch)
@@ -404,11 +404,11 @@ Small PRs with tests. P3 already carries E4 to E6, I1 to I4 and A1 to A3; the it
 | **D2** Limits table | P4 | `[[limit]]` schema, validator, reviewed limits for the library parts; stress service and sweep rating checks read it. | D1; E6 (#50); V1 | The LEDs', NPN's, AMS1117's and ESP32-C3's limits are reviewed with page references; an unreviewed limit does not fail a check unless enabled. |
 | **D3** Text extraction and limit proposals | P4 | Page-chunked text, `datasheet.text` and `limits.propose` tools; proposals land as `unreviewed` with page references. | D1, D2; AI1 | Text for the AMS1117 datasheet is returned with page numbers; a proposed limit appears unreviewed with its page and does not change check results. |
 | **AI4** Rule-based design review | P4 | `ohmforge review` (text, JSON, SARIF) and the Design review panel; the rules in section 7a. | E6; V1; B2 for bus rules; W1 for conductor rules | Fixture circuits trigger each rule exactly once (missing pull-up, unterminated CAN, 5 V into a GPIO, missing decoupling, LED without resistor, rating exceeded); the demo boards pass cleanly; SARIF validates against the schema. |
-| **AI5** AI advisory review | P4 | `review.submit_findings`; evidence requirement; the generic OpenAI-compatible HTTP connector with the loopback default and the cloud notice. | AI4; D3 | With a local Ollama model, a review of a fixture with a 3.3 V part on 5 V returns at least one cited advisory finding; nothing is sent to a non-loopback endpoint without the notice being accepted; findings are never applied without the user. |
+| **AI5** AI advisory review | P4 | `review.submit_findings` over MCP; evidence requirement; the cloud notice for MCP sessions. | AI4; D3 | With a local Ollama model, a review of a fixture with a 3.3 V part on 5 V returns at least one cited advisory finding; nothing is sent to a non-loopback endpoint without the notice being accepted; findings are never applied without the user. |
 
 ## 10. Invariants
 
-1. **No model bundled, no vendor SDK linked.** MCP and one generic HTTP connector only; the user chooses the model.
+1. **No model bundled, no vendor SDK linked.** MCP only for now; the user chooses the model in their MCP client.
 2. **Read-only by default; writes are proposals** confirmed by the user, and every AI action is in the audit log.
 3. **Keys never leave Ohmforge.** Supplier keys stay in the keychain; models see results only, within budgets and caps.
 4. **Hand entries are never overwritten** by any AI tool, refresh or sweep.
@@ -433,18 +433,17 @@ Small PRs with tests. P3 already carries E4 to E6, I1 to I4 and A1 to A3; the it
 
 ## 12. Decided and open questions
 
-Decided (proposed in this document; Stefan to confirm in review):
+Decided (23 November 2026, Stefan):
 
 - **SQLite** is the results store; Parquet is an optional export.
 - **MCP** is the AI interface, over stdio by default and loopback HTTP with a token; no model or vendor SDK bundled.
 - **Monte Carlo moves into the sweep plan** as S3 and replaces the P5 “Monte Carlo runs over part tolerances” item; the GPU item becomes S5.
 - **Datasheet metadata** goes in the `availability/` dataset; PDFs stay in each user's cache.
+- **Limits location** (former open question 1). `[[limit]]` tables in `part.toml`, next to `[electrical]`.
+- **Sweep file home** (former open question 2). A `sweeps/` folder next to the circuit.
+- **Monte Carlo distributions** (former open question 3). As true to life as possible: per-part-kind defaults based on real manufacturing (binned tight-tolerance parts with a centre gap or bimodal shape, truncated normal for screened parts), manufacturer- or datasheet-published distributions when available, sources recorded and no invented numbers; uniform within tolerance as the conservative fallback, marked as assumed; configurable per part and per sweep (section 5c).
+- **First MCP client to document** (former open question 4). VS Code's agent mode.
+- **In-app connector** (former open question 5). MCP only for now; no in-app model connector (section 7c).
+- **Limits review** (former open question 6). Stefan's PR review is enough to mark a limit `reviewed`. A future option is user or community review of limits, where users confirm or flag a value with a datasheet page reference.
 
-Open questions:
-
-1. **Limits location.** `[[limit]]` in `part.toml` (proposed, next to `[electrical]`) or in the `availability/` dataset with the datasheet metadata?
-2. **Sweep file home.** `sweeps/` next to the circuit (proposed) or inside the circuit file?
-3. **Default distribution** for Monte Carlo when a part gives only a tolerance: uniform (proposed, conservative) or normal with σ = tol/3?
-4. **Which MCP client to document first** for Stefan's setup (a desktop chat app, VS Code's agent mode, or an Ollama front end)?
-5. **In-app connector scope.** Is the generic OpenAI-compatible HTTP connector wanted at all, or is MCP-only enough for 0.3?
-6. **Who reviews limits.** Is a second reviewer needed for `reviewed` limits, or is Stefan's PR review enough?
+Open questions: none at present.

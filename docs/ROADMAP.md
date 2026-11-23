@@ -162,7 +162,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
   - [ ] E6 (#50) Parts library and BOM from components: `[symbol]`, pin kinds and `bom` in `part.toml`; the BOM comes from the circuit's components. Needs E4
 - [ ] Classic ESP32 (Xtensa LX6) through a QEMU sidecar process (`of-cpu-qemu-ipc`), kept out of process for licence and stability reasons
 - [ ] Peripherals: I2C, SPI, RMT, DAC (C3 and classic ESP32); the bus part is designed in [`design/buses.md`](design/buses.md), with TWAI/CAN in P4
-  - [ ] B1 Bus ports and device framework: typed I2C, SPI, UART and CAN ports in the component API, transaction-level and pin-level buses with one protocol model per device. Needs E2, E3, E4
+  - [ ] B1 Bus ports and device framework: typed I2C, SPI, UART and CAN ports in the component API (RFC 0002), transaction-level and pin-level buses with one protocol model per device. Needs E2, E3, E4
   - [ ] B2 I2C: C3 controller (master, then slave), open-drain pads, pull-ups and rise-time checks against the NXP UM10204 limits, BME280 I2C behaviour, MPU-6050 (GY-521) part. Needs B1
   - [ ] B3 SPI: GPSPI2 master (modes 0 to 3, CS, DMA), then slave; SD card (SPI mode) and ST7735 models. Needs B1
   - [ ] B4 UART complete: timed TX, UART1, data/parity/stop options, RTS/CTS and XON/XOFF, framing and parity errors at pin level, RS-485 direction; feeds the I2 virtual serial port. Needs B1
@@ -192,14 +192,15 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
   - [ ] V1 Stress service: per-component stress from `Health`, `[electrical]` ratings and generic checks; normal, warning, over-limit and damaged states; readings, event log and CLI summary. Needs E2, E5, E6
   - [ ] V2 Schematic visuals: outline, heat tint, shape-coded badges and tooltips with value, limit and source; colour-blind-safe; reduce-motion; optional auto-pause; the normal state unchanged. Needs V1, E4, T1
   - [ ] V3 Paused edits with preview: DC re-solve of an edit while paused, preview of the new stress states, resume or cancel. Needs V1
-- [ ] Schematic themes, first slice (design: [`design/schematic-themes.md`](design/schematic-themes.md); today's look stays the default)
+- [ ] Schematic themes, first slice (design: [`design/schematic-themes.md`](design/schematic-themes.md); today's colours and strokes stay the default; symbols move to IEC by default with T3)
   - [ ] T1 Theme model (TOML, CC-BY-SA-4.0) and the default theme, pixel-identical to today; theme picker with Ohmforge and Paper
   - [ ] T2 Built-in themes and validator: Cyberpunk / Hacker first, Wasteland Terminal (green and amber phosphor; replaces the retro green CRT idea), Blueprint, Dark high-contrast, KiCad-like, colour-blind-safe; WCAG contrast checks; reduce-motion. Needs T1
-  - [ ] T3 Symbol styles: ANSI/IEEE 315 (zigzag, default) and IEC 60617 (rectangular resistor) as a separate setting. Needs T1, E6
+  - [ ] T3 Symbol styles: IEC 60617 (rectangular resistor; the default, chosen by locale) and ANSI/IEEE 315 (zigzag, today's look) as a separate setting. Needs T1, E6
 - [ ] Schematic auto-layout, first slice (design: [`design/schematic-layout.md`](design/schematic-layout.md); feeds the existing router)
   - [ ] L1 Layout metrics and lint: crossings, bends, wire length and best-practice rule checks; `ohmforge layout check`. Needs E4
   - [ ] L2 Full auto-layout: functional grouping, left-to-right signal flow, supply up and ground down, layered placement with port constraints to minimise crossings, power and ground symbols, net labels, decoupling capacitors next to their IC, grid-aligned and deterministic. Needs L1, E6
 - [ ] Explore compatibility with PCB fabrication services (JLCPCB, PCBWay, OSH Park and similar): export of board designs (Gerber/drill, BOM and pick-and-place/CPL for assembly), likely via the KiCad export
+- [ ] Illustrated step-by-step guide to creating your own schematic: screenshots or GIFs for every step, replacing the simple guide ([`src/guide/first-schematic.md`](src/guide/first-schematic.md)) once users can build circuits without Rust; kept current for each release and folded into the P6 user guide. Needs E4 (circuit files), E6 (components and BOM) and the schematic editor's place-and-wire work
 - [ ] Release 0.2
 
 ## P4 Own Xtensa core and web (weeks 40 to 60), exit 0.3: classic ESP32 in the browser

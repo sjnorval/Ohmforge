@@ -4,6 +4,7 @@
 
 # Guides
 
+- [Your first schematic](guide/first-schematic.md)
 - [Contributing](contributing.md)
 - [Roadmap](roadmap.md)
 - [Common components](components.md)
