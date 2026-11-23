@@ -45,6 +45,7 @@ pub mod boot;
 pub mod bootloader;
 pub mod bus;
 pub mod cache;
+pub mod component;
 pub mod csr;
 pub mod efuse;
 pub mod engine;
@@ -53,6 +54,7 @@ pub mod gpio;
 pub mod intmatrix;
 pub mod ledc;
 pub mod map;
+pub mod pad;
 pub mod rng;
 pub mod rom;
 pub mod rtc_cntl;
@@ -69,11 +71,13 @@ pub mod watchdog;
 
 pub use boot::{FlashBoot, FlashBootError};
 pub use bus::SocBus;
+pub use component::{BootImage, Esp32c3Component, QUIESCENT_A, UART0_PORT};
 pub use engine::{
     Esp32c3Engine, InputWatch, PinLink, adc_request_code, adc_value_code, all_pin_codes, decode_adc_request,
     decode_input_code, decode_pin_code, initial_input_level, input_code, input_watches, pin_code,
 };
 pub use gpio::{GPIO_COUNT, PinOut, VIH_FRACTION, VIL_FRACTION};
 pub use intmatrix::IntMatrix;
+pub use pad::{add_pin_drivers, hook_pin, pin_actions, pin_driver_names, pin_legs};
 pub use soc::{CHIP_ID, Esp32c3, LoadError, PinEdge, UartByte};
 pub use watchdog::{ResetKind, ResetSource, WatchdogReset};
