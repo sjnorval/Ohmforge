@@ -1,0 +1,13 @@
+[book]
+title = "Ohmforge"
+description = "ESP32 circuit simulator documentation (mdBook skeleton)."
+authors = ["Stefan Norval and Ohmforge contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "light"
+git-repository-url = "https://github.com/sjnorval/Ohmforge"

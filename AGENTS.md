@@ -50,7 +50,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, bench PSU whose Vset is tracked by GPIO V_IH/V_IL, virtual V/A meters, serial monitor for UART0 with hex view and find). Load-screen splash (packed EILIi frames, skip, persistent Show startup animation setting, and `--no-splash` / `OF_NO_SPLASH`) |
 | `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui demo picker, with the EILIi load screen |
 | `of-web` | WASM entry point | Empty |
-| `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD) |
+| `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD); `ohmforge validate-parts parts/` |
 
 Internal dependencies point downwards only: `of-core` depends on nothing internal; UI crates may depend on engines, never the reverse. Simulation crates must stay free of UI and OS dependencies and must build for `wasm32-unknown-unknown`.
 
@@ -102,7 +102,7 @@ Internal dependencies point downwards only: `of-core` depends on nothing interna
 - Formatting: `cargo fmt --all` (config in `rustfmt.toml`, max width 120).
 - Lints: `cargo clippy --workspace --all-targets -- -D warnings` must be clean. Workspace lints deny `unsafe_code` and warn on `missing_docs`; every public item gets a doc comment.
 - Tests: every new behaviour gets unit tests in the same crate; numeric code compares with tolerances, never exact floats. Prefer small deterministic tests; analog results are validated against closed-form answers and ngspice (section 3b).
-- Dependencies: add them once in the root `[workspace.dependencies]` and use `x.workspace = true` in crates. Keep heavy dependencies (egui, wgpu, wasmtime) behind the crates or features that need them.
+- Dependencies: add them once in the root `[workspace.dependencies]` and use `x.workspace = true` in crates. Keep heavy dependencies (egui, wgpu, wasmtime) behind the crates or features that need them. Only list an internal path in `[workspace.dependencies]` while some crate actually depends on it; stub crates stay workspace members, and re-add the path entry when the first consumer lands (see the crate map above).
 - Errors: `thiserror` in libraries; no `unwrap()` in library code outside tests.
 - Units: SI units in `f64` for analog values; simulation time is always `of_core::SimTime` (picoseconds), never wall-clock.
 - Determinism: no `HashMap` iteration order, threads, or wall-clock time influencing simulation results.
@@ -133,6 +133,7 @@ bash firmware/esp32c3-blinky/build.sh            # optional: rebuild the test fi
 bash firmware/esp32c3-timer-irq/build.sh
 bash firmware/esp32c3-xip-blinky/build.sh
 cargo run -p of-cli -- --version
+cargo run -p of-cli -- validate-parts parts/
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv
 cargo run -p of-app --features gui      # desktop app: EILIi load screen (or skip via setting / --no-splash), then blink, dimmer, fade and push-button (click Play)

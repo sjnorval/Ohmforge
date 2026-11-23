@@ -36,15 +36,17 @@ Status: done; the core is implemented and tested (63 unit tests, 1 doc test, 75 
 - [x] Example part (`parts/sensors/bosch-bme280/part.toml`) parsed by `of-parts`
 - [x] Agent guides (`AGENTS.md`, `.grok/rules/`, this roadmap)
 - [x] GUI scaffold ported to eframe 0.37 (`App::ui`) with X11/Wayland backends so the Linux CI GUI check builds
-- [ ] `of-core`: scheduler snapshot/restore and replay log
+- [ ] `of-core`: scheduler snapshot/restore and replay log (still open; not required for the P0 exit of “repo public, CI green”)
 - [x] `of-core`: `Engine` trait (`advance_to(limit, ctx) -> reached`, `next_event`, `on_event`) and `Kernel` (quantum slices, events, breakpoints, host stops); used by the analog engine and the ESP32-C3 engine
-- [ ] Project file format v0 (`project.toml` + circuit file) with serde round-trip tests (the circuit file comes with engine phase E4 in P3, #48, [`design/engine-components.md`](design/engine-components.md))
-- [ ] `of-parts`: JSON Schema generation (schemars) and a validator command in `of-cli`
-- [ ] `of-cli`: `ohmforge validate-parts parts/`
-- [ ] RFC template in `rfcs/0000-template.md`
-- [ ] mdBook docs skeleton
+- [ ] Project file format v0 (`project.toml` + circuit file) with serde round-trip tests (deferred: circuit file is engine phase E4 / #48, [`design/engine-components.md`](design/engine-components.md); `project.toml` can follow on top)
+- [ ] `of-parts`: JSON Schema generation via schemars (still open; `validate-parts` covers live checks without exporting a schema file yet)
+- [x] `of-cli`: `ohmforge validate-parts parts/` (parses every `part.toml`, runs `PartFile::check`, requires CC-BY-SA-4.0 licence fields)
+- [x] RFC template in `rfcs/0000-template.md` (#16)
+- [x] mdBook docs skeleton (`docs/book.toml`, `docs/src/`; full user guide remains P6)
 - [x] Choose the final project name: Ohmforge
 - [x] Fill in the Code of Conduct contact
+- [x] Unused-dependency warnings cleared in stub crates and `of-cli` (#14, #15); planned edges stay in the `AGENTS.md` crate map and return to `[workspace.dependencies]` when a consumer lands
+
 
 ## P1 Analog core (weeks 4 to 16)
 
