@@ -14,6 +14,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Added
 
+- **Engine E3 (ESP32-C3 component):** `espressif.esp32-c3` part and `Esp32c3Component` wrap the SoC with GPIO half-bridges on the chip's own `3V3`/`GND`, quiescent supply load, ADC sample hooks, V_IH/V_IL input watches, UART0 port name, and `take_engine` for the kernel; pad helpers live in `of-soc-esp32c3::pad` and `of-ui` pins is a thin demo wrapper. Engine-built blinky matches `blinky_led` edge times and LED current.
 - **Engine E2 (first slice):** new `of-engine` crate elaborates components into `of-analog` with ground / floating-net / supply-pin invariants; `of-component-api` gains `elaborate`, `terminal_currents`, `ElabCtx` / `EventCtx`; `LibraryComponent` and `BenchPsu` (`+`/`−`) port R/LED/pot/button/PSU with KCL and bridge-parity tests. RFC 0001 marked Accepted. Desktop demos still use the existing `of-ui` glue until E3/E4.
 - **RFC 0001 (component API):** [`rfcs/0001-component-api.md`](rfcs/0001-component-api.md) adopts [`docs/design/engine-components.md`](docs/design/engine-components.md) as the normative E2 design (engine core, `Component` trait, invariants, five ported parts). Accepted; tracks #46.
 - **`ohmforge validate-parts`:** walks a parts tree, parses every `part.toml`, runs loader consistency checks and requires CC-BY-SA-4.0 licence fields (`cargo run -p of-cli -- validate-parts parts/`).
