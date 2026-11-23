@@ -5,7 +5,10 @@ One folder per part: `parts/<category>/<manufacturer>-<part>/part.toml`, or
 `crates/of-parts`; the `[analog]` section maps a part onto solver devices
 (`of_components::analog`, see `AGENTS.md` section 3b). See
 [CONTRIBUTING.md](../CONTRIBUTING.md) for how to add a part, and
-[LICENSE.md](LICENSE.md) for licensing rules.
+[LICENSE.md](LICENSE.md) for licensing rules. Under the engine plan
+([`docs/design/engine-components.md`](../docs/design/engine-components.md))
+each part becomes a component on the engine API, so list every pin,
+including supply and ground pins.
 
 Current parts:
 

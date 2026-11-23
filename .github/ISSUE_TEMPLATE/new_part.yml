@@ -9,6 +9,7 @@ body:
         Every Ohmforge part is a real, orderable part, so the BOM comes straight from the design. Please give enough detail to identify the exact part.
         Link datasheets and vendor models; do not attach vendor SPICE models with restrictive terms. Parts data is licensed CC-BY-SA-4.0 (see [parts/LICENSE.md](https://github.com/sjnorval/Ohmforge/blob/main/parts/LICENSE.md)).
         Want to add it yourself? See "Adding a part" in [CONTRIBUTING.md](https://github.com/sjnorval/Ohmforge/blob/main/CONTRIBUTING.md#adding-a-part).
+        Each part becomes a component on the simulator's engine API ([engine-components.md](https://github.com/sjnorval/Ohmforge/blob/main/docs/design/engine-components.md)), so list all its pins, including supply and ground.
   - type: input
     id: name
     attributes:

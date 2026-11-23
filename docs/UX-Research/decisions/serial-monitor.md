@@ -30,4 +30,4 @@ Ship a reusable lean serial monitor (text log, sim-time stamps, clear/copy, baud
 
 ## Status / next
 
-RX FIFO delivery is in: blink attaches `Delivery::Attached` and drains Send into `Esp32c3::push_uart_rx`. Baud-timed RX, RX interrupts, and hex/find are in this PR. Still to do: host the panel in the d5 shell.
+RX FIFO delivery is in: blink attaches `Delivery::Attached` and drains Send into `Esp32c3::push_uart_rx`. Baud-timed RX, RX interrupts, and hex/find are on `main` (#30). Still to do: host the panel in the d5 shell.

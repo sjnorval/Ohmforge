@@ -44,7 +44,7 @@ The [pull request template](.github/pull_request_template.md) has the full check
 1. Create `parts/<category>/<manufacturer>-<part>/part.toml` (or `parts/<category>/<part>/` for generic parts such as `parts/passives/resistor`), copying `parts/sensors/bosch-bme280/part.toml`. Parts that the analog solver should simulate also need an `[analog]` section; see `parts/passives/resistor/part.toml` and `AGENTS.md` section 3b.
 2. Fill in pins and electrical parameters with min/typ/max from the datasheet, at least one `[[variant]]` with an MPN, and the `[license]` block.
 3. Link the datasheet; do not commit it. Do not commit vendor SPICE models with restrictive terms.
-4. If the part needs behaviour beyond the generic models, add a Rust model in `crates/of-components` or a WASM model.
+4. If the part needs behaviour beyond the generic models, add a Rust model in `crates/of-components` or a WASM model. Under the engine plan ([`docs/design/engine-components.md`](docs/design/engine-components.md), phases E2 to E6, issues #46 to #50), once the engine API exists every part is a component on it: declare all pins, including supply and ground pins (no hidden connections to ground), and do not add per-demo glue in `of-ui`.
 5. Add a small test circuit with expected readings (see `crates/of-components/tests/`). Bench-measured parts should include a capture.
 
 ## Labels

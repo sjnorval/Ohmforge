@@ -1,7 +1,7 @@
 # Base engine and plug-in components
 
-Status: planned (phase E1, this document). Nothing here is implemented yet beyond what section 1 lists as existing.
-Date: 2026-11-22.
+Status: E1 (this document) merged in #43. E2 and E3 are planned in P2 (#46, #47), after the PSU return fix (#45); E4 to E6 are planned in P3 / 0.2 (#48, #49, #50). Nothing here is implemented yet beyond what section 1 lists as existing.
+Date: 2026-11-22 (status updated 2026-11-23).
 Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §5 (mixed-signal co-simulation), §6 (system architecture), §7 (component model and library), §11 (BOM); [`wire-routing.md`](wire-routing.md) (the shared schematic router); [`COMPONENTS.md`](../COMPONENTS.md) (the parts the library should grow to); roadmap P2 item “Base engine and plug-in components”.
 
 This note specifies how Ohmforge is split into a **base engine** that stands in for the real world (nets, physics, time, measurement) and **components** that plug into it. Every part with a real-world counterpart is a component that follows one engine API: resistors, LEDs, pots and buttons, the bench PSU, and the ESP32-C3 itself. Wiring, readings, logging and measuring are engine services, so instruments work the same way on every circuit. A demo stops being hand-written glue code and becomes a circuit file: a list of components plus the nets between them.
@@ -336,23 +336,23 @@ Small PRs, each with tests; no visual change unless approved; the demos keep wor
 
 | Phase | Work | Acceptance criteria |
 |---|---|---|
-| **E1** Design | This document; roadmap, plan pointer, README note, agent guides. | Reviewed and merged by Stefan. No code change. |
-| **E2** Engine core and Component trait | `of-engine` crate: elaboration from a list of placed components and nets, registry, invariants 1 to 4 and 6, measurement basics (`terminal_currents`). Extend `of-component-api`. Port `generic.resistor`, `bourns.ptv09a-b103`, `generic.led-red-0603`, `generic.pushbutton` and `bench.psu` (from `of-ui/supply.rs`). | Unit tests per component (including KCL and PSU `+`/`−` balance); an engine-built LED + resistor + PSU circuit matches the existing bridge-built one; `of-analog` ngspice suite unchanged; wasm32 check passes; no realtime regression on the demos. |
-| **E3** ESP32-C3 as a component | `espressif.esp32-c3`: pins, half-bridge drivers on its own `3V3`/`GND`, input watches, ADC sample points, LEDC, UART port, quiescent supply load, firmware and boot parameters, active engine. Move `pins.rs` glue out of `of-ui`. | `of-soc-esp32c3` firmware tests pass unchanged; an engine-built blinky matches `tests/blinky_led.rs` (edge times, LED current within existing tolerances); input, ADC and PWM tests re-expressed on the engine pass. |
-| **E4** Circuit files | Circuit file format (serde, round-trip tests); blink, dimmer, fade and button as circuit files driving both the simulation and the router; `of-ui` demo modules shrink to “load file, run, draw”. | Wiring goldens (`*.routes.txt`, `*.invariants.txt`) byte-identical, or reviewed updates where the PSU return is now drawn; existing desktop demo tests and firmware traces match; `ohmforge run` can run a circuit file headless. |
-| **E5** Instruments as components | Measurement service in `of-instruments` (trace store, period-aligned averages, duty/frequency); voltmeter, ammeter, scope, logger and UART console as instruments on any circuit; `of-ui` panels read from it. | Meters read any branch without per-demo registration; LED and PSU readouts match today's within tolerance (with the chatter fix's ripple bound); CSV/VCD logs from the CLI. |
-| **E6** Parts library and BOM | `[symbol]`, pin kinds and `bom` in `part.toml` (schema, loader, validator); BOM built from the circuit's components through `of-bom`. | Every library part loads with the new fields; the dimmer's BOM lists U1, RV1, R1, D1 with MPNs and excludes PSU1 and instruments; CSV export test. |
+| **E1** Design (#43, P2) | This document; roadmap, plan pointer, README note, agent guides. | Reviewed and merged by Stefan. No code change. |
+| **E2** Engine core and Component trait (#46, P2) | `of-engine` crate: elaboration from a list of placed components and nets, registry, invariants 1 to 4 and 6, measurement basics (`terminal_currents`). Extend `of-component-api`. Port `generic.resistor`, `bourns.ptv09a-b103`, `generic.led-red-0603`, `generic.pushbutton` and `bench.psu` (from `of-ui/supply.rs`). | Unit tests per component (including KCL and PSU `+`/`−` balance); an engine-built LED + resistor + PSU circuit matches the existing bridge-built one; `of-analog` ngspice suite unchanged; wasm32 check passes; no realtime regression on the demos. |
+| **E3** ESP32-C3 as a component (#47, P2) | `espressif.esp32-c3`: pins, half-bridge drivers on its own `3V3`/`GND`, input watches, ADC sample points, LEDC, UART port, quiescent supply load, firmware and boot parameters, active engine. Move `pins.rs` glue out of `of-ui`. | `of-soc-esp32c3` firmware tests pass unchanged; an engine-built blinky matches `tests/blinky_led.rs` (edge times, LED current within existing tolerances); input, ADC and PWM tests re-expressed on the engine pass. |
+| **E4** Circuit files (#48, P3) | Circuit file format (serde, round-trip tests); blink, dimmer, fade and button as circuit files driving both the simulation and the router; `of-ui` demo modules shrink to “load file, run, draw”. | Wiring goldens (`*.routes.txt`, `*.invariants.txt`) byte-identical, or reviewed updates where the PSU return is now drawn; existing desktop demo tests and firmware traces match; `ohmforge run` can run a circuit file headless. |
+| **E5** Instruments as components (#49, P3) | Measurement service in `of-instruments` (trace store, period-aligned averages, duty/frequency); voltmeter, ammeter, scope, logger and UART console as instruments on any circuit; `of-ui` panels read from it. | Meters read any branch without per-demo registration; LED and PSU readouts match today's within tolerance (with the chatter fix's ripple bound); CSV/VCD logs from the CLI. |
+| **E6** Parts library and BOM (#50, P3) | `[symbol]`, pin kinds and `bom` in `part.toml` (schema, loader, validator); BOM built from the circuit's components through `of-bom`. | Every library part loads with the new fields; the dimmer's BOM lists U1, RV1, R1, D1 with MPNs and excludes PSU1 and instruments; CSV export test. |
 
 After E6: the schematic editor (place, wire, probe; wire-routing PRs 6 and 7) edits circuit files, and new parts from `COMPONENTS.md` are added as components only.
 
 ## 6. Impact on the current plan
 
-- **P2 gains the E-phases**, placed before the schematic editor items that depend on them. The editor's place and wire steps need circuit files (E4) and symbols (E6); BOM v1 needs E6.
+- **P2 gains E1 to E3; P3 gains E4 to E6** (decided 23 November 2026: release 0.1 does not wait for E4 to E6). The editor's place and wire steps need circuit files (E4) and symbols (E6), so they follow in P3; BOM v1 for 0.1 comes from the demo boards' placements and moves onto components with E6.
 - **P0 “Project file format v0”** is partly delivered by the E4 circuit file; `project.toml` (firmware, settings, BOM options) can follow on top.
 - **P6 “Stable component API and WASM SDK”** stays in P6. E2 gives an in-tree, unstable API; stabilising it and the WASM SDK remain the 1.0 work.
-- **Paused `p2-psu-return`.** Its fixes (PSU minus terminal drawn and routed to GND, the supply-connection check, the `+`/`−` current balance test, period-aligned LED and PSU averaging) are compatible with this plan and can land first as a small PR; E2 and E5 then generalise them.
-- **Performance work** (realtime factor on the busy demos, `p2-sim-perf`) is orthogonal; E2 to E4 must not regress it, and a realtime benchmark joins the acceptance checks.
-- **MVP 0.1 exit criteria** do not change in content; whether 0.1 waits for E4 to E6 is an open question.
+- **Paused `p2-psu-return` (#45).** Its fixes (PSU minus terminal drawn and routed to GND, the supply-connection check, the `+`/`−` current balance test, period-aligned LED and PSU averaging) are compatible with this plan and can land first as a small PR; E2 and E5 then generalise them.
+- **Performance work** (realtime factor on the busy demos; #44 merged, about 0.17–0.23× on the busy demos) is orthogonal; E2 to E4 must not regress it, and a realtime benchmark joins the acceptance checks.
+- **MVP 0.1 exit criteria** do not change in content, and 0.1 does not wait for E4 to E6.
 - **Physics layers** stay parked, but section 3j gives them an agreed place to attach.
 
 ## 7. Crate placement (proposal)
@@ -388,6 +388,7 @@ Internal dependencies still point downwards; simulation crates stay free of UI a
 4. **Ground naming:** keep accepting `0` and `gnd` as the ground net (as the bridge does), or require the file to name it? Proposal: require `[circuit] ground`, accept `gnd` as the default.
 5. **ESP32-C3 part granularity:** bare chip, a module (ESP32-C3-MINI-1) or a dev board (DevKitM-1, SuperMini) for the demos? It changes the BOM line and which supply pins exist. Proposal: a module part first, dev boards as sub-circuits later.
 6. **Sub-circuits:** support hierarchical circuit files (a dev board as a reusable block) in E4, or later?
-7. **0.1 scope:** does the 0.1 release wait for E4 to E6, or ship the current demos and land the engine in 0.2?
+7. **0.1 scope:** resolved on 23 November 2026: 0.1 does not wait; E1 to E3 stay in P2 and E4 to E6 move to P3 / 0.2.
 8. **Order with the paused PSU fix:** land `p2-psu-return` first (recommended) or fold it into E2?
 9. **Chip supply current:** a fixed quiescent load from the datasheet in E3, or wait for activity-dependent current with the P4 power profiler?
+10. **RFCs:** `CONTRIBUTING.md` asks for an RFC in `rfcs/` for component API and file format changes. Does this document count as that RFC for E2 (component API) and E4 (circuit file), or should each phase open a short RFC first? Proposal: this document is the umbrella design; E2 and E4 each get a short RFC once the RFC template exists.
