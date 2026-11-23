@@ -14,6 +14,7 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Added
 
+- **RFC 0001 (component API):** [`rfcs/0001-component-api.md`](rfcs/0001-component-api.md) adopts [`docs/design/engine-components.md`](docs/design/engine-components.md) as the normative E2 design (engine core, `Component` trait, invariants, five ported parts). Draft; tracks #46. No code change.
 - **`ohmforge validate-parts`:** walks a parts tree, parses every `part.toml`, runs loader consistency checks and requires CC-BY-SA-4.0 licence fields (`cargo run -p of-cli -- validate-parts parts/`).
 - **mdBook skeleton:** `docs/book.toml` and `docs/src/` with a SUMMARY that points at the living guides (full user guide remains P6).
 - **RFC template:** `rfcs/0000-template.md` with the sections required by `CONTRIBUTING.md`; `rfcs/README.md` describes numbering (`NNNN-short-title.md`).
