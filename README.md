@@ -37,6 +37,8 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 **Planned: schematic themes and auto-layout.** Today's colours stay the default; optional themes (Cyberpunk / Hacker, Wasteland Terminal, Blueprint, Paper and more), IEC symbols by default (ANSI selectable), and automatic placement that cuts wire crossings while following schematic best practice (P3 and P4). The plans are in [`docs/design/schematic-themes.md`](docs/design/schematic-themes.md) and [`docs/design/schematic-layout.md`](docs/design/schematic-layout.md).
 
+**Planned: signal flow and memory.** See where a signal goes inside the ESP32 (a live block diagram of pads, the GPIO matrix and peripherals, lit from the simulated register state) and where it moves on the schematic (logic levels, current dots, and a summary when a signal is too fast to watch), and open a memory map and hex view of SRAM, flash and the ROM once you have fetched it (P3 to P5). The plan is in [`docs/design/signal-flow-visualisation.md`](docs/design/signal-flow-visualisation.md).
+
 ## Workspace layout
 
 | Crate | Purpose |
