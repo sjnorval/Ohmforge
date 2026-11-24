@@ -94,17 +94,16 @@ fn rom_boots_the_idf_bootloader_which_boots_the_idf_app() {
     soc.run_until(APP_BY);
     let text = soc.uart_text();
 
-    let rest = text.strip_prefix(ROM_LOG).unwrap_or_else(|| panic!("missing ROM log: {text:?}"));
+    let rest = text
+        .strip_prefix(ROM_LOG)
+        .unwrap_or_else(|| panic!("missing ROM log: {text:?}"));
     for marker in BOOT_MARKERS {
         assert!(
             rest.lines().map(untimed).any(|l| l == *marker),
             "missing bootloader marker {marker:?} in\n{rest}"
         );
     }
-    assert!(
-        text.contains("ohmforge idf blinky"),
-        "missing app banner in\n{text}"
-    );
+    assert!(text.contains("ohmforge idf blinky"), "missing app banner in\n{text}");
     assert!(soc.resets().is_empty(), "{:?}", soc.resets());
 
     // sdkconfig.defaults asks for 160 MHz.
@@ -133,11 +132,7 @@ fn gpio8_toggles_at_the_firmware_period() {
     let Some(mut soc) = powered_on() else { return };
     soc.run_until(SimTime::from_us(APP_BY_US + 10 * HALF_PERIOD_US));
     let edges: Vec<_> = soc.pin_edges().iter().filter(|e| e.pin == 8).copied().collect();
-    assert!(
-        !edges.is_empty(),
-        "no GPIO8 edges; uart=\n{}",
-        soc.uart_text()
-    );
+    assert!(!edges.is_empty(), "no GPIO8 edges; uart=\n{}", soc.uart_text());
     // Find the first edge after the app is up (skip early boot noise if any).
     let start = edges
         .iter()
