@@ -140,7 +140,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 5. [x] Blinky firmware (`firmware/esp32c3-blinky`, RV32IMC asm, SYSTIMER-timed): edges every 250 µs without drift (`tests/blinky.rs`)
 6. [x] `Esp32c3Engine` + `PinDriver` + parts-library LED and resistor under the kernel: LED current switches with a 500 µs period, about 4 mA on (`tests/blinky_led.rs`)
 7. [x] Same blinky from esp-hal (Rust, `riscv32imc-unknown-none-elf`, #21): `firmware/esp32c3-esp-hal-blinky` (esp-hal 1.2.2, unmodified `esp_hal::init` with `CpuClock::max()`, 500 µs half period) boots through the real ROM and the ESP-IDF bootloader, prints its banner at 160 MHz and drives the LED circuit (`tests/esp_hal_blinky.rs`); CI rebuilds it byte for byte
-8. [ ] Arduino-ESP32 / ESP-IDF blink through the real ROM and a flash image (design: [`design/arduino-idf-mvp-demos.md`](design/arduino-idf-mvp-demos.md), #60; bootloader path already works; CI installs pinned ESP-IDF / `arduino-cli` to rebuild committed images — no longer deferred as design-only)
+8. [~] Arduino-ESP32 / ESP-IDF blink through the real ROM and a flash image (design: [`design/arduino-idf-mvp-demos.md`](design/arduino-idf-mvp-demos.md), #60; **ESP-IDF blink done**: `firmware/esp32c3-idf-blinky`, `tests/idf_blinky.rs`, ROM `.rodata.interface` + `SYSTEM_CPU_INTR_FROM_CPU_*` for FreeRTOS yield; Arduino-ESP32 blink still to do)
 
 ### MVP definition (exit criteria for 0.1)
 

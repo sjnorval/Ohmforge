@@ -1,7 +1,7 @@
 # Arduino-ESP32 and ESP-IDF MVP demos
 
-Status: proposed (design only, no code yet). Tracks [#60](https://github.com/sjnorval/Ohmforge/issues/60). Implementation follows once this note is accepted.
-Date: 2026-11-23.
+Status: in progress. Tracks [#60](https://github.com/sjnorval/Ohmforge/issues/60). **D1 (ESP-IDF blink) implemented** (`firmware/esp32c3-idf-blinky`, `tests/idf_blinky.rs`); D2–D5 remain.
+Date: 2026-11-23 (updated same day for D1).
 Related: [`ROADMAP.md`](../ROADMAP.md) (P2 MVP demo exit; first-milestone step 8); [`firmware/README.md`](../../firmware/README.md); [`editor-integration.md`](editor-integration.md) (I6 Arduino board package is a different deliverable); [`AGENTS.md`](../../AGENTS.md) §3c (ROM/bootloader fetch rules); [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §8 (firmware loading), §13.1 (licensing).
 
 The four MVP behaviours already run from **unmodified esp-hal** apps under `firmware/` (blink, button poll/irq, pot dimmer, LED fade). Release 0.1 also asks for the same behaviours from **Arduino-ESP32** and **ESP-IDF** firmware, so the claim “unmodified ESP32-C3 ELF (Arduino / ESP-IDF / esp-hal)” is true for each demo, not only for Rust.
@@ -16,7 +16,7 @@ The four MVP behaviours already run from **unmodified esp-hal** apps under `firm
 | esp-hal ADC/PWM (dimmer + fade) | `firmware/esp32c3-esp-hal-adc-pwm` | Done (#24) |
 | Desktop demos | `of-ui` (blink, dimmer, fade, button) | Drive the esp-hal (or bare-metal blink) images |
 | Real ROM + espflash bootloader | Fetched by `scripts/fetch-esp-rom-elfs.*`, never committed | Required for the same boot path as esp-hal tests |
-| Arduino-ESP32 / ESP-IDF demo apps | — | **Missing (#60)** |
+| Arduino-ESP32 / ESP-IDF demo apps | `firmware/esp32c3-idf-blinky` (D1); rest — | **In progress (#60)** |
 | Arduino IDE board package (upload any sketch) | [`editor-integration.md`](editor-integration.md) I6 | P4; **not** this issue |
 
 Roadmap step 8 still says Arduino/ESP-IDF blink is “deferred: needs an ESP-IDF or Arduino toolchain in CI”. This note un-defers the **design** and records how CI and licensing will work so implementation can start.
