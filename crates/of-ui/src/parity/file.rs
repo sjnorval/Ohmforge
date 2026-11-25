@@ -17,7 +17,7 @@ use crate::button::{self, ButtonKind};
 pub(crate) enum IdleDraw {
     /// `quiescent_a = 0`, as the hand-wired demos (parity runs).
     Off,
-    /// The shipped file's 5 mA (the idle-draw golden).
+    /// The shipped file's `quiescent_a` (23 mA on blink; the idle-draw golden).
     AsShipped,
 }
 

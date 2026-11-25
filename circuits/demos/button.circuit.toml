@@ -3,13 +3,13 @@ format = 1
 [circuit]
 name = "Push button (polling)"
 ground = "gnd"
-description = "A push button on GPIO9 (internal pull-up, contact bounce) switches a red LED on GPIO8; the esp-hal app polls the button (booted through the ROM). The ESP32-C3 draws its 5 mA idle current (quiescent_a)."
+description = "A push button on GPIO9 (internal pull-up, contact bounce) switches a red LED on GPIO8; the esp-hal app polls the button (booted through the ROM). The ESP32-C3 draws 23 mA from 3V3 (quiescent_a; datasheet v2.5 Table 5-8, CPU running at 160 MHz)."
 
 [[component]]
 ref = "U1"
 part = "espressif.esp32-c3"
 at = [18, 49]
-params = { inputs = ["GPIO9"], quiescent_a = 0.005 }
+params = { inputs = ["GPIO9"], quiescent_a = 0.023 }
 
 [component.firmware]
 app = "../../firmware/esp32c3-esp-hal-button/button_poll.bin"

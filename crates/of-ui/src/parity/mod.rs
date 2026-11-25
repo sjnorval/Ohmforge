@@ -23,8 +23,9 @@
 //! - `file`: the shipped `circuits/demos` files built by `of_circuit::build`
 //!   (E4b-2), with U1's idle draw forced off as in the hand-wired demos;
 //! - the idle-draw golden (`goldens/blink.idle-draw.trace.txt`): the blink
-//!   file as shipped, with the ESP32-C3's 5 mA `quiescent_a`. Only the PSU
-//!   current differs from `blink.trace.txt`, by the idle draw.
+//!   file as shipped, with the ESP32-C3's 23 mA `quiescent_a` (datasheet
+//!   v2.5 Table 5-8, CPU running at 160 MHz). Only the PSU current differs
+//!   from `blink.trace.txt`, by that supply current.
 //!
 //! Run with `OF_BLESS=1` to rewrite the goldens from the hand-wired demos
 //! (and the idle-draw golden from the blink file), on Linux only.
@@ -339,10 +340,11 @@ fn idle_golden_path() -> PathBuf {
         .join(format!("{IDLE_GOLDEN}.trace.txt"))
 }
 
-/// The shipped blink file keeps the ESP32-C3's 5 mA idle draw. Its trace is
-/// a separate, reviewed golden: everything but the PSU current matches the
-/// hand-wired blink exactly, and the PSU current is higher by the idle draw
-/// (`quiescent_a` times the rail over 3.3 V).
+/// The shipped blink file keeps the ESP32-C3's 23 mA supply current. Its
+/// trace is a separate, reviewed golden: everything but the PSU current
+/// matches the hand-wired blink exactly, and the PSU current is higher by
+/// `quiescent_a` times the rail over 3.3 V (just under 23 mA, as the rail
+/// sits a few mV under 3.3 V).
 #[test]
 fn shipped_blink_file_matches_the_idle_draw_golden() {
     let mut sim = file::start(Demo::Blink, file::IdleDraw::AsShipped).expect("blink file");
@@ -373,7 +375,7 @@ fn shipped_blink_file_matches_the_idle_draw_golden() {
         assert!((on.1 - off.1).abs() < 0.05, "LED current moved by {} mA", on.1 - off.1);
         let extra = on.2 - off.2;
         assert!(
-            (4.8..=5.0).contains(&extra),
+            (22.8..=23.0).contains(&extra),
             "idle draw adds {extra} mA at t = {}",
             on.0
         );

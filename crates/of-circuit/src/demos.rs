@@ -1,8 +1,9 @@
 //! The shipped demo circuits (`circuits/demos`, feature `demos`), embedded
 //! with the firmware they name so an app runs them without the repository.
 //!
-//! The files keep the ESP32-C3's true-to-life 5 mA idle draw
-//! (`quiescent_a = 0.005`). The mask ROM and bootloader are never embedded:
+//! The files keep the ESP32-C3's supply current from its datasheet (v2.5,
+//! Table 5-8, 160 MHz): `quiescent_a = 0.023` with the CPU running, and
+//! `0.016` for `button-irq`, which sleeps in `wfi`. The mask ROM and bootloader are never embedded:
 //! add them with [`EmbeddedResolver::with_rom`] for the ROM-booted demos.
 
 use crate::embedded::EmbeddedResolver;

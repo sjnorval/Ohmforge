@@ -3,7 +3,7 @@ format = 1
 [circuit]
 name = "Pot dimmer"
 ground = "gnd"
-description = "The ESP32-C3 reads a 10 kohm pot on GPIO2 (ADC) and sets the LEDC duty of a red LED on GPIO8 (esp-hal app, booted through the ROM). The ESP32-C3 draws its 5 mA idle current (quiescent_a)."
+description = "The ESP32-C3 reads a 10 kohm pot on GPIO2 (ADC) and sets the LEDC duty of a red LED on GPIO8 (esp-hal app, booted through the ROM). The ESP32-C3 draws 23 mA from 3V3 (quiescent_a; datasheet v2.5 Table 5-8, CPU running at 160 MHz)."
 
 [sim]
 max_step = 2e-5
@@ -12,7 +12,7 @@ max_step = 2e-5
 ref = "U1"
 part = "espressif.esp32-c3"
 at = [18, 49]
-params = { quiescent_a = 0.005 }
+params = { quiescent_a = 0.023 }
 
 [component.firmware]
 app = "../../firmware/esp32c3-esp-hal-adc-pwm/pot_dimmer.bin"

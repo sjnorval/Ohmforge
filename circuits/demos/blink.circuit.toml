@@ -3,13 +3,13 @@ format = 1
 [circuit]
 name = "LED blink"
 ground = "gnd"
-description = "ESP32-C3 GPIO8 blinks a red LED through 330 ohm from the bench PSU (bare-metal blinky ELF). The ESP32-C3 draws its 5 mA idle current (quiescent_a)."
+description = "ESP32-C3 GPIO8 blinks a red LED through 330 ohm from the bench PSU (bare-metal blinky ELF). The ESP32-C3 draws 23 mA from 3V3 (quiescent_a; datasheet v2.5 Table 5-8, CPU running at 160 MHz)."
 
 [[component]]
 ref = "U1"
 part = "espressif.esp32-c3"
 at = [18, 49]
-params = { quiescent_a = 0.005 }
+params = { quiescent_a = 0.023 }
 
 [component.firmware]
 app = "../../firmware/esp32c3-blinky/blinky.elf"

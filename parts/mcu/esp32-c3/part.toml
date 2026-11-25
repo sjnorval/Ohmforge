@@ -1,6 +1,10 @@
 # Espressif ESP32-C3 (bare chip / module footprint). Only pins that are
 # wired in the circuit are elaborated (design §3c). The Rust model is
 # `Esp32c3Component` in of-soc-esp32c3 (`model = "rust:esp32c3"`).
+# Supply current (`quiescent_a`, default 23 mA): ESP32-C3 Series Datasheet
+# v2.5, Table 5-8, Modem-sleep at 160 MHz, CPU running, peripheral clocks
+# disabled (16 mA with the CPU idle in `wfi`). Idle GPIO pads are 1 GΩ to
+# ground, within the 50 nA I_IH / I_IL limit of Table 5-4.
 [part]
 id = "espressif.esp32-c3"
 name = "ESP32-C3"

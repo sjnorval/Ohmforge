@@ -60,7 +60,13 @@ fn shipped_demos_keep_the_idle_draw_and_name_their_boot() {
         let u1 = f.components.iter().find(|c| c.reference() == "U1").unwrap();
         assert_eq!(
             u1.params.get("quiescent_a"),
-            Some(&of_circuit::ParamValue::Number(0.005)),
+            // ESP32-C3 datasheet v2.5, Table 5-8, 160 MHz: 23 mA with the CPU
+            // running, 16 mA for button-irq, which sleeps in `wfi`.
+            Some(&of_circuit::ParamValue::Number(if d.name == "button-irq" {
+                0.016
+            } else {
+                0.023
+            })),
             "{}",
             d.path
         );
