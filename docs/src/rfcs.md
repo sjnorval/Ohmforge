@@ -7,3 +7,4 @@ file formats and the QEMU sync protocol. See [`rfcs/README.md`](https://github.c
 Current drafts:
 
 - [RFC 0001: Component API for engine E2](https://github.com/sjnorval/Ohmforge/blob/main/rfcs/0001-component-api.md) (tracks #46)
+- [RFC 0003: Circuit file format (engine E4)](https://github.com/sjnorval/Ohmforge/blob/main/rfcs/0003-circuit-file.md) (tracks #48)

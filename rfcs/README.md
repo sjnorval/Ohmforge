@@ -15,3 +15,5 @@ Smaller changes do not need an RFC; use an ordinary pull request.
 | Number | Title | Status | Tracking |
 |---|---|---|---|
 | [0001](0001-component-api.md) | Component API for engine E2 | Accepted | [#46](https://github.com/sjnorval/Ohmforge/issues/46) |
+| 0002 | Bus ports (reserved by [`buses.md`](../docs/design/buses.md), not written yet) | Reserved | — |
+| [0003](0003-circuit-file.md) | Circuit file format (engine E4) | Draft | [#48](https://github.com/sjnorval/Ohmforge/issues/48) |
