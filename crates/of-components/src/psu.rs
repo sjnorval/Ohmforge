@@ -52,6 +52,36 @@ impl SupplySettings {
             current_limit: self.current_limit.clamp(1e-6, 2.0),
         }
     }
+
+    /// True when the set voltage is outside the ESP32-C3 recommended range.
+    pub fn set_outside_rated(self) -> bool {
+        self.on && !(RATED_MIN_V..=RATED_MAX_V).contains(&self.volts)
+    }
+}
+
+/// Live output of the PSU, as its face shows it (built from the component's
+/// readings by `of_instruments::psu::PsuReadout`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SupplyStatus {
+    /// Voltage on the `+` rail (V).
+    pub volts: f64,
+    /// Current delivered into the rail (A), instantaneous.
+    pub amps: f64,
+    /// Period-averaged current (A) for the instrument face and sidebar.
+    /// `None` means "use [`Self::amps`]".
+    pub amps_avg: Option<f64>,
+    /// Regulation mode.
+    pub mode: SupplyMode,
+    /// Set point or rail is outside 3.0–3.6 V.
+    pub outside_rated: bool,
+}
+
+impl SupplyStatus {
+    /// Current shown on the PSU face: the period average when filled,
+    /// otherwise the instantaneous value.
+    pub fn display_amps(self) -> f64 {
+        self.amps_avg.unwrap_or(self.amps)
+    }
 }
 
 /// How the supply is regulating.
@@ -331,4 +361,32 @@ fn net_name(circuit: &of_analog::Circuit, node: of_analog::Var) -> String {
                 .to_owned()
         })
         .unwrap_or_else(|| "gnd".into())
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn warning_when_outside_rated_range() {
+        let mut s = SupplySettings::default();
+        assert!(!s.set_outside_rated());
+        s.volts = 2.5;
+        assert!(s.set_outside_rated());
+        s.volts = 5.0;
+        assert!(s.set_outside_rated());
+        s.on = false;
+        assert!(!s.set_outside_rated());
+    }
+
+    #[test]
+    fn the_face_shows_the_average_when_there_is_one() {
+        let mut st = SupplyStatus {
+            amps: 0.02,
+            ..SupplyStatus::default()
+        };
+        assert_eq!(st.display_amps(), 0.02);
+        st.amps_avg = Some(0.025);
+        assert_eq!(st.display_amps(), 0.025);
+    }
 }
