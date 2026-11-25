@@ -2021,11 +2021,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "of-circuit"
+version = "0.0.1"
+dependencies = [
+ "of-firmware",
+ "of-parts",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "of-cli"
 version = "0.0.1"
 dependencies = [
  "of-analog",
  "of-bom",
+ "of-circuit",
  "of-netlist",
  "of-parts",
 ]

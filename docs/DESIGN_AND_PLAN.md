@@ -202,7 +202,7 @@ flowchart TD
 
 The kernel and all models have no UI or OS dependencies and compile to `wasm32`, so the same core runs in the desktop app, in a browser Web Worker, and as a headless CLI for CI (`ohmforge run --until 5s --assert`).
 
-> **Update (23 November 2026):** under the engine plan ([`docs/design/engine-components.md`](design/engine-components.md)) a planned `of-engine` crate builds components and circuit files into the solvers, the bench PSU is a component with `+` and `−` terminals rather than an instrument, and readings, logging and measuring are an engine service in `of-instruments`. The diagram and layout below are otherwise unchanged.
+> **Update (23 November 2026):** under the engine plan ([`docs/design/engine-components.md`](design/engine-components.md)) a planned `of-engine` crate builds components and circuit files into the solvers, the bench PSU is a component with `+` and `−` terminals rather than an instrument, and readings, logging and measuring are an engine service in `of-instruments`. Circuit files (`*.circuit.toml`, [RFC 0003](../rfcs/0003-circuit-file.md)) are read and written by a new `of-circuit` crate (E4, #48). The diagram and layout below are otherwise unchanged.
 
 ### 6.1 Workspace layout
 

@@ -13,7 +13,8 @@ holder about a separate commercial licence.
 
 Parts library data and artwork under parts/ are licensed under the
 Creative Commons Attribution-ShareAlike 4.0 International licence
-(CC-BY-SA-4.0); see parts/LICENSE.md. Documentation under docs/ is
+(CC-BY-SA-4.0); see parts/LICENSE.md. Circuit files under circuits/ are
+CC-BY-SA-4.0; see circuits/LICENSE.md. Documentation under docs/ is
 CC-BY-SA-4.0 unless stated.
 
 No GPL-2.0-only or LGPL code is linked into this workspace. The planned

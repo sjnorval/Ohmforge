@@ -19,7 +19,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 ## Planned changes: base engine and plug-in components
 
-> **Architecture in progress.** The design is merged (phase E1, #43). The bench PSU already has explicit `+` and `−` terminals, with `−` routed to GND on the demo boards, and the LED and PSU currents are averaged over whole PWM periods (#45, closed by #54). Ohmforge is moving to a **base engine** that stands in for the real world: it owns the nets, the analog and digital solvers, simulated time and events, and the wiring, readings, logging and measuring services. **Every part with a real-world counterpart becomes a plug-in component** on one engine API: resistors, LEDs, pots and buttons, the **bench PSU** and the **ESP32-C3 itself**. Meters, the scope, the logger and the UART console become instruments that work on any circuit; demos become circuit files drawn by the existing schematic router; and the BOM comes straight from the components. Next in P2 are engine phases E2 and E3 (#46, #47). Phases E4 to E6 follow in P3 / 0.2 (#48 to #50); 0.1 does not wait for them. The design is in [`docs/design/engine-components.md`](docs/design/engine-components.md).
+> **Architecture in progress.** The design is merged (phase E1, #43). The bench PSU already has explicit `+` and `−` terminals, with `−` routed to GND on the demo boards, and the LED and PSU currents are averaged over whole PWM periods (#45, closed by #54). Ohmforge is moving to a **base engine** that stands in for the real world: it owns the nets, the analog and digital solvers, simulated time and events, and the wiring, readings, logging and measuring services. **Every part with a real-world counterpart becomes a plug-in component** on one engine API: resistors, LEDs, pots and buttons, the **bench PSU** and the **ESP32-C3 itself**. Meters, the scope, the logger and the UART console become instruments that work on any circuit; demos become circuit files drawn by the existing schematic router; and the BOM comes straight from the components. Engine phases E2 and E3 are on `main` (#62, #63), and E4a, the circuit file format, landed in #73. The rest of E4, and E5 and E6, follow in P3 / 0.2 (#48 to #50); 0.1 does not wait for them. The design is in [`docs/design/engine-components.md`](docs/design/engine-components.md).
 
 **Planned: editor integration.** Upload, serial monitor and debugging from VS Code and the Arduino IDE 2.x as if the simulator were a real board: a local control API, a virtual serial port, a GDB stub and hot reload in P3, then a VS Code extension and an Arduino board package in P4. The plan is in [`docs/design/editor-integration.md`](docs/design/editor-integration.md).
 
@@ -37,6 +37,8 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 **Planned: schematic themes and auto-layout.** Today's colours stay the default; optional themes (Cyberpunk / Hacker, Wasteland Terminal, Blueprint, Paper and more), IEC symbols by default (ANSI selectable), and automatic placement that cuts wire crossings while following schematic best practice (P3 and P4). The plans are in [`docs/design/schematic-themes.md`](docs/design/schematic-themes.md) and [`docs/design/schematic-layout.md`](docs/design/schematic-layout.md).
 
+**Planned: signal flow and memory.** See where a signal goes inside the ESP32 (a live block diagram of pads, the GPIO matrix and peripherals, lit from the simulated register state) and where it moves on the schematic (logic levels, current dots, and a summary when a signal is too fast to watch), and open a memory map and hex view of SRAM, flash and the ROM once you have fetched it (P3 to P5). The plan is in [`docs/design/signal-flow-visualisation.md`](docs/design/signal-flow-visualisation.md).
+
 **Planned: official examples and file-based sharing.** A gallery of complete, documented projects you can open and edit, and a project pack you can send as a file, with no account (P3; the web app opens the same packs in P4). The plan is in [`docs/design/examples-and-sharing.md`](docs/design/examples-and-sharing.md).
 
 **Planned: compatibility checks and breadboard view.** Cited ratings on each part and a visible Checks panel for wiring and interface mistakes (P3 first slice; full review in P4), and a true 2.54 mm breadboard of the same circuit (P3). The plans are in [`docs/design/compatibility-checks.md`](docs/design/compatibility-checks.md) and [`docs/design/breadboard.md`](docs/design/breadboard.md).
@@ -51,16 +53,17 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-netlist` | Circuit graph, nets, analog/digital partitioning |
 | `of-analog` | MNA solver, Newton-Raphson, sparse LU, adaptive timestep |
 | `of-digital` | Event-driven 4-state logic kernel |
-| `of-component-api` | Component trait (draft; grows into the engine's component API in phase E2, #46, stable from 1.0) |
+| `of-component-api` | Component trait: the engine's component API from phase E2 (RFC 0001, #62), stable from 1.0 |
 | `of-components` | Built-in part models |
 | `of-parts` | `part.toml` schema and loader |
+| `of-circuit` | Circuit files (`*.circuit.toml`, RFC 0003): parse with line and column errors, validate, canonical save (phase E4, #48) |
 | `of-cpu-riscv`, `of-cpu-xtensa` | CPU cores (ESP32-C3 first, Xtensa later) |
 | `of-cpu-qemu-ipc` | Client for the out-of-process QEMU sidecar (no GPL linking) |
 | `of-soc-esp32c3`, `of-soc-esp32` | SoC memory maps and peripherals (ESP32-C3 first) |
 | `of-firmware` | ELF loading, ESP flash images and partition tables (DWARF later) |
 | `of-plugin-wasm` | Sandboxed WASM component host |
 | `of-instruments` | Measurement service and instruments: scope, logic analyser, decoders, multimeter, logger; serial monitor model (`SerialMonitor`, lean console; the rest to do, phase E5 in P3, #49). The bench PSU becomes a component (E2) |
-| `of-engine` (planned) | Base engine: builds components and circuit files into the solvers, checks the circuit, runs the kernel (phase E2, #46; not in the workspace yet) |
+| `of-engine` | Base engine: builds components and circuit files into the solvers, checks the circuit, runs the kernel (E2, #62; circuit files E4, #48) |
 | `of-bom` | Bill of materials, costing, CSV export |
 | `of-kicad` | KiCad netlist and schematic export |
 | `of-gdb` | GDB remote protocol |
@@ -69,7 +72,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-web` | WASM entry point |
 | `of-cli` | `ohmforge` headless runner |
 
-Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo, icons, and the [startup animation](assets/startup/README.md)), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
+Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `circuits/` (CC-BY-SA-4.0 circuit files, see [`circuits/README.md`](circuits/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo, icons, and the [startup animation](assets/startup/README.md)), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
 
 ## Building
 
@@ -80,6 +83,9 @@ cargo check --workspace
 cargo test --workspace
 cargo run -p of-cli -- --version
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv   # SPICE netlist to CSV
+cargo run -p of-cli -- circuit check circuits/   # validate circuit files (*.circuit.toml, RFC 0003)
+cargo run -p of-cli -- validate-parts parts/   # check every part.toml in the parts library
+cargo run -p of-cli -- bom dimmer --out bom.csv   # demo-board BOM as CSV (blink, dimmer, fade or button)
 cargo test -p of-soc-esp32c3          # blinky, timer-interrupt, XIP and button firmware on the ESP32-C3 model, LED and button co-simulated
 scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests and the pot dimmer / LED fade demos (never committed)
 cargo run -p of-app --features gui   # desktop app: load screen, then live blink, dimmer, fade and push-button demos
@@ -94,7 +100,7 @@ New to Ohmforge? [Your first schematic](docs/src/guide/first-schematic.md) previ
 
 Code: [GNU AGPL-3.0-or-later](LICENSE). If you distribute Ohmforge or a modified version, or offer it to users over a network, you must share the full source under the same licence. For closed-source commercial use, ask about a separate commercial licence.
 
-Parts data, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md)). See [NOTICE](NOTICE).
+Parts data, circuit files, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md), [circuits/LICENSE.md](circuits/LICENSE.md)). See [NOTICE](NOTICE).
 
 Contributions are accepted under the Developer Certificate of Origin; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -113,8 +119,8 @@ The planned path from the work already on `main` through to 1.0 is below.
 
 | Phase | Status | What it covers | Release |
 | --- | --- | --- | --- |
-| P0 Foundations | ✅ Done | Repo, CI, RFCs, parts validation | n/a |
-| Phase one, RISC-V core | ✅ Done | RV32IMC, 75 of 77 riscv-tests | n/a |
+| P0 Foundations | ✅ Done (leftovers #57, #58) | Repo, CI, RFCs, parts validation | n/a |
+| RISC-V core (phase one) | ✅ Done | RV32IMC, 75 of 77 riscv-tests | n/a |
 | P1 Analog core | ✅ Done | DC, AC and transient analyses within 1 % of ngspice | n/a |
 | P2 ESP32-C3 MVP | 🚧 In progress | Boot, GPIO, ADC, PWM, UART, live demo, BOM | 0.1 |
 | P3 Breadth | 📋 Planned | Classic ESP32, I2C/SPI, breadboard, examples and sharing, engine E4–E6 | 0.2 |
