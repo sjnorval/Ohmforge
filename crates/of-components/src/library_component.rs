@@ -274,15 +274,14 @@ impl Component for LibraryComponent {
                 out[1] = -i;
             }
             "led" | "diode" => {
-                // Series with its neighbour: use diode probe if present, else voltage/resistance estimate.
+                // The solver's diode current probe `i(name)` (E5c: every diode reports it).
                 let name = self.instance.as_deref().unwrap_or("");
                 if let Some(i) = view.value(&format!("i({name})")) {
                     out[0] = i;
                     out[1] = -i;
                     return;
                 }
-                // Shockley current is not exposed as i(name) for diodes; leave 0
-                // so KCL still holds (0+0). Parity tests compare node voltages.
+                // No probe (a model without one): leave 0 so KCL still holds (0+0).
                 let _ = view;
             }
             "potentiometer" => {

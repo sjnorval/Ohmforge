@@ -2,7 +2,9 @@
 
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Ui};
 
-use crate::meters::{CircuitReadout, MeterKind, PlacedMeter, ProbeRef, read_meter};
+use of_instruments::Reading;
+
+use crate::meters::{MeterKind, PlacedMeter, ProbeRef};
 use crate::theme::TEAL;
 
 /// A clickable node on the schematic, in schematic coordinates.
@@ -19,7 +21,24 @@ pub struct MeterView<'a> {
     pub arm: Option<MeterKind>,
     pub pending_a: Option<&'a str>,
     pub meters: &'a [PlacedMeter],
-    pub readout: &'a CircuitReadout,
+    /// The worker's readings, by meter id.
+    pub readings: &'a [(u64, Reading)],
+}
+
+impl MeterView<'_> {
+    /// The display text of meter `id` (`—` until the worker has read it).
+    pub fn text(&self, id: u64) -> String {
+        reading_text(self.readings, id)
+    }
+}
+
+/// The display text of meter `id` in `readings`.
+pub fn reading_text(readings: &[(u64, Reading)], id: u64) -> String {
+    readings
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map_or(Reading::Missing, |(_, r)| r.clone())
+        .display()
 }
 
 /// Result of interacting with the schematic overlay.
@@ -74,7 +93,7 @@ pub fn meter_layer(
         painter.circle_filled(a, 3.0, TEAL);
         painter.circle_filled(b, 3.0, TEAL);
         let mid = Pos2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5 - 8.0);
-        let text = read_meter(meter, view.readout).display();
+        let text = view.text(meter.id);
         painter.text(mid, egui::Align2::CENTER_BOTTOM, text, FontId::monospace(12.0), TEAL);
     }
     clicked

@@ -9,6 +9,7 @@
 //! min/max and RMS. The serial monitor model lives in [`serial`]; egui panels
 //! live in `of-ui`.
 
+pub mod meter;
 pub mod ring;
 pub mod serial;
 pub mod service;
@@ -16,6 +17,7 @@ pub mod session;
 pub mod signal;
 pub mod stats;
 
+pub use meter::{Averaging, Candidate, MeterError, MeterMode, Multimeter, PartPins, Reading, candidates};
 pub use ring::{SampleClock, TraceBuf};
 pub use serial::{Delivery, Dir, Entry, FindHit, SendError, SerialMonitor};
 pub use service::{Channel, ChannelId, MeasurementService, ProbeError, Probeable, SamplePlan};

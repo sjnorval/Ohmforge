@@ -22,17 +22,17 @@ use of_components::analog::{Env, Library};
 use of_components::{BounceSettings, register_builtin};
 use of_core::{SimTime, Stop};
 use of_engine::{Firmware, Registry, Session};
-use of_instruments::{ChannelId, MeasurementService, Probeable, SamplePlan, Signal};
+use of_instruments::{
+    Averaging, ChannelId, MeasurementService, MeterMode, Multimeter, PartPins, Probeable, Reading, SamplePlan, Signal,
+};
 use of_soc_esp32c3::{Esp32c3Engine, UartByte};
 
 use crate::adc_pwm::{self, PwmKind};
 use crate::button::{self, ButtonKind};
 use crate::kind::DemoKind;
-use crate::meters::{self, CircuitReadout};
 use crate::supply::{RATED_MAX_V, RATED_MIN_V, SupplyMode, SupplySettings, SupplyStatus};
 use crate::trace::{self, SampleClock, TraceBuf};
 
-const R_SERIES: f64 = 330.0;
 /// Display-average window of the PWM demos (as `PwmSim`).
 const PWM_AVG_WINDOW: f64 = 2e-3;
 /// Display-average window of the button demos (as `ButtonSim`).
@@ -219,6 +219,10 @@ pub(crate) struct SessionSim {
     /// The measurement service; samples the file's `LED current` probe (A).
     meas: MeasurementService,
     led: ChannelId,
+    /// The placed meters' channels (E5c), with the LED probe again as the
+    /// averaging reference ([`Self::meter_ref`]).
+    meters: MeasurementService,
+    meter_ref: ChannelId,
     psu_samples: TraceBuf,
     clock: SampleClock,
     /// Button loop: next grid sample (relative).
@@ -262,12 +266,16 @@ impl SessionSim {
         let style = Loop::of(kind);
         let mut meas = MeasurementService::new(SamplePlan::default());
         let led = meas.watch_default(led_probe(kind)?);
+        let mut meters = MeasurementService::new(SamplePlan::default());
+        let meter_ref = meters.watch_default(led_probe(kind)?);
         let mut d = Self {
             kind,
             s,
             style,
             meas,
             led,
+            meters,
+            meter_ref,
             psu_samples: TraceBuf::default_scope(),
             clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             next_sample: SimTime::ZERO,
@@ -297,6 +305,7 @@ impl SessionSim {
     }
 
     /// The series resistor of the LED (`R1` on blink, `R2` elsewhere).
+    #[cfg(test)]
     fn resistor_ref(&self) -> &'static str {
         if self.kind == DemoKind::Blink { "R1" } else { "R2" }
     }
@@ -329,6 +338,7 @@ impl SessionSim {
     fn record_sample(&mut self) -> Result<(), String> {
         let t = self.time();
         self.meas.record(&mut self.s).map_err(|e| e.to_string())?;
+        self.meters.record(&mut self.s).map_err(|e| e.to_string())?;
         self.cpu().recycle_consumed_edges();
         self.s.commit().map_err(|e| e.to_string())?;
         self.supply_status = self.read_supply();
@@ -638,36 +648,77 @@ impl SessionSim {
         }
     }
 
-    /// Node voltages and branch currents for the meters, with the same names
-    /// as the hand-wired demos (ground is `0`, branches `R1`/`R2`, `D1`,
-    /// `RV1 (1–W)`, `RV1 (W–3)`, `SW1`, `PSU`).
-    pub(crate) fn circuit_readout(&mut self) -> CircuitReadout {
-        let mut out = CircuitReadout::new();
-        let mut nodes = vec!["gpio8", "led_a", "vdd"];
-        match self.kind {
-            DemoKind::Dimmer => nodes.push("gpio2"),
-            DemoKind::ButtonPoll | DemoKind::ButtonIrq => nodes.push("gpio9"),
-            DemoKind::Blink | DemoKind::Fade => {}
-        }
-        meters::take_nodes(self.s.analog(), &nodes, &mut out);
-        meters::add_led_series(&mut out, self.resistor_ref(), "D1", "gpio8", "led_a", R_SERIES);
-        match self.kind {
-            DemoKind::Dimmer => {
-                if let Some(i) = self.s.terminal_currents("RV1") {
-                    // Pins 1, W, 3: current into pin 1 flows 1 → W; out of pin 3, W → 3.
-                    out.push_branch("RV1 (1–W)", "0", "gpio2", i[0]);
-                    out.push_branch("RV1 (W–3)", "gpio2", "vdd", -i[2]);
+    // Meters (E5c).
+
+    /// Every part's pins and their nets in pin order, for
+    /// [`of_instruments::candidates`] (an unconnected pin has net `""`).
+    pub(crate) fn layout(&self) -> Vec<PartPins> {
+        self.s
+            .components()
+            .iter()
+            .map(|c| {
+                let info = c.component.info();
+                PartPins {
+                    refdes: info.refdes.clone(),
+                    pins: info
+                        .pins
+                        .iter()
+                        .map(|p| (p.name.clone(), c.pin_nets.get(&p.name).cloned().unwrap_or_default()))
+                        .collect(),
                 }
-            }
-            DemoKind::ButtonPoll | DemoKind::ButtonIrq => {
-                if let Some(i) = self.s.terminal_currents("SW1") {
-                    out.push_branch("SW1", "gpio9", "0", i[0]);
-                }
-            }
-            DemoKind::Blink | DemoKind::Fade => {}
+            })
+            .collect()
+    }
+
+    /// Sample `meter`'s signal from the next sample on.
+    pub(crate) fn watch_meter(&mut self, meter: &Multimeter) {
+        self.meters.watch_default(meter.signal.clone());
+    }
+
+    /// Stop sampling signals that none of `keep` reads.
+    pub(crate) fn retain_meters(&mut self, keep: &[Multimeter]) {
+        let drop: Vec<ChannelId> = self
+            .meters
+            .channels()
+            .filter(|(id, c)| *id != self.meter_ref && !keep.iter().any(|m| m.signal == c.signal))
+            .map(|(id, _)| id)
+            .collect();
+        for id in drop {
+            self.meters.unwatch(id);
         }
-        meters::add_psu(&mut out, self.supply_status().display_amps());
-        out
+    }
+
+    /// Averaging of every meter: whole PWM periods of the LED current, or
+    /// the kind's display window when no period is seen (as the PSU readout).
+    fn averaging(&self) -> Averaging {
+        Averaging {
+            reference: self.meter_ref,
+            high: trace::PWM_EDGE_HIGH * 1e-3,
+            periods: trace::PWM_AVG_PERIODS,
+            fallback: match self.style {
+                Loop::Pwm => PWM_AVG_WINDOW,
+                Loop::Blink | Loop::Button => trace::LED_AVG_WINDOW,
+            },
+        }
+    }
+
+    /// `meter`'s reading now; before its first sample (placed while paused)
+    /// the instantaneous value.
+    pub(crate) fn read_meter(&mut self, meter: &Multimeter) -> Reading {
+        let avg = self.averaging();
+        match meter.read(&self.meters, &avg, self.time()) {
+            Reading::Missing => match self.s.sample(&meter.signal) {
+                Ok(v) => match meter.mode {
+                    MeterMode::DcVolts => Reading::Volts(v),
+                    MeterMode::DcAmps => Reading::Amps {
+                        amps: if meter.negate { -v } else { v },
+                        part: meter.part.clone().unwrap_or_default(),
+                    },
+                },
+                Err(_) => Reading::Missing,
+            },
+            r => r,
+        }
     }
 }
 
@@ -712,6 +763,10 @@ impl SessionSim {
 mod tests {
     use super::*;
     use crate::parity::{Demo, registry_session, skip_without_rom};
+    use of_instruments::candidates;
+
+    /// The LED series resistor of every demo.
+    const R_SERIES: f64 = 330.0;
 
     const KINDS: [DemoKind; 5] = [
         DemoKind::Blink,
@@ -731,7 +786,8 @@ mod tests {
         duty: (Option<f64>, Option<f64>),
         uart: String,
         supply: SupplyStatus,
-        readout: CircuitReadout,
+        /// `v(node)` of the pre-E5c meter nodes.
+        volts: Vec<f64>,
         wiper: Option<f64>,
         adc: Option<(u32, u32)>,
         button: Option<f64>,
@@ -755,7 +811,7 @@ mod tests {
             },
             uart: text(s.uart_bytes()),
             supply: s.supply_status(),
-            readout: s.circuit_readout(),
+            volts: old_nodes(s.kind).iter().map(|n| net_volts(s, n)).collect(),
             wiper: (s.kind == DemoKind::Dimmer).then(|| s.wiper_volts().unwrap()),
             adc: if s.kind == DemoKind::Dimmer {
                 s.last_adc_uart()
@@ -902,34 +958,9 @@ mod tests {
             );
             assert_eq!(file.adc, hand.adc, "{k} ADC line");
             assert!(close_opt(file.button, hand.button, VOLTS), "{k} GPIO9");
-            let (fr, hr) = (&file.readout, &hand.readout);
-            assert_eq!(
-                fr.nodes.keys().collect::<Vec<_>>(),
-                hr.nodes.keys().collect::<Vec<_>>(),
-                "{k} nodes"
-            );
-            for (name, v) in &hr.nodes {
-                assert!(
-                    close(fr.nodes[name], *v, VOLTS),
-                    "{k} node {name}: {} vs {v}",
-                    fr.nodes[name]
-                );
-            }
-            let names = |r: &CircuitReadout| {
-                r.branches
-                    .iter()
-                    .map(|b| (b.name.clone(), b.a.clone(), b.b.clone()))
-                    .collect::<Vec<_>>()
-            };
-            assert_eq!(names(fr), names(hr), "{k} branches");
-            for (f, h) in fr.branches.iter().zip(&hr.branches) {
-                assert!(
-                    close(f.amps, h.amps, AMPS),
-                    "{k} branch {}: {} vs {}",
-                    h.name,
-                    f.amps,
-                    h.amps
-                );
+            assert_eq!(file.volts.len(), hand.volts.len(), "{k} nodes");
+            for (n, (f, h)) in old_nodes(kind).iter().zip(file.volts.iter().zip(&hand.volts)) {
+                assert!(close(*f, *h, VOLTS), "{k} node {n}: {f} vs {h}");
             }
         }
     }
@@ -1075,6 +1106,249 @@ mod tests {
             }
         }
         eprintln!("i(R) vs V/R: {compared} samples, worst |diff| = {worst:e} A");
+    }
+
+    /// The pre-E5c meters' probe nodes of `kind` (ground is `0`).
+    fn old_nodes(kind: DemoKind) -> Vec<&'static str> {
+        let mut nodes = vec!["gpio8", "led_a", "vdd", "0"];
+        match kind {
+            DemoKind::Dimmer => nodes.push("gpio2"),
+            DemoKind::ButtonPoll | DemoKind::ButtonIrq => nodes.push("gpio9"),
+            DemoKind::Blink | DemoKind::Fade => {}
+        }
+        nodes
+    }
+
+    /// `v(net)` now.
+    fn net_volts(s: &mut SessionSim, net: &str) -> f64 {
+        s.s.sample(&Signal::NetVolts(net.to_owned())).unwrap()
+    }
+
+    /// The ammeter from `a` toward `b` through `part`, instantaneous (A).
+    fn amps_through(s: &mut SessionSim, a: &str, b: &str, part: &str) -> f64 {
+        let c = candidates(&s.layout(), a, b)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.refdes == part)
+            .unwrap_or_else(|| panic!("{part} does not join {a} and {b}"));
+        let v = s.s.sample(&c.signal).unwrap();
+        if c.negate { -v } else { v }
+    }
+
+    /// Every meter the pre-E5c meters resolved, as recorded by the
+    /// old-versus-new check (commit "feat(ui): desktop meters read through
+    /// the ideal multimeter", RFC 0004): (demo, a, b, part or "" for a
+    /// voltmeter, displayed text, value) after running to 16 ms, the button
+    /// closed at 8 ms.
+    #[rustfmt::skip]
+    const RECORDED: &[(DemoKind, &str, &str, &str, &str, f64)] = &[
+        (DemoKind::Blink, "gpio8", "led_a", "", "-0.000 V", -3.0601937488523236e-10),
+        (DemoKind::Blink, "led_a", "gpio8", "", "0.000 V", 3.0601937488523236e-10),
+        (DemoKind::Blink, "gpio8", "vdd", "", "-3.298 V", -3.297701601786737e0),
+        (DemoKind::Blink, "vdd", "gpio8", "", "3.298 V", 3.297701601786737e0),
+        (DemoKind::Blink, "gpio8", "0", "", "0.000 V", 1.267509912249869e-10),
+        (DemoKind::Blink, "0", "gpio8", "", "-0.000 V", -1.267509912249869e-10),
+        (DemoKind::Blink, "led_a", "vdd", "", "-3.298 V", -3.2977016014807177e0),
+        (DemoKind::Blink, "vdd", "led_a", "", "3.298 V", 3.2977016014807177e0),
+        (DemoKind::Blink, "led_a", "0", "", "0.000 V", 4.3277036611021924e-10),
+        (DemoKind::Blink, "0", "led_a", "", "-0.000 V", -4.3277036611021924e-10),
+        (DemoKind::Blink, "vdd", "0", "", "3.298 V", 3.297701601913488e0),
+        (DemoKind::Blink, "0", "vdd", "", "-3.298 V", -3.297701601913488e0),
+        (DemoKind::Blink, "gpio8", "led_a", "R1", "-0.00 mA", -9.273314390461588e-13),
+        (DemoKind::Blink, "led_a", "gpio8", "R1", "0.00 mA", 9.273314390461588e-13),
+        (DemoKind::Blink, "led_a", "0", "D1", "-0.00 mA", -9.273314390461588e-13),
+        (DemoKind::Blink, "0", "led_a", "D1", "0.00 mA", 9.273314390461588e-13),
+        (DemoKind::Blink, "vdd", "0", "PSU", "-22.98 mA", -2.298398086511888e-2),
+        (DemoKind::Blink, "0", "vdd", "PSU", "22.98 mA", 2.298398086511888e-2),
+        (DemoKind::Dimmer, "gpio8", "led_a", "", "0.848 V", 8.481949985341278e-1),
+        (DemoKind::Dimmer, "led_a", "gpio8", "", "-0.848 V", -8.481949985341278e-1),
+        (DemoKind::Dimmer, "gpio8", "vdd", "", "-1.231 V", -1.2312926630970307e0),
+        (DemoKind::Dimmer, "vdd", "gpio8", "", "1.231 V", 1.2312926630970307e0),
+        (DemoKind::Dimmer, "gpio8", "0", "", "2.066 V", 2.0661191378123167e0),
+        (DemoKind::Dimmer, "0", "gpio8", "", "-2.066 V", -2.0661191378123167e0),
+        (DemoKind::Dimmer, "gpio8", "gpio2", "", "0.417 V", 4.1741735499032434e-1),
+        (DemoKind::Dimmer, "gpio2", "gpio8", "", "-0.417 V", -4.1741735499032434e-1),
+        (DemoKind::Dimmer, "led_a", "vdd", "", "-2.079 V", -2.079487661631158e0),
+        (DemoKind::Dimmer, "vdd", "led_a", "", "2.079 V", 2.079487661631158e0),
+        (DemoKind::Dimmer, "led_a", "0", "", "1.218 V", 1.217924139278187e0),
+        (DemoKind::Dimmer, "0", "led_a", "", "-1.218 V", -1.217924139278187e0),
+        (DemoKind::Dimmer, "led_a", "gpio2", "", "-0.431 V", -4.307776435438034e-1),
+        (DemoKind::Dimmer, "gpio2", "led_a", "", "0.431 V", 4.307776435438034e-1),
+        (DemoKind::Dimmer, "vdd", "0", "", "3.297 V", 3.2974118009093463e0),
+        (DemoKind::Dimmer, "0", "vdd", "", "-3.297 V", -3.2974118009093463e0),
+        (DemoKind::Dimmer, "vdd", "gpio2", "", "1.649 V", 1.648710018087356e0),
+        (DemoKind::Dimmer, "gpio2", "vdd", "", "-1.649 V", -1.648710018087356e0),
+        (DemoKind::Dimmer, "0", "gpio2", "", "-1.649 V", -1.648701782821991e0),
+        (DemoKind::Dimmer, "gpio2", "0", "", "1.649 V", 1.648701782821991e0),
+        (DemoKind::Dimmer, "gpio8", "led_a", "R2", "2.57 mA", 2.5702878743458415e-3),
+        (DemoKind::Dimmer, "led_a", "gpio8", "R2", "-2.57 mA", -2.5702878743458415e-3),
+        (DemoKind::Dimmer, "led_a", "0", "D1", "2.57 mA", 2.5702878743458415e-3),
+        (DemoKind::Dimmer, "0", "led_a", "D1", "-2.57 mA", -2.5702878743458415e-3),
+        (DemoKind::Dimmer, "vdd", "0", "PSU", "-25.88 mA", -2.588199090653242e-2),
+        (DemoKind::Dimmer, "0", "vdd", "PSU", "25.88 mA", 2.588199090653242e-2),
+        (DemoKind::Dimmer, "vdd", "gpio2", "RV1", "0.33 mA", 3.2974200361747107e-4),
+        (DemoKind::Dimmer, "gpio2", "vdd", "RV1", "-0.33 mA", -3.2974200361747107e-4),
+        (DemoKind::Dimmer, "0", "gpio2", "RV1", "-0.33 mA", -3.2974035656439826e-4),
+        (DemoKind::Dimmer, "gpio2", "0", "RV1", "0.33 mA", 3.2974035656439826e-4),
+        (DemoKind::Fade, "gpio8", "led_a", "", "0.326 V", 3.2588627093071487e-1),
+        (DemoKind::Fade, "led_a", "gpio8", "", "-0.326 V", -3.2588627093071487e-1),
+        (DemoKind::Fade, "gpio8", "vdd", "", "-2.503 V", -2.5029022260148417e0),
+        (DemoKind::Fade, "vdd", "gpio8", "", "2.503 V", 2.5029022260148417e0),
+        (DemoKind::Fade, "gpio8", "0", "", "0.795 V", 7.947006912643532e-1),
+        (DemoKind::Fade, "0", "gpio8", "", "-0.795 V", -7.947006912643532e-1),
+        (DemoKind::Fade, "led_a", "vdd", "", "-2.829 V", -2.8287884969455566e0),
+        (DemoKind::Fade, "vdd", "led_a", "", "2.829 V", 2.8287884969455566e0),
+        (DemoKind::Fade, "led_a", "0", "", "0.469 V", 4.688144203336383e-1),
+        (DemoKind::Fade, "0", "led_a", "", "-0.469 V", -4.688144203336383e-1),
+        (DemoKind::Fade, "vdd", "0", "", "3.298 V", 3.2976029172791947e0),
+        (DemoKind::Fade, "0", "vdd", "", "-3.298 V", -3.2976029172791947e0),
+        (DemoKind::Fade, "gpio8", "led_a", "R2", "0.99 mA", 9.875341543354997e-4),
+        (DemoKind::Fade, "led_a", "gpio8", "R2", "-0.99 mA", -9.875341543354997e-4),
+        (DemoKind::Fade, "led_a", "0", "D1", "0.99 mA", 9.875341543354997e-4),
+        (DemoKind::Fade, "0", "led_a", "D1", "-0.99 mA", -9.875341543354997e-4),
+        (DemoKind::Fade, "vdd", "0", "PSU", "-23.97 mA", -2.3970827208051357e-2),
+        (DemoKind::Fade, "0", "vdd", "PSU", "23.97 mA", 2.3970827208051357e-2),
+        (DemoKind::ButtonPoll, "gpio8", "led_a", "", "1.305 V", 1.3050330761452755e0),
+        (DemoKind::ButtonPoll, "led_a", "gpio8", "", "-1.305 V", -1.3050330761452755e0),
+        (DemoKind::ButtonPoll, "gpio8", "vdd", "", "-0.119 V", -1.1863937065401983e-1),
+        (DemoKind::ButtonPoll, "vdd", "gpio8", "", "0.119 V", 1.1863937065401983e-1),
+        (DemoKind::ButtonPoll, "gpio8", "0", "", "3.179 V", 3.178659719914133e0),
+        (DemoKind::ButtonPoll, "0", "gpio8", "", "-3.179 V", -3.178659719914133e0),
+        (DemoKind::ButtonPoll, "gpio8", "gpio9", "", "3.179 V", 3.178652392599102e0),
+        (DemoKind::ButtonPoll, "gpio9", "gpio8", "", "-3.179 V", -3.178652392599102e0),
+        (DemoKind::ButtonPoll, "led_a", "vdd", "", "-1.424 V", -1.4236724467992947e0),
+        (DemoKind::ButtonPoll, "vdd", "led_a", "", "1.424 V", 1.4236724467992947e0),
+        (DemoKind::ButtonPoll, "led_a", "0", "", "1.874 V", 1.8736266437688562e0),
+        (DemoKind::ButtonPoll, "0", "led_a", "", "-1.874 V", -1.8736266437688562e0),
+        (DemoKind::ButtonPoll, "led_a", "gpio9", "", "1.874 V", 1.873619316453828e0),
+        (DemoKind::ButtonPoll, "gpio9", "led_a", "", "-1.874 V", -1.873619316453828e0),
+        (DemoKind::ButtonPoll, "vdd", "0", "", "3.297 V", 3.2972990905681527e0),
+        (DemoKind::ButtonPoll, "0", "vdd", "", "-3.297 V", -3.2972990905681527e0),
+        (DemoKind::ButtonPoll, "vdd", "gpio9", "", "3.297 V", 3.297291763253124e0),
+        (DemoKind::ButtonPoll, "gpio9", "vdd", "", "-3.297 V", -3.297291763253124e0),
+        (DemoKind::ButtonPoll, "0", "gpio9", "", "-0.000 V", -7.327315029450649e-6),
+        (DemoKind::ButtonPoll, "gpio9", "0", "", "0.000 V", 7.327315029450649e-6),
+        (DemoKind::ButtonPoll, "gpio8", "led_a", "R2", "3.95 mA", 3.95464568528871e-3),
+        (DemoKind::ButtonPoll, "led_a", "gpio8", "R2", "-3.95 mA", -3.95464568528871e-3),
+        (DemoKind::ButtonPoll, "led_a", "0", "D1", "3.95 mA", 3.95464568528871e-3),
+        (DemoKind::ButtonPoll, "0", "led_a", "D1", "-3.95 mA", -3.95464568528871e-3),
+        (DemoKind::ButtonPoll, "vdd", "0", "PSU", "-27.01 mA", -2.700909431847977e-2),
+        (DemoKind::ButtonPoll, "0", "vdd", "PSU", "27.01 mA", 2.700909431847977e-2),
+        (DemoKind::ButtonPoll, "0", "gpio9", "SW1", "-0.07 mA", -7.327315029450646e-5),
+        (DemoKind::ButtonPoll, "gpio9", "0", "SW1", "0.07 mA", 7.327315029450646e-5),
+        (DemoKind::ButtonIrq, "gpio8", "led_a", "", "1.305 V", 1.3045465275404955e0),
+        (DemoKind::ButtonIrq, "led_a", "gpio8", "", "-1.305 V", -1.3045465275404955e0),
+        (DemoKind::ButtonIrq, "gpio8", "vdd", "", "-0.119 V", -1.1859513896269996e-1),
+        (DemoKind::ButtonIrq, "vdd", "gpio8", "", "0.119 V", 1.1859513896269996e-1),
+        (DemoKind::ButtonIrq, "gpio8", "0", "", "3.179 V", 3.1794031855478737e0),
+        (DemoKind::ButtonIrq, "0", "gpio8", "", "-3.179 V", -3.1794031855478737e0),
+        (DemoKind::ButtonIrq, "gpio8", "gpio9", "", "3.179 V", 3.1793958566789944e0),
+        (DemoKind::ButtonIrq, "gpio9", "gpio8", "", "-3.179 V", -3.1793958566789944e0),
+        (DemoKind::ButtonIrq, "led_a", "vdd", "", "-1.423 V", -1.4231416665031953e0),
+        (DemoKind::ButtonIrq, "vdd", "led_a", "", "1.423 V", 1.4231416665031953e0),
+        (DemoKind::ButtonIrq, "led_a", "0", "", "1.875 V", 1.8748566580073784e0),
+        (DemoKind::ButtonIrq, "0", "led_a", "", "-1.875 V", -1.8748566580073784e0),
+        (DemoKind::ButtonIrq, "led_a", "gpio9", "", "1.875 V", 1.8748493291384993e0),
+        (DemoKind::ButtonIrq, "gpio9", "led_a", "", "-1.875 V", -1.8748493291384993e0),
+        (DemoKind::ButtonIrq, "vdd", "0", "", "3.298 V", 3.2979983245105733e0),
+        (DemoKind::ButtonIrq, "0", "vdd", "", "-3.298 V", -3.2979983245105733e0),
+        (DemoKind::ButtonIrq, "vdd", "gpio9", "", "3.298 V", 3.297990995641695e0),
+        (DemoKind::ButtonIrq, "gpio9", "vdd", "", "-3.298 V", -3.297990995641695e0),
+        (DemoKind::ButtonIrq, "0", "gpio9", "", "-0.000 V", -7.328868879203033e-6),
+        (DemoKind::ButtonIrq, "gpio9", "0", "", "0.000 V", 7.328868879203033e-6),
+        (DemoKind::ButtonIrq, "gpio8", "led_a", "R2", "3.95 mA", 3.95317129557726e-3),
+        (DemoKind::ButtonIrq, "led_a", "gpio8", "R2", "-3.95 mA", -3.95317129557726e-3),
+        (DemoKind::ButtonIrq, "led_a", "0", "D1", "3.95 mA", 3.95317129557726e-3),
+        (DemoKind::ButtonIrq, "0", "led_a", "D1", "-3.95 mA", -3.95317129557726e-3),
+        (DemoKind::ButtonIrq, "vdd", "0", "PSU", "-20.02 mA", -2.0016754894261343e-2),
+        (DemoKind::ButtonIrq, "0", "vdd", "PSU", "20.02 mA", 2.0016754894261343e-2),
+        (DemoKind::ButtonIrq, "0", "gpio9", "SW1", "-0.07 mA", -7.328868879203031e-5),
+        (DemoKind::ButtonIrq, "gpio9", "0", "SW1", "0.07 mA", 7.328868879203031e-5),
+    ];
+
+    /// E5c: the multimeter still reads the values the pre-E5c meters read
+    /// (period-averaged as the multimeter averages; PSU as the old PSU
+    /// readout): displayed strings equal, values within max(1 nA, 1 ppm)
+    /// (1 nV for volts), on all five demos.
+    #[test]
+    fn the_meters_read_the_recorded_values_on_all_demos() {
+        let close = |x: f64, y: f64| (x - y).abs() <= 1e-9_f64.max(1e-6 * x.abs().max(y.abs()));
+        let mut checked = 0;
+        for kind in KINDS {
+            let Some(mut s) = start(kind, StartOptions::default()) else {
+                continue;
+            };
+            let layout = s.layout();
+            let rows: Vec<_> = RECORDED.iter().filter(|r| r.0 == kind).collect();
+            assert!(!rows.is_empty(), "{kind:?} has recorded meters");
+            let meters: Vec<Multimeter> = rows
+                .iter()
+                .map(|&&(_, a, b, part, _, _)| {
+                    if part.is_empty() {
+                        Multimeter::voltmeter(a, b)
+                    } else {
+                        let c = candidates(&layout, a, b)
+                            .unwrap()
+                            .into_iter()
+                            .find(|c| c.refdes == part);
+                        Multimeter::ammeter(&c.unwrap_or_else(|| panic!("{kind:?} {part} joins {a} and {b}")))
+                    }
+                })
+                .collect();
+            for m in &meters {
+                s.watch_meter(m);
+            }
+            if matches!(kind, DemoKind::ButtonPoll | DemoKind::ButtonIrq) {
+                s.advance(8e-3).unwrap();
+                s.set_closed(true).unwrap();
+            }
+            s.advance(16e-3).unwrap();
+            for (&&(_, a, b, part, text, value), m) in rows.iter().zip(&meters) {
+                let r = s.read_meter(m);
+                let v = match &r {
+                    Reading::Volts(v) | Reading::Amps { amps: v, .. } => *v,
+                    other => panic!("{kind:?} {a}->{b} {part}: {other:?}"),
+                };
+                assert_eq!(r.display(), text, "{kind:?} {a}->{b} {part} display");
+                assert!(close(v, value), "{kind:?} {a}->{b} {part}: {v:e} vs recorded {value:e}");
+                checked += 1;
+            }
+        }
+        eprintln!("{checked} recorded meter readings matched");
+    }
+    #[test]
+    fn the_led_current_agrees_with_its_series_resistor() {
+        use of_instruments::{Probeable, Signal};
+        // E5c: the solver's diode current `i(D1)` against the series-R current,
+        // at max(1 nA, 1 ppm), on every demo, at the scope's sample instants.
+        let mut worst: f64 = 0.0;
+        let mut compared = 0;
+        for kind in [
+            DemoKind::Blink,
+            DemoKind::Dimmer,
+            DemoKind::Fade,
+            DemoKind::ButtonPoll,
+            DemoKind::ButtonIrq,
+        ] {
+            let Some(mut sim) = start(kind, StartOptions::default()) else {
+                continue;
+            };
+            let r: Signal = format!("i({})", sim.resistor_ref()).parse().unwrap();
+            let d: Signal = "i(D1)".parse().unwrap();
+            for k in 1..=400 {
+                sim.advance(k as f64 * 50e-6).unwrap();
+                let ir = sim.s.sample(&r).unwrap();
+                let id = sim.s.sample(&d).unwrap();
+                assert!(
+                    parity_close(ir, id),
+                    "{kind:?} t = {}: R {ir:e} vs D1 {id:e}",
+                    sim.time()
+                );
+                worst = worst.max((ir - id).abs());
+                compared += 1;
+            }
+        }
+        eprintln!("i(D1) vs i(R): {compared} samples, worst |diff| = {worst:e} A");
     }
 
     #[test]
@@ -1277,7 +1551,7 @@ mod tests {
         let peak = late.iter().fold(0.0_f64, |m, v| m.max((v - mean).abs()));
         assert!(mean > 1.5, "expected a mid-duty LED average, got {mean} mA");
         assert!(peak < 0.08, "ripple {peak} mA around {mean} mA at constant duty");
-        let vdd = s.circuit_readout().volts("vdd").unwrap();
+        let vdd = net_volts(&mut s, "vdd");
         let i_pot = vdd / 10_000.0;
         // The ESP32-C3's own supply current (`quiescent_a`, sized for 3.3 V).
         let i_chip = vdd * of_soc_esp32c3::QUIESCENT_A / 3.3;
@@ -1331,51 +1605,39 @@ mod tests {
 
     #[test]
     fn blink_led_series_current_matches_the_resistor_drop() {
-        let r_series = 330.0;
         let mut s = start(DemoKind::Blink, StartOptions::default()).expect("blink needs no ROM");
         s.advance(125e-6).unwrap();
-        let r = s.circuit_readout();
-        let i_r = r.unique_current("gpio8", "led_a").unwrap();
-        let i_d = r.unique_current("led_a", "0").unwrap();
-        assert_eq!(i_r.0, "R1");
-        assert_eq!(i_d.0, "D1");
-        let analytic = (r.volts("gpio8").unwrap() - r.volts("led_a").unwrap()) / r_series;
-        assert!((i_r.1 - analytic).abs() < 1e-9, "{} vs {analytic}", i_r.1);
-        assert!((i_d.1 - analytic).abs() < 1e-9, "{} vs {analytic}", i_d.1);
+        let i_r = amps_through(&mut s, "gpio8", "led_a", "R1");
+        let i_d = amps_through(&mut s, "led_a", "0", "D1");
+        let analytic = (net_volts(&mut s, "gpio8") - net_volts(&mut s, "led_a")) / R_SERIES;
+        assert!((i_r - analytic).abs() < 1e-9, "{i_r} vs {analytic}");
+        assert!((i_d - analytic).abs() < 1e-9, "{i_d} vs {analytic}");
         assert!((3.0..4.5).contains(&(analytic * 1e3)), "{} mA", analytic * 1e3);
         // Same current, opposite sign, if the leads are swapped.
-        assert!((r.unique_current("led_a", "gpio8").unwrap().1 + analytic).abs() < 1e-9);
+        assert!((amps_through(&mut s, "led_a", "gpio8", "R1") + analytic).abs() < 1e-9);
     }
 
     #[test]
     fn dimmer_pot_divider_voltage_matches_the_wiper() {
         let Some(mut s) = dimmer(0.5) else { return };
-        let r = s.circuit_readout();
-        let vdd = r.volts("vdd").unwrap();
-        let wiper = r.voltage_between("gpio2", "0").unwrap();
+        let vdd = net_volts(&mut s, "vdd");
+        let wiper = net_volts(&mut s, "gpio2");
         assert!((wiper - 0.5 * vdd).abs() < 0.05, "wiper {wiper} V, VDD {vdd} V");
-        // The two pot legs are unique branches and their currents match.
-        let i_a = r.unique_current("0", "gpio2").expect("pin 1 to wiper");
-        let i_b = r.unique_current("vdd", "gpio2").expect("pin 3 to wiper");
-        assert!(
-            (i_a.1 + i_b.1).abs() < 5e-6,
-            "unloaded wiper: {} A vs {} A",
-            i_a.1,
-            i_b.1
-        );
+        // The two pot legs read their own segment and their currents match.
+        let i_a = amps_through(&mut s, "0", "gpio2", "RV1");
+        let i_b = amps_through(&mut s, "vdd", "gpio2", "RV1");
+        assert!((i_a + i_b).abs() < 5e-6, "unloaded wiper: {i_a} A vs {i_b} A");
         s.set_supply(SupplySettings {
             volts: 5.0,
             ..SupplySettings::default()
         })
         .unwrap();
-        let r = s.circuit_readout();
-        let wiper = r.voltage_between("gpio2", "0").unwrap();
+        let wiper = net_volts(&mut s, "gpio2");
         assert!(
-            (wiper - 0.5 * r.volts("vdd").unwrap()).abs() < 0.08,
+            (wiper - 0.5 * net_volts(&mut s, "vdd")).abs() < 0.08,
             "wiper should scale with the rail: {wiper}"
         );
     }
-
     /// Changing the supply at t = 0, before the demo has advanced, keeps the
     /// rail at or under the new set point and the wiper under the rail at
     /// every step (it once spiked to 70 V for one step).
@@ -1389,7 +1651,7 @@ mod tests {
         .unwrap();
         let mut t = s.time();
         for _ in 0..200 {
-            let v = s.circuit_readout().volts("vdd").unwrap();
+            let v = net_volts(&mut s, "vdd");
             let w = s.wiper_volts().unwrap();
             assert!(v <= 5.0 + 1e-3, "rail {v} V at {t} s");
             assert!(w <= v + 1e-6, "wiper {w} V above the rail {v} V at {t} s");
