@@ -13,6 +13,7 @@ use crate::blink::Blink;
 use crate::button::{ButtonKind, ButtonSim};
 use crate::kind::DemoKind;
 use crate::meters::CircuitReadout;
+use crate::pins::IDLE_DRAW_RUNNING_A;
 use crate::supply::{SupplySettings, SupplyStatus};
 use crate::trace::{self, DEFAULT_VISIBLE_WINDOW};
 
@@ -193,19 +194,21 @@ impl Worker {
 
     fn finish_boot(&mut self) {
         let result = match self.kind {
-            DemoKind::Blink => Blink::with_supply(self.supply)
+            DemoKind::Blink => Blink::with_supply(self.supply, IDLE_DRAW_RUNNING_A)
                 .map(Running::Blink)
                 .map_err(|e| e.to_string()),
-            DemoKind::Dimmer => PwmSim::with_supply(PwmKind::Dimmer, self.pot, self.supply)
+            DemoKind::Dimmer => PwmSim::with_supply(PwmKind::Dimmer, self.pot, self.supply, IDLE_DRAW_RUNNING_A)
                 .map(Running::Pwm)
                 .map_err(|e| e.to_string()),
-            DemoKind::Fade => PwmSim::with_supply(PwmKind::Fade, self.pot, self.supply)
+            DemoKind::Fade => PwmSim::with_supply(PwmKind::Fade, self.pot, self.supply, IDLE_DRAW_RUNNING_A)
                 .map(Running::Pwm)
                 .map_err(|e| e.to_string()),
-            DemoKind::ButtonPoll => ButtonSim::with_supply(ButtonKind::Poll, self.supply)
-                .map(Running::Button)
-                .map_err(|e| e.to_string()),
-            DemoKind::ButtonIrq => ButtonSim::with_supply(ButtonKind::Irq, self.supply)
+            DemoKind::ButtonPoll => {
+                ButtonSim::with_supply(ButtonKind::Poll, self.supply, ButtonKind::Poll.idle_draw_a())
+                    .map(Running::Button)
+                    .map_err(|e| e.to_string())
+            }
+            DemoKind::ButtonIrq => ButtonSim::with_supply(ButtonKind::Irq, self.supply, ButtonKind::Irq.idle_draw_a())
                 .map(Running::Button)
                 .map_err(|e| e.to_string()),
         };

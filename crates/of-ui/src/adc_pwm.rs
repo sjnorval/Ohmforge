@@ -12,7 +12,7 @@ use of_parts::parse_part;
 use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte, adc_request_code, adc_value_code};
 
 use crate::meters::{self, CircuitReadout};
-use crate::pins::{add_pin_drivers, hook_pin};
+use crate::pins::{IDLE_DRAW_RUNNING_A, add_idle_draw, add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
 use crate::trace::{self, SampleClock, TraceBuf};
@@ -113,15 +113,28 @@ pub(crate) struct PwmSim {
 impl PwmSim {
     #[allow(dead_code)]
     pub(crate) fn new(kind: PwmKind, position: f64) -> Result<Self, Box<dyn Error>> {
-        Self::with_supply(kind, position, SupplySettings::default())
+        Self::with_supply(kind, position, SupplySettings::default(), IDLE_DRAW_RUNNING_A)
     }
 
-    pub(crate) fn with_supply(kind: PwmKind, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+    /// Build with `supply` and the ESP32-C3 drawing `idle_a` from VDD
+    /// (`IDLE_DRAW_RUNNING_A` as shipped, 0 for parity runs).
+    pub(crate) fn with_supply(
+        kind: PwmKind,
+        position: f64,
+        supply: SupplySettings,
+        idle_a: f64,
+    ) -> Result<Self, Box<dyn Error>> {
         let soc = booted(kind)?;
-        Self::from_soc(kind, soc, position, supply)
+        Self::from_soc(kind, soc, position, supply, idle_a)
     }
 
-    fn from_soc(kind: PwmKind, soc: Esp32c3, position: f64, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+    fn from_soc(
+        kind: PwmKind,
+        soc: Esp32c3,
+        position: f64,
+        supply: SupplySettings,
+        idle_a: f64,
+    ) -> Result<Self, Box<dyn Error>> {
         let supply = supply.sanitized();
         let position = position.clamp(0.0, 1.0);
         let mut lib = Library::new();
@@ -155,6 +168,14 @@ impl PwmSim {
         supply::add_supply(&mut board.circuit, vdd, &supply)?;
         let node = board.circuit.node("gpio8");
         add_pin_drivers(&mut board.circuit, GPIO_LED, node, vdd, soc.pin(usize::from(GPIO_LED)))?;
+        if kind == PwmKind::Dimmer {
+            // The ADC pin's own pad, as on the real chip and the engine's U1:
+            // idle, 1 GΩ to ground (within the datasheet's 50 nA input-current
+            // limit, I_IH / I_IL, Table 5-4).
+            let wiper = board.circuit.node("gpio2");
+            add_pin_drivers(&mut board.circuit, GPIO_POT, wiper, vdd, soc.pin(usize::from(GPIO_POT)))?;
+        }
+        add_idle_draw(&mut board.circuit, vdd, idle_a)?;
 
         let circuit = std::mem::replace(&mut board.circuit, of_analog::Circuit::new());
         let mut analog = AnalogEngine::new(
@@ -169,6 +190,7 @@ impl PwmSim {
         )?;
         hook_pin(&mut analog, GPIO_LED);
         if kind == PwmKind::Dimmer {
+            hook_pin(&mut analog, GPIO_POT);
             analog.sample_on(adc_request_code(GPIO_POT), WIPER_NODE, 0, adc_value_code(GPIO_POT))?;
         }
 
@@ -179,6 +201,10 @@ impl PwmSim {
             target: 1,
         });
         if kind == PwmKind::Dimmer {
+            cpu.link_pin(PinLink {
+                pin: GPIO_POT,
+                target: 1,
+            });
             cpu.link_adc(GPIO_POT, 1);
         }
 
@@ -630,7 +656,7 @@ mod tests {
             current_limit: 0.5e-3,
             ..SupplySettings::default()
         };
-        let mut sim = match PwmSim::with_supply(PwmKind::Dimmer, 1.0, settings) {
+        let mut sim = match PwmSim::with_supply(PwmKind::Dimmer, 1.0, settings, crate::pins::IDLE_DRAW_RUNNING_A) {
             Ok(sim) => sim,
             Err(e) => {
                 let msg = e.to_string();
@@ -679,11 +705,13 @@ mod tests {
         );
         let vdd = sim.circuit_readout().volts("vdd").unwrap();
         let i_pot = vdd / 10_000.0;
+        // The ESP32-C3's own supply current (`u1_iq`, sized for 3.3 V).
+        let i_chip = vdd * IDLE_DRAW_RUNNING_A / 3.3;
         let i_psu = sim.supply_status().display_amps();
         let i_led = sim.average_ma() * 1e-3;
         assert!(
-            (i_psu - (i_led + i_pot)).abs() < 2e-4,
-            "averaged PSU {i_psu} A should be LED {i_led} A plus pot {i_pot} A"
+            (i_psu - (i_led + i_pot + i_chip)).abs() < 2e-4,
+            "averaged PSU {i_psu} A should be LED {i_led} A plus pot {i_pot} A plus ESP32-C3 {i_chip} A"
         );
     }
 

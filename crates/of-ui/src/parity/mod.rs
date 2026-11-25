@@ -7,15 +7,13 @@
 //! the circuit-file demos must match them within the tolerances agreed for
 //! E4 (exact digital outputs, 1 ns edge times, `max(1 nA, 1 ppm)` analog).
 //!
-//! Two accepted exceptions (Stefan, 25 November 2026; RFC 0003, Determinism):
-//! - the dimmer's PSU current may differ by 3.5 nA (`session_tolerance`):
-//!   the engine's U1 has a 1 GΩ pad on the ADC pin GPIO2 that the hand-wired
-//!   dimmer lacks;
-//! - against the goldens, samples off the 50 µs grid (LEDC-edge samples in
-//!   the fade demo) get 1 % relative (`Tolerance::GOLDEN`), because the
-//!   goldens are recorded on Linux and other platforms' libm moves them. Each
-//!   engine run is also compared with the hand-wired demo on the same machine
-//!   at the strict `Tolerance::PARITY`.
+//! One accepted exception (Stefan, 25 November 2026; RFC 0003, Determinism):
+//! against the goldens, samples off the 50 µs grid (LEDC-edge samples in the
+//! fade demo) get 1 % relative (`Tolerance::GOLDEN`), because the goldens are
+//! recorded on Linux and other platforms' libm moves them. Each engine run is
+//! also compared with the hand-wired demo on the same machine at the strict
+//! `Tolerance::PARITY`, with no per-demo exceptions: the hand-wired dimmer has
+//! the ADC pin's 1 GΩ pad on GPIO2 like the engine's U1 (E4c).
 //!
 //! Three engine paths are checked against the same goldens and, at the
 //! strict tolerance, against the hand-wired demo on the same machine:
@@ -223,18 +221,6 @@ fn every_demo_has_a_golden() {
     }
 }
 
-/// `base`, except one known, explained deviation (to be confirmed by
-/// Stefan): the engine's U1 puts a GPIO pad on the dimmer's ADC pin GPIO2
-/// (1 GΩ to ground while the pad is idle), which the hand-wired dimmer leaves
-/// out. The wiper then leaks `v(wiper) / 1 GΩ`, at most 3.3 nA, into the PSU
-/// current. Everything digital stays exact.
-fn session_tolerance(demo: Demo, base: Tolerance) -> Tolerance {
-    match demo {
-        Demo::Dimmer => Tolerance { abs_ma: 3.5e-6, ..base },
-        _ => base,
-    }
-}
-
 fn run_session(demo: Demo) {
     let mut sim = match session::start(demo) {
         Ok(sim) => sim,
@@ -246,12 +232,12 @@ fn run_session(demo: Demo) {
     let golden = demo
         .golden()
         .unwrap_or_else(|| panic!("no golden for {}; run with OF_BLESS=1", demo.name()));
-    if let Err(e) = compare(&golden, &trace, session_tolerance(demo, Tolerance::GOLDEN)) {
+    if let Err(e) = compare(&golden, &trace, Tolerance::GOLDEN) {
         panic!("{} on Session does not match the legacy golden: {e}", demo.name());
     }
     // The agreed tolerance, against the hand-wired demo on this machine.
     let legacy = play(legacy::start(demo).expect("legacy").as_mut(), &demo.script()).expect("legacy run");
-    if let Err(e) = compare_traces(&legacy, &trace, session_tolerance(demo, Tolerance::PARITY)) {
+    if let Err(e) = compare_traces(&legacy, &trace, Tolerance::PARITY) {
         panic!("{} on Session does not match the hand-wired demo: {e}", demo.name());
     }
 }
@@ -292,14 +278,14 @@ fn run_file(demo: Demo) {
     let golden = demo
         .golden()
         .unwrap_or_else(|| panic!("no golden for {}; run with OF_BLESS=1", demo.name()));
-    if let Err(e) = compare(&golden, &trace, session_tolerance(demo, Tolerance::GOLDEN)) {
+    if let Err(e) = compare(&golden, &trace, Tolerance::GOLDEN) {
         panic!(
             "{} from its circuit file does not match the legacy golden: {e}",
             demo.name()
         );
     }
     let legacy = play(legacy::start(demo).expect("legacy").as_mut(), &demo.script()).expect("legacy run");
-    if let Err(e) = compare_traces(&legacy, &trace, session_tolerance(demo, Tolerance::PARITY)) {
+    if let Err(e) = compare_traces(&legacy, &trace, Tolerance::PARITY) {
         panic!(
             "{} from its circuit file does not match the hand-wired demo: {e}",
             demo.name()

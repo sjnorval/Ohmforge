@@ -6,16 +6,18 @@ use super::{Demo, DemoRun, Raw, Step};
 use crate::adc_pwm::{PwmKind, PwmSim};
 use crate::blink::Blink;
 use crate::button::{ButtonKind, ButtonSim};
+use crate::supply::SupplySettings;
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// Build the hand-wired simulation for `demo` and start its edge log.
+/// Build the hand-wired simulation for `demo`, with the ESP32-C3's supply
+/// current off as in every parity run, and start its edge log.
 pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
     Ok(match demo {
         Demo::Blink => {
-            let mut s = Blink::new().map_err(err)?;
+            let mut s = Blink::with_supply(SupplySettings::default(), 0.0).map_err(err)?;
             s.parity_start();
             Box::new(s)
         }
@@ -25,7 +27,7 @@ pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
             } else {
                 PwmKind::Fade
             };
-            let mut s = PwmSim::new(kind, 0.5).map_err(err)?;
+            let mut s = PwmSim::with_supply(kind, 0.5, SupplySettings::default(), 0.0).map_err(err)?;
             s.parity_start();
             Box::new(s)
         }
@@ -35,7 +37,7 @@ pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
             } else {
                 ButtonKind::Irq
             };
-            let mut s = ButtonSim::new(kind).map_err(err)?;
+            let mut s = ButtonSim::with_supply(kind, SupplySettings::default(), 0.0).map_err(err)?;
             s.parity_start();
             Box::new(s)
         }
