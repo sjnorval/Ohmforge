@@ -1,6 +1,6 @@
 # RFC 0003: Circuit file format (engine E4)
 
-- **Status:** Draft
+- **Status:** Implemented (E4a #73, E4b #77 and #78, E4c #79, E4d #80)
 - **Author:** Stefan Norval \<sjnorval@gmail.com\>
 - **Date:** 2026-11-25
 - **Tracking issue:** [#48](https://github.com/sjnorval/Ohmforge/issues/48)
@@ -338,5 +338,13 @@ live `position`. The desktop builds the files with the parts embedded by
 the window title stays "Ohmforge"). The hand-wired boards draw the same
 ESP32-C3 supply current and have the same GPIO2 pad (see Determinism), so both
 paths show the same readings.
+
+Settled in E4d: the circuit files are the desktop's only path. The
+`--circuit-files` flag, `OF_CIRCUIT_FILES` and the `circuit_files` preference
+are removed (an old preference key is ignored); the hand-wired boards and
+simulations are deleted. The trace goldens remain the parity reference, now
+blessed from the circuit files (byte for byte unchanged at the switch-over),
+and the registry-built `Session` must match the files at the strict
+tolerance on the same machine.
 
 Still open: whether `bench.psu` gets a `bom = false` marker before E6.
