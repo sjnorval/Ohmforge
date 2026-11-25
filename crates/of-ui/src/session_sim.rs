@@ -31,7 +31,7 @@ use crate::adc_pwm::{self, PwmKind};
 use crate::button::{self, ButtonKind};
 use crate::kind::DemoKind;
 use crate::supply::{RATED_MAX_V, RATED_MIN_V, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace::{self, SampleClock, TraceBuf};
+use crate::trace::{self, TraceBuf};
 
 /// Display-average window of the PWM demos (as `PwmSim`).
 const PWM_AVG_WINDOW: f64 = 2e-3;
@@ -224,7 +224,6 @@ pub(crate) struct SessionSim {
     meters: MeasurementService,
     meter_ref: ChannelId,
     psu_samples: TraceBuf,
-    clock: SampleClock,
     /// Button loop: next grid sample (relative).
     next_sample: SimTime,
     closed: bool,
@@ -277,7 +276,6 @@ impl SessionSim {
             meters,
             meter_ref,
             psu_samples: TraceBuf::default_scope(),
-            clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             next_sample: SimTime::ZERO,
             closed: false,
             bounce: BounceSettings::default(),
@@ -290,8 +288,8 @@ impl SessionSim {
         }
         d.record_sample()?;
         if style == Loop::Button {
-            d.clock.take(d.time());
-            d.next_sample = SimTime::from_secs_f64(d.clock.next().max(0.0));
+            d.meas.take_due(d.time());
+            d.next_sample = SimTime::from_secs_f64(d.meas.next_due().max(0.0));
         }
         Ok(d)
     }
@@ -391,14 +389,14 @@ impl SessionSim {
     fn advance_blink(&mut self, seconds: f64) -> Result<(), String> {
         let until = SimTime::from_secs_f64(seconds.max(0.0));
         while self.s.now() < until {
-            let grid = SimTime::from_secs_f64(self.clock.next().max(0.0));
+            let grid = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
             let next = grid.min(until);
             if next > self.s.now() {
                 self.run_to(next)?;
             } else if self.s.now() < until {
                 self.run_to(until)?;
             }
-            if self.clock.take(self.time()) {
+            if self.meas.take_due(self.time()) {
                 self.record_sample()?;
             }
         }
@@ -410,7 +408,7 @@ impl SessionSim {
         let origin = self.s.origin();
         while self.s.now() < until {
             let now = self.s.now();
-            let grid = SimTime::from_secs_f64(self.clock.next().max(0.0));
+            let grid = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
             let pwm = self
                 .cpu()
                 .soc
@@ -419,7 +417,7 @@ impl SessionSim {
                 .next_event()
                 .map(|t| SimTime(t.0.saturating_sub(origin.0)));
             if grid <= now {
-                if self.clock.take(self.time()) {
+                if self.meas.take_due(self.time()) {
                     self.record_sample()?;
                 } else if now < until {
                     let nudge = now.saturating_add(SimTime::from_ns(1)).min(until);
@@ -439,7 +437,7 @@ impl SessionSim {
             } else if self.s.now() < until {
                 self.run_to(until)?;
             }
-            let hit_grid = self.clock.take(self.time());
+            let hit_grid = self.meas.take_due(self.time());
             let hit_pwm = pwm.is_some_and(|p| p <= self.s.now());
             if hit_grid || hit_pwm {
                 self.record_sample()?;
@@ -456,10 +454,10 @@ impl SessionSim {
                 self.run_to(next)?;
             }
             if self.s.now() >= self.next_sample {
-                if self.clock.take(self.time()) {
+                if self.meas.take_due(self.time()) {
                     self.record_sample()?;
                 }
-                self.next_sample = SimTime::from_secs_f64(self.clock.next().max(0.0));
+                self.next_sample = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
                 if self.next_sample <= self.s.now() {
                     self.next_sample = self.s.now().saturating_add(SimTime::from_ns(1));
                 }
@@ -472,9 +470,8 @@ impl SessionSim {
         let now = self.time();
         self.meas.set_visible_window(visible, now);
         self.psu_samples.set_visible_window(visible);
-        self.clock.set_step(self.led_ring().sample_step(), now);
         if self.style == Loop::Button {
-            self.next_sample = SimTime::from_secs_f64(self.clock.next().max(0.0));
+            self.next_sample = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
         }
     }
 
