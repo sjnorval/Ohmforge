@@ -7,8 +7,11 @@
 //! - [`parse`] reads a file and runs the structural checks ([`diagnostics`]);
 //!   every error carries a 1-based line and column ([`CircuitError`]).
 //! - [`save`] writes the canonical form; canonical files round-trip byte for byte.
-//! - Feature `engine`: [`library`] checks parts, pins and firmware hashes.
-//! - Feature `fs`: [`fs`] reads files and the parts directory from disk.
+//! - Feature `engine`: [`library`] checks parts, pins and firmware hashes;
+//!   [`build`] turns a file into an `of_engine` session through the model
+//!   registry; [`embedded`] resolves firmware from memory.
+//! - Feature `fs`: [`fs`] reads files, the parts directory and the fetched
+//!   mask ROM from disk.
 //!
 //! The default build has no host I/O and builds for `wasm32-unknown-unknown`.
 //! The files themselves are data, licensed CC-BY-SA-4.0 (`circuits/LICENSE.md`).
@@ -19,6 +22,10 @@ mod parse;
 mod save;
 mod validate;
 
+#[cfg(feature = "engine")]
+pub mod build;
+#[cfg(feature = "engine")]
+pub mod embedded;
 #[cfg(feature = "fs")]
 pub mod fs;
 #[cfg(feature = "engine")]

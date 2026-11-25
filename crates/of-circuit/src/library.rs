@@ -43,11 +43,48 @@ impl PartsIndex {
     }
 }
 
-/// Reads files a circuit refers to (firmware, partition tables).
+/// Reads files a circuit refers to (firmware, partition tables) and, for
+/// `boot = "rom"`, the chip's fetched mask ROM and bootloader.
 pub trait Resolver {
     /// Bytes of `path` as written in the file (relative to the circuit file,
     /// `/` separated). The error text names the file.
     fn read(&self, path: &str) -> Result<Vec<u8>, String>;
+
+    /// Mask ROM ELF and second-stage bootloader for library part `part`
+    /// (`boot = "rom"`). They are fetched, never in the repository; the
+    /// default has none.
+    fn rom(&self, part: &str) -> Result<RomFiles, String> {
+        Err(format!(
+            "no mask ROM is available for {part}: this resolver does not provide one"
+        ))
+    }
+
+    /// An already booted chip for a `boot = "rom"` placement, for example a
+    /// desktop pre-boot cache keyed by the app hash and the ready text.
+    /// `Ok(None)` (the default) boots from the ROM.
+    fn booted(&self, _part: &str, _app_sha256: &str, _ready_text: &str) -> Result<Option<of_engine::Firmware>, String> {
+        Ok(None)
+    }
+}
+
+/// A chip's mask ROM ELF and second-stage bootloader ELF.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RomFiles {
+    /// Mask ROM ELF.
+    pub rom: Vec<u8>,
+    /// Second-stage bootloader ELF.
+    pub bootloader: Vec<u8>,
+}
+
+impl std::fmt::Debug for RomFiles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RomFiles {{ rom: {} bytes, bootloader: {} bytes }}",
+            self.rom.len(),
+            self.bootloader.len()
+        )
+    }
 }
 
 /// Lower-case hex SHA-256.
@@ -57,7 +94,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 /// The part pin with this name (case-insensitive). Pin numbers do not match:
 /// circuit files use names.
-fn pin_named<'a>(part: &'a PartFile, name: &str) -> Option<&'a str> {
+pub(crate) fn pin_named<'a>(part: &'a PartFile, name: &str) -> Option<&'a str> {
     part.pins
         .iter()
         .find(|p| p.name.eq_ignore_ascii_case(name))

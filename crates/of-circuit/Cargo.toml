@@ -17,11 +17,22 @@ serde.workspace = true
 toml.workspace = true
 of-parts = { workspace = true, optional = true }
 of-firmware = { workspace = true, optional = true }
+of-core = { workspace = true, optional = true }
+of-component-api = { workspace = true, optional = true }
+of-engine = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The integration tests need every feature; `cargo test --workspace` alone
+# would only enable the features other members ask for.
+of-circuit = { path = ".", features = ["fs"] }
+of-components.workspace = true
+of-soc-esp32c3.workspace = true
 
 [features]
 default = []
-# Checks against the parts library and firmware hashes through a `Resolver`.
-# Engine E4b adds the circuit-file -> `of_engine::Session` builder behind this feature.
-engine = ["dep:of-parts", "dep:of-firmware"]
-# Host file system: `FsResolver`, file loading and the parts-directory loader. Not for wasm32.
+# Checks against the parts library and firmware hashes through a `Resolver`,
+# the circuit-file -> `of_engine` builder and the in-memory resolver.
+engine = ["dep:of-parts", "dep:of-firmware", "dep:of-core", "dep:of-component-api", "dep:of-engine"]
+# Host file system: `FsResolver`, file loading, the parts-directory loader and
+# the fetched-ROM lookup. Not for wasm32.
 fs = ["engine"]
