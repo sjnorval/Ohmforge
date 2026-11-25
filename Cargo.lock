@@ -2043,8 +2043,12 @@ dependencies = [
  "of-analog",
  "of-bom",
  "of-circuit",
+ "of-components",
+ "of-core",
+ "of-engine",
  "of-netlist",
  "of-parts",
+ "of-soc-esp32c3",
 ]
 
 [[package]]
