@@ -1,8 +1,7 @@
 //! Lightweight counters for live-playback profiling (not on the hot path).
 
-use of_analog::AnalogEngine;
 use of_analog::results::TranStats;
-use of_core::{EngineId, Kernel};
+use of_engine::Session;
 use of_soc_esp32c3::Esp32c3Engine;
 
 /// Analog solver and hart counters at one instant.
@@ -21,17 +20,15 @@ pub(crate) struct PerfSnapshot {
 }
 
 impl PerfSnapshot {
-    pub(crate) fn from_kernel(kernel: &mut Kernel, cpu: EngineId, analog: EngineId, time: f64, samples: usize) -> Self {
-        let st: TranStats = kernel
-            .engine_as::<AnalogEngine>(analog)
-            .expect("analog solver is not registered")
-            .stats();
-        let hart = &kernel
-            .engine_as::<Esp32c3Engine>(cpu)
+    /// The counters of a running demo session (U1 is the ESP32-C3).
+    pub(crate) fn from_session(session: &mut Session, time: f64, samples: usize) -> Self {
+        let st: TranStats = session.analog().stats();
+        let csr = session
+            .engine_as::<Esp32c3Engine>("U1")
             .expect("registered ESP32-C3")
             .soc
-            .hart;
-        let csr = hart.csrs();
+            .hart
+            .csrs();
         Self {
             time,
             accepted: st.accepted,

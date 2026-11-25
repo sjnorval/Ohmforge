@@ -1,17 +1,16 @@
 //! The desktop demos on [`of_engine::Session`], built from their circuit
-//! files (engine E4c; `--circuit-files`).
+//! files (engine E4c; the desktop's only path since E4d).
 //!
-//! [`SessionSim`] runs a built `Session` with the hand-wired demos' sampling
-//! loops (scope grid, LEDC events, the button's grid) and offers the same
-//! methods the live worker calls on `Blink`, `PwmSim` and `ButtonSim`. The
-//! trace parity tests (`parity`) run the same type, so the desktop's file path
-//! is the code the goldens check. [`start`] builds a demo from the embedded
+//! [`SessionSim`] runs a built `Session` with the desktop's sampling loops
+//! (scope grid, LEDC events, the button's grid; the loops of the hand-wired
+//! demos it replaced) and offers the methods the live worker calls. The trace
+//! parity tests (`parity`) run the same type, so the desktop's path is the
+//! code the goldens check. [`start`] builds a demo from the embedded
 //! `circuits/demos` file with the embedded parts and firmware; the ROM-booted
-//! chips come from the same pre-boot caches the hand-wired demos use.
+//! chips come from the pre-boot caches in `adc_pwm` and `button`.
 //!
 //! The shipped files keep the ESP32-C3's supply current (`quiescent_a`, from
-//! datasheet v2.5 Table 5-8), as the hand-wired boards do, so both paths read
-//! the same.
+//! datasheet v2.5 Table 5-8).
 
 use std::sync::{Arc, OnceLock};
 
@@ -105,7 +104,7 @@ fn registry(file: &CircuitFile, lib: Arc<Library>) -> Registry {
     reg
 }
 
-/// The pre-booted chip of a ROM demo (the hand-wired demos' caches), or
+/// The pre-booted chip of a ROM demo (the `adc_pwm` / `button` caches), or
 /// `None` for the direct-boot blink. The error is the missing-ROM message.
 pub(crate) fn booted(kind: DemoKind) -> Result<Option<Firmware>, String> {
     let soc = match kind {
@@ -169,7 +168,7 @@ pub(crate) fn build_session(kind: DemoKind, opts: StartOptions) -> Result<Sessio
     let (index, lib) = parts()?;
     let res = demos::resolver().with_booted(move |_, _, _| booted(kind));
     let built = build(d.text, &file, index, &registry(&file, Arc::clone(lib)), &res).map_err(|e| {
-        // A missing ROM shows the desktop's own message, as on the hand-wired path.
+        // A missing ROM shows the desktop's own message.
         match booted(kind) {
             Err(rom) => rom,
             Ok(_) => format!("{}: {e}", d.path),
@@ -199,7 +198,7 @@ impl Loop {
     }
 }
 
-/// A demo running on [`Session`] with the hand-wired sampling loop.
+/// A demo running on [`Session`] with the desktop's sampling loop.
 pub(crate) struct SessionSim {
     kind: DemoKind,
     s: Session,
@@ -446,7 +445,7 @@ impl SessionSim {
         self.instant_ma()
     }
 
-    /// Display-average LED current (mA), as the hand-wired demo of this kind.
+    /// Display-average LED current (mA), averaged as for this kind.
     pub(crate) fn average_ma(&self) -> f64 {
         let pts = self.samples.to_vec();
         match self.style {
@@ -661,6 +660,20 @@ impl SessionSim {
         }
     }
 
+    /// Solver and hart counters for the realtime reports.
+    #[cfg(all(feature = "gui", test))]
+    pub(crate) fn perf_snapshot(&mut self) -> crate::stats::PerfSnapshot {
+        let time = self.time();
+        let samples = self.samples.len();
+        crate::stats::PerfSnapshot::from_session(&mut self.s, time, samples)
+    }
+
+    /// Capacity of the scope ring.
+    #[cfg(all(feature = "gui", test))]
+    pub(crate) fn trace_capacity(&self) -> usize {
+        self.samples.capacity()
+    }
+
     /// The running session (parity steps set raw host params).
     pub(crate) fn session(&mut self) -> &mut Session {
         &mut self.s
@@ -670,10 +683,7 @@ impl SessionSim {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adc_pwm::PwmSim;
-    use crate::blink::Blink;
-    use crate::button::ButtonSim;
-    use crate::parity::skip_without_rom;
+    use crate::parity::{Demo, registry_session, skip_without_rom};
 
     const KINDS: [DemoKind; 5] = [
         DemoKind::Blink,
@@ -755,97 +765,29 @@ mod tests {
         Some(file_view(&mut s))
     }
 
-    fn run_hand_wired(kind: DemoKind, idle_draw: bool) -> View {
-        let supply = SupplySettings::default();
-        match kind {
-            DemoKind::Blink => {
-                let idle = if idle_draw {
-                    crate::pins::IDLE_DRAW_RUNNING_A
-                } else {
-                    0.0
-                };
-                let mut s = Blink::with_supply(supply, idle).unwrap();
-                for t in [1e-3, 2e-3, 3e-3] {
-                    s.advance(t).unwrap();
-                }
-                View {
-                    time: s.time(),
-                    instant: Some(s.current_ma().unwrap()),
-                    average: s.average_ma(),
-                    trace: s.trace(),
-                    duty: s.pwm_duty_freq(),
-                    uart: text(s.uart_bytes()),
-                    supply: s.supply_status(),
-                    readout: s.circuit_readout(),
-                    wiper: None,
-                    adc: None,
-                    button: None,
-                }
-            }
-            DemoKind::Dimmer | DemoKind::Fade => {
-                let pk = if kind == DemoKind::Dimmer {
-                    PwmKind::Dimmer
-                } else {
-                    PwmKind::Fade
-                };
-                let idle = if idle_draw {
-                    crate::pins::IDLE_DRAW_RUNNING_A
-                } else {
-                    0.0
-                };
-                let mut s = PwmSim::with_supply(pk, 0.5, supply, idle).unwrap();
-                s.advance(1e-3).unwrap();
-                if kind == DemoKind::Dimmer {
-                    s.set_position(0.8).unwrap();
-                }
-                s.advance(2e-3).unwrap();
-                s.advance(3e-3).unwrap();
-                View {
-                    time: s.time(),
-                    instant: None,
-                    average: s.average_ma(),
-                    trace: s.trace(),
-                    duty: s.pwm_duty_freq(),
-                    uart: text(s.uart_bytes()),
-                    supply: s.supply_status(),
-                    readout: s.circuit_readout(),
-                    wiper: (kind == DemoKind::Dimmer).then(|| s.wiper_volts().unwrap()),
-                    adc: if kind == DemoKind::Dimmer {
-                        s.last_adc_uart()
-                    } else {
-                        None
-                    },
-                    button: None,
-                }
-            }
-            DemoKind::ButtonPoll | DemoKind::ButtonIrq => {
-                let bk = if kind == DemoKind::ButtonPoll {
-                    ButtonKind::Poll
-                } else {
-                    ButtonKind::Irq
-                };
-                let idle = if idle_draw { bk.idle_draw_a() } else { 0.0 };
-                let mut s = ButtonSim::with_supply(bk, supply, idle).unwrap();
-                s.advance(1e-3).unwrap();
-                s.set_closed(true).unwrap();
-                s.advance(2e-3).unwrap();
-                s.set_closed(false).unwrap();
-                s.advance(3e-3).unwrap();
-                View {
-                    time: s.time(),
-                    instant: Some(s.current_ma().unwrap()),
-                    average: s.average_ma(),
-                    trace: s.trace(),
-                    duty: (None, None),
-                    uart: text(s.uart_bytes()),
-                    supply: s.supply_status(),
-                    readout: s.circuit_readout(),
-                    wiper: None,
-                    adc: None,
-                    button: Some(s.button_volts().unwrap()),
-                }
-            }
+    /// The scripted run of [`run_file`] on the demo placed through the model
+    /// registry in Rust (`parity::session`; U1's supply current off).
+    fn run_registry(kind: DemoKind) -> Option<View> {
+        let demo = Demo::ALL.into_iter().find(|d| d.kind() == kind).expect("demo");
+        let session = match registry_session(demo) {
+            Ok(s) => s,
+            Err(e) if skip_without_rom(&e) => return None,
+            Err(e) => panic!("{kind:?}: {e}"),
+        };
+        let mut s = SessionSim::run(kind, session).unwrap();
+        s.advance(1e-3).unwrap();
+        if kind == DemoKind::Dimmer {
+            s.set_position(0.8).unwrap();
         }
+        if kind.has_button() {
+            s.set_closed(true).unwrap();
+        }
+        s.advance(2e-3).unwrap();
+        if kind.has_button() {
+            s.set_closed(false).unwrap();
+        }
+        s.advance(3e-3).unwrap();
+        Some(file_view(&mut s))
     }
 
     /// RFC 0003's analog rule: `max(floor, 1 ppm)`. `floor` is 1 nA in the
@@ -866,18 +808,20 @@ mod tests {
     const AMPS: f64 = 1e-9;
     const VOLTS: f64 = 1e-9;
 
-    /// The file path and the hand-wired path, both with or both without the
-    /// ESP32-C3's supply current, show the same LED current, scope trace, PWM
-    /// readout, UART text, PSU face and meter readout (node voltages, branch
-    /// names and currents), within RFC 0003's `max(1 nA, 1 ppm)` and with
-    /// no per-demo exceptions.
-    fn file_reads_like_the_hand_wired_demo(idle_draw: bool) {
+    /// The circuit file and the same circuit placed through the registry in
+    /// Rust (both without the ESP32-C3's supply current) show the same LED
+    /// current, scope trace, PWM readout, UART text, PSU face and meter
+    /// readout (node voltages, branch names and currents), within RFC 0003's
+    /// `max(1 nA, 1 ppm)` and with no per-demo exceptions. Since E4d this
+    /// replaces the comparison with the deleted hand-wired demos.
+    #[test]
+    fn every_demo_from_its_file_reads_like_the_registry_built_demo() {
         for kind in KINDS {
-            let Some(file) = run_file(kind, idle_draw) else {
+            let Some(file) = run_file(kind, false) else {
                 continue;
             };
-            let hand = run_hand_wired(kind, idle_draw);
-            let k = format!("{kind:?} (idle draw {idle_draw})");
+            let hand = run_registry(kind).expect("ROM present for the file run");
+            let k = format!("{kind:?}");
             assert_eq!(file.time, hand.time, "{k} time");
             assert!(
                 close_opt(file.instant, hand.instant, MA),
@@ -962,18 +906,6 @@ mod tests {
         }
     }
 
-    /// As shipped: both paths draw the ESP32-C3's datasheet supply current.
-    #[test]
-    fn every_demo_from_its_file_reads_like_the_hand_wired_demo() {
-        file_reads_like_the_hand_wired_demo(true);
-    }
-
-    /// As in the parity runs: the supply current off on both paths.
-    #[test]
-    fn every_demo_from_its_file_reads_like_the_hand_wired_demo_without_idle_draw() {
-        file_reads_like_the_hand_wired_demo(false);
-    }
-
     /// The ESP32-C3's 23 mA (blink) moves only the PSU current (by just under
     /// 23 mA, as the rail sits under 3.3 V) and the rail (23 mA × 0.1 Ω).
     #[test]
@@ -1039,5 +971,331 @@ mod tests {
             assert_eq!(d.path, format!("circuits/demos/{}.circuit.toml", file_stem(kind)));
             assert!(parsed(kind).is_ok(), "{}", d.path);
         }
+    }
+    // Ported in E4d from the deleted hand-wired sims (`blink::simulation`,
+    // `adc_pwm::PwmSim`, `button::ButtonSim`); same scripts and bounds, on
+    // the shipped files.
+
+    const LED_ON_MA: f64 = 1.0;
+    const VDD: f64 = 3.3;
+
+    fn start(kind: DemoKind, opts: StartOptions) -> Option<SessionSim> {
+        match SessionSim::start(kind, opts) {
+            Ok(s) => Some(s),
+            Err(e) if skip_without_rom(&e) => None,
+            Err(e) => panic!("{kind:?}: {e}"),
+        }
+    }
+
+    fn dimmer(position: f64) -> Option<SessionSim> {
+        start(
+            DemoKind::Dimmer,
+            StartOptions {
+                position,
+                ..StartOptions::default()
+            },
+        )
+    }
+
+    fn adc_readings(s: &mut SessionSim) -> Vec<(u32, u32)> {
+        text(s.uart_bytes())
+            .lines()
+            .filter_map(|l| {
+                let rest = l.strip_prefix("adc: ")?;
+                let (mv, duty) = rest.split_once(" duty: ")?;
+                Some((mv.parse().ok()?, duty.parse().ok()?))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn blink_advances_firmware_and_records_led_current() {
+        let end = 2.6e-3;
+        let mut s = start(DemoKind::Blink, StartOptions::default()).expect("blink needs no ROM");
+        assert_eq!(s.time(), 0.0);
+        assert!(s.uart_bytes().is_empty());
+        s.advance(125e-6).unwrap();
+        assert!((3.0..4.5).contains(&s.current_ma().unwrap()));
+        assert_eq!(text(s.uart_bytes()), "ohmforge blinky\n");
+        s.advance(375e-6).unwrap();
+        assert!(s.current_ma().unwrap().abs() < 1e-3);
+        s.advance(625e-6).unwrap();
+        assert!((3.0..4.5).contains(&s.current_ma().unwrap()));
+        s.advance(end).unwrap();
+        let trace = s.trace();
+        assert!(trace.iter().any(|&(_, ma)| ma > LED_ON_MA), "LED never on: {trace:?}");
+        assert!(trace.iter().any(|&(_, ma)| ma.abs() < 1e-3), "LED never off: {trace:?}");
+        assert!((trace.last().unwrap().0 - end).abs() < 1e-9);
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn monitor_receives_blink_banner_when_synced() {
+        let mut monitor = of_instruments::SerialMonitor::new();
+        let mut s = start(DemoKind::Blink, StartOptions::default()).expect("blink needs no ROM");
+        s.advance(125e-6).unwrap();
+        for b in s.uart_bytes() {
+            monitor.push_rx(b.at, &[b.byte]);
+        }
+        assert_eq!(monitor.text_device_to_host(), "ohmforge blinky\n");
+    }
+
+    #[test]
+    fn push_uart_rx_is_readable_from_fifo() {
+        let mut s = start(DemoKind::Blink, StartOptions::default()).expect("blink needs no ROM");
+        s.push_uart_rx(b"Z");
+        // 8N1 at a typical baud is ~87 µs per byte; wait a couple of frames.
+        let baud = s.uart_baud().unwrap_or(115_200.0).max(1.0);
+        s.advance(s.time() + 20.0 / baud).unwrap();
+        assert_eq!(s.cpu().soc.bus.uart0.pop_rx(), b'Z');
+    }
+
+    #[test]
+    fn tiny_advances_keep_the_scope_until_the_left_edge() {
+        let mut s = start(DemoKind::Blink, StartOptions::default()).expect("blink needs no ROM");
+        let visible = crate::trace::DEFAULT_VISIBLE_WINDOW;
+        // Many slices much smaller than SAMPLE_STEP, as at a very low playback speed.
+        let (end, dt) = (0.20, 5e-6);
+        let mut t = s.time();
+        while t < end {
+            t += dt;
+            s.advance(t).unwrap();
+        }
+        let pts = s.trace();
+        let left = s.time() - visible;
+        assert!(!pts.is_empty(), "empty trace");
+        assert!(
+            pts[0].0 <= left + crate::trace::SAMPLE_STEP * 2.0,
+            "cleared too early: first {} left {left}",
+            pts[0].0
+        );
+        let on_screen = pts.iter().filter(|(tt, _)| *tt >= left - 1e-12).count();
+        assert!(on_screen > 100, "sparse on-screen trace: {on_screen}");
+    }
+
+    #[test]
+    fn dimmer_reads_the_pot_and_the_slider_changes_the_duty() {
+        let Some(mut s) = dimmer(0.3) else { return };
+        assert!((s.wiper_volts().unwrap() - 0.3 * VDD).abs() < 0.05);
+        s.advance(15e-3).unwrap();
+        let mid = adc_readings(&mut s);
+        assert!(
+            mid.iter()
+                .any(|&(mv, _)| (f64::from(mv) - 0.3 * VDD * 1e3).abs() < 80.0),
+            "{mid:?}"
+        );
+        s.set_position(0.85).unwrap();
+        let after_turn = adc_readings(&mut s).len();
+        s.advance(20e-3).unwrap();
+        let high = adc_readings(&mut s);
+        assert!(high.len() > after_turn, "{high:?}");
+        assert!(
+            high.iter()
+                .any(|&(mv, duty)| (f64::from(mv) - 0.85 * VDD * 1e3).abs() < 80.0 && duty > 800),
+            "{high:?}"
+        );
+        assert!(s.average_ma() > 1.0, "average {} mA", s.average_ma());
+        assert!(s.trace().len() > 10);
+    }
+
+    #[test]
+    fn fade_ramps_the_display_average() {
+        let Some(mut s) = start(DemoKind::Fade, StartOptions::default()) else {
+            return;
+        };
+        s.advance(20e-3).unwrap();
+        let early = s.average_ma();
+        s.advance(40e-3).unwrap();
+        let later = s.average_ma();
+        // The hardware fade climbs for ~51 ms; 20 ms to 60 ms should get brighter.
+        assert!(later > early + 0.3, "early {early} mA, later {later} mA");
+        let t = text(s.uart_bytes());
+        assert!(t.contains("ohmforge esp-hal led fade"), "{t:?}");
+    }
+
+    #[test]
+    fn pot_divider_scales_with_supply_voltage() {
+        let Some(mut s) = dimmer(0.5) else { return };
+        s.set_position(0.5).unwrap();
+        // Allow one ADC print to catch up; the wiper itself updates immediately.
+        let mid = s.wiper_volts().unwrap();
+        assert!((mid - 0.5 * VDD).abs() < 0.05, "wiper at 3.3 V: {mid}");
+        s.set_supply(SupplySettings {
+            volts: 5.0,
+            ..SupplySettings::default()
+        })
+        .unwrap();
+        let high = s.wiper_volts().unwrap();
+        assert!(
+            (high - 0.5 * 5.0).abs() < 0.08,
+            "wiper should scale with the rail: {high}"
+        );
+        assert!(s.supply_status().outside_rated);
+    }
+
+    #[test]
+    fn current_limit_clamps_dimmer_led_current() {
+        let opts = StartOptions {
+            supply: SupplySettings {
+                current_limit: 0.5e-3,
+                ..SupplySettings::default()
+            },
+            position: 1.0,
+            ..StartOptions::default()
+        };
+        let Some(mut s) = start(DemoKind::Dimmer, opts) else {
+            return;
+        };
+        s.advance(20e-3).unwrap();
+        let status = s.supply_status();
+        let avg = s.average_ma();
+        assert!(
+            status.mode == SupplyMode::Cc || avg < 1.0,
+            "limit did not clamp: status={status:?} avg={avg} mA"
+        );
+        assert!(status.amps <= 0.7e-3, "{status:?}");
+    }
+
+    #[test]
+    fn dimmer_averaged_led_current_is_steady_at_constant_duty() {
+        let Some(mut s) = dimmer(0.5) else { return };
+        s.advance(25e-3).unwrap();
+        let readings = adc_readings(&mut s);
+        assert!(
+            readings.iter().any(|&(_, duty)| duty > 0),
+            "no UART duty print: {readings:?}"
+        );
+        let late: Vec<f64> = s
+            .trace()
+            .iter()
+            .filter(|(t, _)| *t >= s.time() - 8e-3)
+            .map(|(_, i)| *i)
+            .collect();
+        assert!(late.len() >= 8, "not enough averaged samples: {}", late.len());
+        let mean = late.iter().sum::<f64>() / late.len() as f64;
+        let peak = late.iter().fold(0.0_f64, |m, v| m.max((v - mean).abs()));
+        assert!(mean > 1.5, "expected a mid-duty LED average, got {mean} mA");
+        assert!(peak < 0.08, "ripple {peak} mA around {mean} mA at constant duty");
+        let vdd = s.circuit_readout().volts("vdd").unwrap();
+        let i_pot = vdd / 10_000.0;
+        // The ESP32-C3's own supply current (`quiescent_a`, sized for 3.3 V).
+        let i_chip = vdd * of_soc_esp32c3::QUIESCENT_A / 3.3;
+        let i_psu = s.supply_status().display_amps();
+        let i_led = s.average_ma() * 1e-3;
+        assert!(
+            (i_psu - (i_led + i_pot + i_chip)).abs() < 2e-4,
+            "PSU {i_psu} A should be LED {i_led} A plus pot {i_pot} A plus ESP32-C3 {i_chip} A"
+        );
+    }
+
+    #[test]
+    fn polling_copies_the_button_to_the_led() {
+        let Some(mut s) = start(DemoKind::ButtonPoll, StartOptions::default()) else {
+            return;
+        };
+        s.advance(200e-6).unwrap();
+        assert!(s.average_ma() < 0.2, "LED should be off at rest: {} mA", s.average_ma());
+        let v_up = s.button_volts().unwrap();
+        assert!(v_up > 3.0, "pull-up should hold GPIO9 high: {v_up}");
+        s.set_closed(true).unwrap();
+        s.advance(s.time() + 2e-3).unwrap();
+        let inst = s.current_ma().unwrap();
+        let v_down = s.button_volts().unwrap();
+        assert!(inst > 1.0, "LED should be on while held: {inst} mA, GPIO9 {v_down} V");
+        assert!(v_down < 0.1, "closed button should pull GPIO9 down: {v_down}");
+        // Default bounce is the canonical press train (5 edges), ending low.
+        let t = text(s.uart_bytes());
+        assert!(t.contains("poll: 5 low"), "{t:?}");
+    }
+
+    #[test]
+    fn bounce_can_be_turned_off() {
+        let Some(mut s) = start(DemoKind::ButtonPoll, StartOptions::default()) else {
+            return;
+        };
+        s.set_bounce(BounceSettings {
+            enabled: false,
+            seed: 0,
+        })
+        .unwrap();
+        s.advance(200e-6).unwrap();
+        s.set_closed(true).unwrap();
+        s.advance(s.time() + 2e-3).unwrap();
+        let t = text(s.uart_bytes());
+        assert!(t.contains("poll: 1 low"), "{t:?}");
+        assert!(!t.contains("poll: 5 low"), "{t:?}");
+    }
+
+    // Ported from `meters` (they ran on the hand-wired blink and dimmer).
+
+    #[test]
+    fn blink_led_series_current_matches_the_resistor_drop() {
+        let r_series = 330.0;
+        let mut s = start(DemoKind::Blink, StartOptions::default()).expect("blink needs no ROM");
+        s.advance(125e-6).unwrap();
+        let r = s.circuit_readout();
+        let i_r = r.unique_current("gpio8", "led_a").unwrap();
+        let i_d = r.unique_current("led_a", "0").unwrap();
+        assert_eq!(i_r.0, "R1");
+        assert_eq!(i_d.0, "D1");
+        let analytic = (r.volts("gpio8").unwrap() - r.volts("led_a").unwrap()) / r_series;
+        assert!((i_r.1 - analytic).abs() < 1e-9, "{} vs {analytic}", i_r.1);
+        assert!((i_d.1 - analytic).abs() < 1e-9, "{} vs {analytic}", i_d.1);
+        assert!((3.0..4.5).contains(&(analytic * 1e3)), "{} mA", analytic * 1e3);
+        // Same current, opposite sign, if the leads are swapped.
+        assert!((r.unique_current("led_a", "gpio8").unwrap().1 + analytic).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dimmer_pot_divider_voltage_matches_the_wiper() {
+        let Some(mut s) = dimmer(0.5) else { return };
+        let r = s.circuit_readout();
+        let vdd = r.volts("vdd").unwrap();
+        let wiper = r.voltage_between("gpio2", "0").unwrap();
+        assert!((wiper - 0.5 * vdd).abs() < 0.05, "wiper {wiper} V, VDD {vdd} V");
+        // The two pot legs are unique branches and their currents match.
+        let i_a = r.unique_current("0", "gpio2").expect("pin 1 to wiper");
+        let i_b = r.unique_current("vdd", "gpio2").expect("pin 3 to wiper");
+        assert!(
+            (i_a.1 + i_b.1).abs() < 5e-6,
+            "unloaded wiper: {} A vs {} A",
+            i_a.1,
+            i_b.1
+        );
+        s.set_supply(SupplySettings {
+            volts: 5.0,
+            ..SupplySettings::default()
+        })
+        .unwrap();
+        let r = s.circuit_readout();
+        let wiper = r.voltage_between("gpio2", "0").unwrap();
+        assert!(
+            (wiper - 0.5 * r.volts("vdd").unwrap()).abs() < 0.08,
+            "wiper should scale with the rail: {wiper}"
+        );
+    }
+
+    /// Changing the supply at t = 0, before the demo has advanced, keeps the
+    /// rail at or under the new set point and the wiper under the rail at
+    /// every step (it once spiked to 70 V for one step).
+    #[test]
+    fn a_supply_change_before_the_first_step_never_overshoots() {
+        let Some(mut s) = dimmer(0.5) else { return };
+        s.set_supply(SupplySettings {
+            volts: 5.0,
+            ..SupplySettings::default()
+        })
+        .unwrap();
+        let mut t = s.time();
+        for _ in 0..200 {
+            let v = s.circuit_readout().volts("vdd").unwrap();
+            let w = s.wiper_volts().unwrap();
+            assert!(v <= 5.0 + 1e-3, "rail {v} V at {t} s");
+            assert!(w <= v + 1e-6, "wiper {w} V above the rail {v} V at {t} s");
+            assert_ne!(s.supply_status().mode, SupplyMode::Cc, "at {t} s");
+            t += 1e-6;
+            s.advance(t).unwrap();
+        }
+        assert!((s.wiper_volts().unwrap() - 2.5).abs() < 0.08);
     }
 }

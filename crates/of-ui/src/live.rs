@@ -8,12 +8,8 @@ use std::time::{Duration, Instant};
 use of_components::BounceSettings;
 use of_soc_esp32c3::UartByte;
 
-use crate::adc_pwm::{PwmKind, PwmSim};
-use crate::blink::Blink;
-use crate::button::{ButtonKind, ButtonSim};
 use crate::kind::DemoKind;
 use crate::meters::CircuitReadout;
-use crate::pins::IDLE_DRAW_RUNNING_A;
 use crate::session_sim::{SessionSim, StartOptions};
 use crate::supply::{SupplySettings, SupplyStatus};
 use crate::trace::{self, DEFAULT_VISIBLE_WINDOW};
@@ -124,30 +120,22 @@ impl Snapshot {
 /// UI-side handle to the live worker.
 pub(crate) struct LiveSession {
     tx: Sender<Command>,
-    circuit_files: bool,
     shared: Arc<Mutex<Snapshot>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl LiveSession {
-    /// Start `kind` on the hand-wired demos, or with `circuit_files` on
-    /// [`SessionSim`] built from the embedded circuit files (E4c).
-    pub(crate) fn start(kind: DemoKind, circuit_files: bool) -> Self {
+    /// Start `kind`, built from its embedded circuit file ([`SessionSim`]).
+    pub(crate) fn start(kind: DemoKind) -> Self {
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Mutex::new(Snapshot::empty(kind, SupplySettings::default())));
         let shared_w = Arc::clone(&shared);
-        let thread = thread::spawn(move || worker(rx, shared_w, kind, circuit_files));
+        let thread = thread::spawn(move || worker(rx, shared_w, kind));
         Self {
             tx,
-            circuit_files,
             shared,
             thread: Some(thread),
         }
-    }
-
-    /// Whether the demos are built from their circuit files.
-    pub(crate) fn circuit_files(&self) -> bool {
-        self.circuit_files
     }
 
     pub(crate) fn send(&self, cmd: Command) {
@@ -168,19 +156,9 @@ impl Drop for LiveSession {
     }
 }
 
-enum Running {
-    Blink(Blink),
-    Pwm(PwmSim),
-    Button(ButtonSim),
-    /// Any demo built from its circuit file.
-    File(SessionSim),
-}
-
 struct Worker {
     kind: DemoKind,
-    /// Build demos from the circuit files (`--circuit-files`).
-    circuit_files: bool,
-    sim: Result<Running, String>,
+    sim: Result<SessionSim, String>,
     playing: bool,
     speed: f64,
     pot: f64,
@@ -206,26 +184,19 @@ impl Worker {
         self.sim = Err("booting".into());
     }
 
+    /// Build `kind` from its embedded circuit file (E4d: the only path).
     fn finish_boot(&mut self) {
-        let result = if self.circuit_files {
-            let opts = StartOptions {
-                supply: self.supply,
-                position: self.pot,
-                ..StartOptions::default()
-            };
-            SessionSim::start(self.kind, opts).map(Running::File)
-        } else {
-            self.start_hand_wired()
+        let opts = StartOptions {
+            supply: self.supply,
+            position: self.pot,
+            ..StartOptions::default()
         };
-        self.sim = result;
-        match &mut self.sim {
-            Ok(Running::Button(s)) => s.set_bounce(self.bounce),
-            Ok(Running::File(s)) if self.kind.has_button() => {
-                if let Err(e) = s.set_bounce(self.bounce) {
-                    self.sim = Err(e);
-                }
-            }
-            _ => {}
+        self.sim = SessionSim::start(self.kind, opts);
+        if self.kind.has_button()
+            && let Ok(s) = &mut self.sim
+            && let Err(e) = s.set_bounce(self.bounce)
+        {
+            self.sim = Err(e);
         }
         self.booting = false;
         self.playing = self.sim.is_ok();
@@ -235,107 +206,55 @@ impl Worker {
         self.lagging = false;
     }
 
-    /// The hand-wired boards, with the same ESP32-C3 supply current as the
-    /// shipped circuit files.
-    fn start_hand_wired(&self) -> Result<Running, String> {
-        match self.kind {
-            DemoKind::Blink => Blink::with_supply(self.supply, IDLE_DRAW_RUNNING_A)
-                .map(Running::Blink)
-                .map_err(|e| e.to_string()),
-            DemoKind::Dimmer => PwmSim::with_supply(PwmKind::Dimmer, self.pot, self.supply, IDLE_DRAW_RUNNING_A)
-                .map(Running::Pwm)
-                .map_err(|e| e.to_string()),
-            DemoKind::Fade => PwmSim::with_supply(PwmKind::Fade, self.pot, self.supply, IDLE_DRAW_RUNNING_A)
-                .map(Running::Pwm)
-                .map_err(|e| e.to_string()),
-            DemoKind::ButtonPoll => {
-                ButtonSim::with_supply(ButtonKind::Poll, self.supply, ButtonKind::Poll.idle_draw_a())
-                    .map(Running::Button)
-                    .map_err(|e| e.to_string())
-            }
-            DemoKind::ButtonIrq => ButtonSim::with_supply(ButtonKind::Irq, self.supply, ButtonKind::Irq.idle_draw_a())
-                .map(Running::Button)
-                .map_err(|e| e.to_string()),
-        }
-    }
-
     fn time(&self) -> f64 {
-        match &self.sim {
-            Ok(Running::Blink(s)) => s.time(),
-            Ok(Running::Pwm(s)) => s.time(),
-            Ok(Running::Button(s)) => s.time(),
-            Ok(Running::File(s)) => s.time(),
-            Err(_) => 0.0,
-        }
+        self.sim.as_ref().map_or(0.0, SessionSim::time)
     }
 
     fn advance(&mut self, t: f64) -> Result<(), String> {
         match &mut self.sim {
-            Ok(Running::Blink(s)) => s.advance(t).map_err(|e| e.to_string()),
-            Ok(Running::Pwm(s)) => s.advance(t).map_err(|e| e.to_string()),
-            Ok(Running::Button(s)) => s.advance(t).map_err(|e| e.to_string()),
-            Ok(Running::File(s)) => s.advance(t),
+            Ok(s) => s.advance(t),
             Err(e) => Err(e.clone()),
         }
     }
 
     fn apply_pot(&mut self) -> Result<(), String> {
         match &mut self.sim {
-            Ok(Running::Pwm(s)) if s.kind() == PwmKind::Dimmer => {
-                s.set_position(self.pot).map_err(|e| e.to_string())?;
-            }
-            Ok(Running::File(s)) if s.kind() == DemoKind::Dimmer => s.set_position(self.pot)?,
-            _ => {}
+            Ok(s) if s.kind() == DemoKind::Dimmer => s.set_position(self.pot),
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     fn apply_button(&mut self) -> Result<(), String> {
         match &mut self.sim {
-            Ok(Running::Button(s)) => s.set_closed(self.button).map_err(|e| e.to_string())?,
-            Ok(Running::File(s)) if s.kind().has_button() => s.set_closed(self.button)?,
-            _ => {}
+            Ok(s) if s.kind().has_button() => s.set_closed(self.button),
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     fn apply_bounce(&mut self) -> Result<(), String> {
         match &mut self.sim {
-            Ok(Running::Button(s)) => s.set_bounce(self.bounce),
-            Ok(Running::File(s)) if s.kind().has_button() => s.set_bounce(self.bounce)?,
-            _ => {}
+            Ok(s) if s.kind().has_button() => s.set_bounce(self.bounce),
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     fn apply_supply(&mut self) -> Result<(), String> {
         match &mut self.sim {
-            Ok(Running::Blink(s)) => s.set_supply(self.supply).map_err(|e| e.to_string()),
-            Ok(Running::Pwm(s)) => s.set_supply(self.supply).map_err(|e| e.to_string()),
-            Ok(Running::Button(s)) => s.set_supply(self.supply).map_err(|e| e.to_string()),
-            Ok(Running::File(s)) => s.set_supply(self.supply),
+            Ok(s) => s.set_supply(self.supply),
             Err(_) => Ok(()),
         }
     }
 
     fn push_uart(&mut self, bytes: &[u8]) {
-        match &mut self.sim {
-            Ok(Running::Blink(s)) => s.push_uart_rx(bytes),
-            Ok(Running::Pwm(s)) => s.push_uart_rx(bytes),
-            Ok(Running::Button(s)) => s.push_uart_rx(bytes),
-            Ok(Running::File(s)) => s.push_uart_rx(bytes),
-            Err(_) => {}
+        if let Ok(s) = &mut self.sim {
+            s.push_uart_rx(bytes);
         }
     }
 
     fn apply_scope_window(&mut self) {
         let visible = self.scope_visible.max(trace::visible_window(trace::TIME_DIVS[0]));
-        match &mut self.sim {
-            Ok(Running::Blink(s)) => s.set_scope_window(visible),
-            Ok(Running::Pwm(s)) => s.set_scope_window(visible),
-            Ok(Running::Button(s)) => s.set_scope_window(visible),
-            Ok(Running::File(s)) => s.set_scope_window(visible),
-            Err(_) => {}
+        if let Ok(s) = &mut self.sim {
+            s.set_scope_window(visible);
         }
     }
 
@@ -354,58 +273,13 @@ impl Worker {
         match &mut self.sim {
             Err(_) if self.booting => {}
             Err(e) => snap.error = Some(e.clone()),
-            Ok(Running::Blink(s)) => {
-                snap.time = s.time();
-                snap.led_instant = s.current_ma().unwrap_or(0.0);
-                snap.led_ma = s.average_ma();
-                snap.supply_status = s.supply_status();
-                snap.led_trace = s.trace();
-                let (d, f) = s.pwm_duty_freq();
-                snap.pwm_duty = d;
-                snap.pwm_freq = f;
-                snap.uart = s.uart_bytes().to_vec();
-                snap.uart_baud = s.uart_baud();
-                snap.readout = s.circuit_readout();
-            }
-            Ok(Running::Pwm(s)) => {
-                snap.time = s.time();
-                snap.led_ma = s.average_ma();
-                snap.led_instant = snap.led_ma;
-                snap.supply_status = s.supply_status();
-                snap.led_trace = s.trace();
-                let (d, f) = s.pwm_duty_freq();
-                snap.pwm_duty = d;
-                snap.pwm_freq = f;
-                if s.kind() == PwmKind::Dimmer {
-                    snap.pot = s.position();
-                    snap.wiper_v = s.wiper_volts().ok();
-                    snap.adc = s.last_adc_uart();
-                }
-                snap.uart = s.uart_bytes().to_vec();
-                snap.uart_baud = s.uart_baud();
-                snap.readout = s.circuit_readout();
-            }
-            Ok(Running::Button(s)) => {
-                snap.time = s.time();
-                snap.led_instant = s.current_ma().unwrap_or(0.0);
-                snap.led_ma = s.average_ma();
-                snap.supply_status = s.supply_status();
-                snap.led_trace = s.trace();
-                snap.button = s.closed();
-                snap.bounce = s.bounce();
-                snap.button_v = s.button_volts().ok();
-                snap.uart = s.uart_bytes().to_vec();
-                snap.uart_baud = s.uart_baud();
-                snap.readout = s.circuit_readout();
-            }
-            Ok(Running::File(s)) => file_snapshot(s, &mut snap),
+            Ok(s) => file_snapshot(s, &mut snap),
         }
         snap
     }
 }
 
-/// A [`Snapshot`] of a demo built from its circuit file: the fields each
-/// hand-wired demo fills, by kind.
+/// A [`Snapshot`] of a running demo: the fields each kind fills.
 fn file_snapshot(s: &mut SessionSim, snap: &mut Snapshot) {
     let kind = s.kind();
     snap.time = s.time();
@@ -444,10 +318,9 @@ fn file_snapshot(s: &mut SessionSim, snap: &mut Snapshot) {
     snap.readout = s.circuit_readout();
 }
 
-fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind, circuit_files: bool) {
+fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) {
     let mut w = Worker {
         kind: start,
-        circuit_files,
         sim: Err("starting".into()),
         playing: false,
         speed: 1.0,
@@ -606,7 +479,7 @@ fn publish(shared: &Arc<Mutex<Snapshot>>, snap: Snapshot) {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{MAX_SPEED, MIN_SPEED, clamp_speed, park_after_slice};
+    use super::{DemoKind, MAX_SPEED, MIN_SPEED, SessionSim, StartOptions, clamp_speed, park_after_slice};
 
     fn report(name: &str, sim_s: f64, run: impl FnOnce()) {
         let t0 = Instant::now();
@@ -620,7 +493,7 @@ mod tests {
 
     fn skip_without_rom(e: &impl std::fmt::Display) -> bool {
         let msg = e.to_string();
-        if msg.contains("fetch-esp-rom-elfs") {
+        if msg.contains("fetch-esp-rom-elfs") || msg.contains("not bundled") {
             assert!(
                 std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
                 "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {msg}"
@@ -628,6 +501,15 @@ mod tests {
             true
         } else {
             false
+        }
+    }
+
+    /// Start `kind` from its circuit file, or `None` without the fetched ROM.
+    fn file_sim(kind: DemoKind) -> Option<SessionSim> {
+        match SessionSim::start(kind, StartOptions::default()) {
+            Ok(sim) => Some(sim),
+            Err(e) if skip_without_rom(&e) => None,
+            Err(e) => panic!("{kind:?}: {e}"),
         }
     }
 
@@ -651,44 +533,21 @@ mod tests {
     #[test]
     fn realtime_capacity_report() {
         report("blink 20 ms", 0.020, || {
-            crate::blink::Blink::new().unwrap().advance(0.020).unwrap();
+            file_sim(DemoKind::Blink).expect("blink").advance(0.020).unwrap();
         });
         const SPAN: f64 = 0.100;
-        let mut blink = crate::blink::Blink::new().unwrap();
-        let b0 = blink.perf_snapshot();
-        let t0 = Instant::now();
-        blink.advance(blink.time() + SPAN).unwrap();
-        report_counters("blink 100 ms", b0, blink.perf_snapshot(), t0.elapsed().as_secs_f64());
-
         for (label, kind) in [
-            ("dimmer 100 ms", crate::adc_pwm::PwmKind::Dimmer),
-            ("fade 100 ms", crate::adc_pwm::PwmKind::Fade),
+            ("blink 100 ms", DemoKind::Blink),
+            ("dimmer 100 ms", DemoKind::Dimmer),
+            ("fade 100 ms", DemoKind::Fade),
+            ("button-poll 100 ms", DemoKind::ButtonPoll),
+            ("button-irq 100 ms", DemoKind::ButtonIrq),
         ] {
-            match crate::adc_pwm::PwmSim::new(kind, 0.5) {
-                Ok(mut sim) => {
-                    let s0 = sim.perf_snapshot();
-                    let t0 = Instant::now();
-                    sim.advance(sim.time() + SPAN).unwrap();
-                    report_counters(label, s0, sim.perf_snapshot(), t0.elapsed().as_secs_f64());
-                }
-                Err(e) if skip_without_rom(&e) => {}
-                Err(e) => panic!("{e}"),
-            }
-        }
-        for (label, kind) in [
-            ("button-poll 100 ms", crate::button::ButtonKind::Poll),
-            ("button-irq 100 ms", crate::button::ButtonKind::Irq),
-        ] {
-            match crate::button::ButtonSim::new(kind) {
-                Ok(mut sim) => {
-                    let s0 = sim.perf_snapshot();
-                    let t0 = Instant::now();
-                    sim.advance(sim.time() + SPAN).unwrap();
-                    report_counters(label, s0, sim.perf_snapshot(), t0.elapsed().as_secs_f64());
-                }
-                Err(e) if skip_without_rom(&e) => {}
-                Err(e) => panic!("{e}"),
-            }
+            let Some(mut sim) = file_sim(kind) else { continue };
+            let s0 = sim.perf_snapshot();
+            let t0 = Instant::now();
+            sim.advance(sim.time() + SPAN).unwrap();
+            report_counters(label, s0, sim.perf_snapshot(), t0.elapsed().as_secs_f64());
         }
     }
 
@@ -697,54 +556,48 @@ mod tests {
     #[test]
     fn dimmer_realtime_factor_report() {
         const SPAN: f64 = 0.200;
-        match crate::adc_pwm::PwmSim::new(crate::adc_pwm::PwmKind::Dimmer, 0.5) {
-            Ok(mut sim) => {
-                // Warm the ROM/boot path and the decode cache before timing.
-                sim.advance(sim.time() + 0.020).unwrap();
-                let s0 = sim.perf_snapshot();
-                let t0 = Instant::now();
-                sim.advance(sim.time() + SPAN).unwrap();
-                let wall = t0.elapsed().as_secs_f64().max(1e-9);
-                let d = s0.delta(sim.perf_snapshot());
-                let rt = d.time / wall;
-                eprintln!(
-                    "dimmer realtime factor: {rt:.3}× ({:.3} s sim in {wall:.3} s wall; minstret={} analog_steps={})",
-                    d.time, d.minstret, d.accepted
-                );
-                assert!(
-                    d.time > SPAN * 0.95,
-                    "expected about {SPAN} s of sim progress, got {}",
-                    d.time
-                );
-                assert!(rt > 0.0, "realtime factor must be positive");
-                // Release floor from #44 / #61 (interpreter-bound; ~0.22× typical).
-                #[cfg(not(debug_assertions))]
-                assert!(
-                    rt > 0.15,
-                    "dimmer release realtime regressed below the #44 floor: {rt:.3}×"
-                );
-            }
-            Err(e) if skip_without_rom(&e) => {}
-            Err(e) => panic!("{e}"),
-        }
+        let Some(mut sim) = file_sim(DemoKind::Dimmer) else {
+            return;
+        };
+        // Warm the ROM/boot path and the decode cache before timing.
+        sim.advance(sim.time() + 0.020).unwrap();
+        let s0 = sim.perf_snapshot();
+        let t0 = Instant::now();
+        sim.advance(sim.time() + SPAN).unwrap();
+        let wall = t0.elapsed().as_secs_f64().max(1e-9);
+        let d = s0.delta(sim.perf_snapshot());
+        let rt = d.time / wall;
+        eprintln!(
+            "dimmer realtime factor: {rt:.3}× ({:.3} s sim in {wall:.3} s wall; minstret={} analog_steps={})",
+            d.time, d.minstret, d.accepted
+        );
+        assert!(
+            d.time > SPAN * 0.95,
+            "expected about {SPAN} s of sim progress, got {}",
+            d.time
+        );
+        assert!(rt > 0.0, "realtime factor must be positive");
+        // Release floor from #44 / #61 (interpreter-bound; ~0.22× typical).
+        #[cfg(not(debug_assertions))]
+        assert!(
+            rt > 0.15,
+            "dimmer release realtime regressed below the #44 floor: {rt:.3}×"
+        );
     }
 
     #[test]
     fn long_run_keeps_the_scope_bounded() {
         // button-irq sleeps in wfi, so several simulated minutes are cheap
         // after the analog hold optimisation.
-        match crate::button::ButtonSim::new(crate::button::ButtonKind::Irq) {
-            Ok(mut sim) => {
-                let cap = sim.trace_capacity();
-                sim.advance(sim.time() + 180.0).unwrap();
-                let n = sim.trace().len();
-                assert!(n <= cap, "trace grew past the ring capacity: {n} > {cap}");
-                assert!(n > 8, "trace should still hold a window of samples, got {n}");
-                assert!(cap <= crate::trace::MAX_TRACE_SAMPLES);
-            }
-            Err(e) if skip_without_rom(&e) => {}
-            Err(e) => panic!("{e}"),
-        }
+        let Some(mut sim) = file_sim(DemoKind::ButtonIrq) else {
+            return;
+        };
+        let cap = sim.trace_capacity();
+        sim.advance(sim.time() + 180.0).unwrap();
+        let n = sim.trace().len();
+        assert!(n <= cap, "trace grew past the ring capacity: {n} > {cap}");
+        assert!(n > 8, "trace should still hold a window of samples, got {n}");
+        assert!(cap <= crate::trace::MAX_TRACE_SAMPLES);
     }
 
     /// Wait (up to 60 s wall) for `done`, returning the last snapshot.
@@ -761,15 +614,14 @@ mod tests {
         }
     }
 
-    /// `--circuit-files`: the live worker boots each demo from its file,
-    /// runs it, and switches demos the same way the hand-wired worker does.
+    /// The live worker boots each demo from its circuit file, runs it, and
+    /// switches demos.
     #[test]
     fn the_worker_runs_the_demos_from_their_circuit_files() {
         use super::Command;
         use crate::kind::DemoKind;
 
-        let live = super::LiveSession::start(DemoKind::Blink, true);
-        assert!(live.circuit_files());
+        let live = super::LiveSession::start(DemoKind::Blink);
         live.send(Command::SetSpeed(0.1));
         live.send(Command::SetPlaying(true));
         let snap = wait_for(&live, |s| s.time > 2e-3);

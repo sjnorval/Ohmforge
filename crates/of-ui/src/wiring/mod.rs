@@ -3,30 +3,30 @@
 //! This module is pure Rust and is compiled without the `gui` feature so the
 //! goldens and invariants run in the workspace test job.
 
-mod blink;
-mod button;
-mod dimmer;
+#[cfg(test)]
+mod demos;
 mod from_circuit;
 mod golden;
 mod hops;
 mod invariants;
 mod model;
 mod router;
+mod symbols;
 
 pub use model::{
     CLEARANCE, Component, Direction, FixtureStroke, GRID, Hop, Net, NetKind, Pin, PinRef, Point, Rect, Route,
     Schematic, StrokeStyle,
 };
 
-pub use blink::{board as blink_board, r1_zigzag};
-pub use button::board as button_board;
-pub use dimmer::{board as dimmer_board, board_at as dimmer_board_at, fade_board};
+#[cfg(test)]
+pub use demos::{blink_board, button_board, dimmer_board, dimmer_board_at, fade_board};
 #[cfg_attr(not(feature = "gui"), allow(unused_imports))]
 pub use from_circuit::from_circuit;
 pub use golden::serialize;
 pub use hops::poly_with_hops;
 pub use invariants::check;
 pub use router::route;
+pub use symbols::r1_zigzag;
 
 #[cfg(test)]
 mod tests {

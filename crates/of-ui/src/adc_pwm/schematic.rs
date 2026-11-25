@@ -8,7 +8,7 @@ use crate::theme::{LED_RED, TEAL, panel};
 use crate::wiring::{self, Point};
 
 /// Draw the dimmer (`position` is `Some`) or fade board; `board` is the
-/// routed schematic (hand-written or from the circuit file).
+/// routed schematic from the circuit file.
 pub(crate) fn show(
     ui: &mut Ui,
     board: &wiring::Schematic,

@@ -1,40 +1,35 @@
-//! Trace parity goldens for the desktop demos (engine E4b, #48).
+//! Trace parity goldens for the desktop demos (engine E4, #48).
 //!
 //! Each demo runs a fixed, deterministic script and its observable outputs are
 //! written to `goldens/<demo>.trace.txt`: the GPIO edges after the circuit is
 //! connected, the UART0 text, and the scope samples (LED and PSU current on
-//! the fixed sample grid). The hand-wired demos recorded these files first;
-//! the circuit-file demos must match them within the tolerances agreed for
-//! E4 (exact digital outputs, 1 ns edge times, `max(1 nA, 1 ppm)` analog).
+//! the fixed sample grid). The hand-wired demos recorded these files first
+//! (E4b-1); since E4d they are blessed from the circuit files, which
+//! reproduced them byte for byte when the hand-wired demos were deleted.
 //!
 //! One accepted exception (Stefan, 25 November 2026; RFC 0003, Determinism):
 //! against the goldens, samples off the 50 µs grid (LEDC-edge samples in the
 //! fade demo) get 1 % relative (`Tolerance::GOLDEN`), because the goldens are
-//! recorded on Linux and other platforms' libm moves them. Each engine run is
-//! also compared with the hand-wired demo on the same machine at the strict
-//! `Tolerance::PARITY`, with no per-demo exceptions: the hand-wired dimmer has
-//! the ADC pin's 1 GΩ pad on GPIO2 like the engine's U1 (E4c).
-//!
-//! Three engine paths are checked against the same goldens and, at the
-//! strict tolerance, against the hand-wired demo on the same machine:
-//! - `session`: the demos placed through the model registry in Rust (E4b-1);
+//! recorded on Linux and other platforms' libm moves them. On the same
+//! machine the two engine paths must agree at the strict `Tolerance::PARITY`
+//! (exact digital outputs, 1 ns edge times, `max(1 nA, 1 ppm)` analog):
 //! - `file`: the shipped `circuits/demos` files built by `of_circuit::build`
-//!   (E4b-2) from the embedded files, parts and firmware, exactly as the
-//!   desktop's `--circuit-files` path builds them (`session_sim`, E4c), with
-//!   U1's idle draw forced off as in the hand-wired demos;
+//!   from the embedded files, parts and firmware, exactly as the desktop
+//!   builds them (`session_sim`), with U1's idle draw forced off;
+//! - `session`: the demos placed through the model registry in Rust (E4b-1);
 //! - the idle-draw golden (`goldens/blink.idle-draw.trace.txt`): the blink
 //!   file as shipped, with the ESP32-C3's 23 mA `quiescent_a` (datasheet
 //!   v2.5 Table 5-8, CPU running at 160 MHz). Only the PSU current differs
 //!   from `blink.trace.txt`, by that supply current.
 //!
-//! Run with `OF_BLESS=1` to rewrite the goldens from the hand-wired demos
-//! (and the idle-draw golden from the blink file), on Linux only.
+//! Run with `OF_BLESS=1` to rewrite the goldens from the circuit files, on
+//! Linux only.
 
 mod file;
-mod legacy;
 mod session;
 mod trace;
 
+pub(crate) use session::build as registry_session;
 pub(crate) use trace::{DemoTrace, Raw, Tolerance, compare, compare_traces, serialize};
 
 use std::path::PathBuf;
@@ -169,8 +164,8 @@ fn dump(demo: Demo, kind: &str, trace: &DemoTrace) {
     }
 }
 
+/// Compare `got` with its golden, or rewrite the golden with `OF_BLESS=1`.
 fn check_or_bless(demo: Demo, got: &DemoTrace) {
-    dump(demo, "legacy", got);
     let text = serialize(demo.name(), got);
     if std::env::var_os("OF_BLESS").is_some() {
         std::fs::write(demo.golden_path(), &text).expect("write golden");
@@ -181,49 +176,56 @@ fn check_or_bless(demo: Demo, got: &DemoTrace) {
         .golden()
         .unwrap_or_else(|| panic!("no golden for {}; run with OF_BLESS=1", demo.name()));
     if let Err(e) = compare(&golden, got, Tolerance::GOLDEN) {
-        panic!("{} does not match its golden: {e}", demo.name());
+        panic!("{} from its circuit file does not match its golden: {e}", demo.name());
     }
 }
 
-fn run_legacy(demo: Demo) {
-    let mut sim = match legacy::start(demo) {
+/// The circuit file as the desktop builds it, with U1's idle draw off: the
+/// path the goldens are blessed from.
+fn file_trace(demo: Demo) -> Option<DemoTrace> {
+    let mut sim = match file::start(demo, file::IdleDraw::Off) {
         Ok(sim) => sim,
-        Err(e) if skip_without_rom(&e) => return,
+        Err(e) if skip_without_rom(&e) => return None,
         Err(e) => panic!("{}: {e}", demo.name()),
     };
-    let trace = play(sim.as_mut(), &demo.script()).unwrap_or_else(|e| panic!("{}: {e}", demo.name()));
+    Some(play(sim.as_mut(), &demo.script()).unwrap_or_else(|e| panic!("{}: {e}", demo.name())))
+}
+
+fn run_file(demo: Demo) {
+    let Some(trace) = file_trace(demo) else { return };
+    dump(demo, "file", &trace);
     check_or_bless(demo, &trace);
 }
 
 #[test]
-fn golden_matches_legacy_blink() {
-    run_legacy(Demo::Blink);
+fn golden_matches_file_blink() {
+    run_file(Demo::Blink);
 }
 
 #[test]
-fn golden_matches_legacy_dimmer() {
-    run_legacy(Demo::Dimmer);
+fn golden_matches_file_dimmer() {
+    run_file(Demo::Dimmer);
 }
 
 #[test]
-fn golden_matches_legacy_fade() {
-    run_legacy(Demo::Fade);
+fn golden_matches_file_fade() {
+    run_file(Demo::Fade);
 }
 
 #[test]
-fn golden_matches_legacy_button() {
-    run_legacy(Demo::Button);
+fn golden_matches_file_button() {
+    run_file(Demo::Button);
 }
 
 #[test]
-fn golden_matches_legacy_button_irq() {
-    run_legacy(Demo::ButtonIrq);
+fn golden_matches_file_button_irq() {
+    run_file(Demo::ButtonIrq);
 }
 
 #[test]
-fn legacy_traces_are_deterministic() {
-    let a = play(legacy::start(Demo::Blink).unwrap().as_mut(), &Demo::Blink.script()).unwrap();
-    let b = play(legacy::start(Demo::Blink).unwrap().as_mut(), &Demo::Blink.script()).unwrap();
+fn file_traces_are_deterministic() {
+    let a = file_trace(Demo::Blink).expect("blink needs no ROM");
+    let b = file_trace(Demo::Blink).expect("blink needs no ROM");
     assert_eq!(serialize("blink", &a), serialize("blink", &b));
     assert!(compare_traces(&a, &b, Tolerance::PARITY).is_ok());
 }
@@ -235,6 +237,8 @@ fn every_demo_has_a_golden() {
     }
 }
 
+/// The registry-built demo must match the golden and, at the strict
+/// tolerance, the circuit file on this machine.
 fn run_session(demo: Demo) {
     let mut sim = match session::start(demo) {
         Ok(sim) => sim,
@@ -247,89 +251,37 @@ fn run_session(demo: Demo) {
         .golden()
         .unwrap_or_else(|| panic!("no golden for {}; run with OF_BLESS=1", demo.name()));
     if let Err(e) = compare(&golden, &trace, Tolerance::GOLDEN) {
-        panic!("{} on Session does not match the legacy golden: {e}", demo.name());
+        panic!("{} on Session does not match the golden: {e}", demo.name());
     }
-    // The agreed tolerance, against the hand-wired demo on this machine.
-    let legacy = play(legacy::start(demo).expect("legacy").as_mut(), &demo.script()).expect("legacy run");
-    if let Err(e) = compare_traces(&legacy, &trace, Tolerance::PARITY) {
-        panic!("{} on Session does not match the hand-wired demo: {e}", demo.name());
+    let file = file_trace(demo).expect("file run");
+    if let Err(e) = compare_traces(&file, &trace, Tolerance::PARITY) {
+        panic!("{} on Session does not match its circuit file: {e}", demo.name());
     }
 }
 
 #[test]
-fn session_matches_legacy_blink() {
+fn session_matches_file_blink() {
     run_session(Demo::Blink);
 }
 
 #[test]
-fn session_matches_legacy_dimmer() {
+fn session_matches_file_dimmer() {
     run_session(Demo::Dimmer);
 }
 
 #[test]
-fn session_matches_legacy_fade() {
+fn session_matches_file_fade() {
     run_session(Demo::Fade);
 }
 
 #[test]
-fn session_matches_legacy_button() {
+fn session_matches_file_button() {
     run_session(Demo::Button);
 }
 
 #[test]
-fn session_matches_legacy_button_irq() {
+fn session_matches_file_button_irq() {
     run_session(Demo::ButtonIrq);
-}
-
-fn run_file(demo: Demo) {
-    let mut sim = match file::start(demo, file::IdleDraw::Off) {
-        Ok(sim) => sim,
-        Err(e) if skip_without_rom(&e) => return,
-        Err(e) => panic!("{}: {e}", demo.name()),
-    };
-    let trace = play(sim.as_mut(), &demo.script()).unwrap_or_else(|e| panic!("{}: {e}", demo.name()));
-    dump(demo, "file", &trace);
-    let golden = demo
-        .golden()
-        .unwrap_or_else(|| panic!("no golden for {}; run with OF_BLESS=1", demo.name()));
-    if let Err(e) = compare(&golden, &trace, Tolerance::GOLDEN) {
-        panic!(
-            "{} from its circuit file does not match the legacy golden: {e}",
-            demo.name()
-        );
-    }
-    let legacy = play(legacy::start(demo).expect("legacy").as_mut(), &demo.script()).expect("legacy run");
-    if let Err(e) = compare_traces(&legacy, &trace, Tolerance::PARITY) {
-        panic!(
-            "{} from its circuit file does not match the hand-wired demo: {e}",
-            demo.name()
-        );
-    }
-}
-
-#[test]
-fn file_matches_legacy_blink() {
-    run_file(Demo::Blink);
-}
-
-#[test]
-fn file_matches_legacy_dimmer() {
-    run_file(Demo::Dimmer);
-}
-
-#[test]
-fn file_matches_legacy_fade() {
-    run_file(Demo::Fade);
-}
-
-#[test]
-fn file_matches_legacy_button() {
-    run_file(Demo::Button);
-}
-
-#[test]
-fn file_matches_legacy_button_irq() {
-    run_file(Demo::ButtonIrq);
 }
 
 const IDLE_GOLDEN: &str = "blink.idle-draw";
@@ -342,7 +294,7 @@ fn idle_golden_path() -> PathBuf {
 
 /// The shipped blink file keeps the ESP32-C3's 23 mA supply current. Its
 /// trace is a separate, reviewed golden: everything but the PSU current
-/// matches the hand-wired blink exactly, and the PSU current is higher by
+/// matches the idle-draw-off blink exactly, and the PSU current is higher by
 /// `quiescent_a` times the rail over 3.3 V (just under 23 mA, as the rail
 /// sits a few mV under 3.3 V).
 #[test]

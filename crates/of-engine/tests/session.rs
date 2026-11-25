@@ -185,6 +185,55 @@ fn psu_goes_to_constant_current_and_droops_like_the_desktop_supply() {
     assert!((v - 0.33).abs() < 0.05, "expected droop, got {v}");
 }
 
+/// A new set point is regulated against a rail solved at that set point:
+/// committing before the next step (the rail still at the old 3.3 V) must not
+/// read the step as an overload and switch to constant current, which drives
+/// the limit into the load (tens of volts on a 10 kΩ divider).
+#[test]
+fn a_set_point_change_before_the_next_step_stays_in_constant_voltage() {
+    let reg = registry();
+    let mut s = build(
+        &reg,
+        vec![
+            (
+                "RV1",
+                "bourns.ptv09a-b103",
+                "rust:potentiometer",
+                vec![("position", 0.5.into())],
+                vec![("1", "gnd"), ("W", "wiper"), ("3", "vdd")],
+            ),
+            (
+                "R1",
+                "generic.resistor",
+                "rust:resistor",
+                vec![("resistance", 1e6.into())],
+                vec![("1", "wiper"), ("2", "gnd")],
+            ),
+            (
+                "PSU",
+                "bench.psu",
+                "rust:bench-psu",
+                vec![],
+                vec![("+", "vdd"), ("-", "gnd")],
+            ),
+        ],
+        SessionConfig::default(),
+    );
+    s.set_param("PSU", "volts", 5.0).unwrap();
+    s.commit().unwrap();
+    let r: BTreeMap<String, f64> = s.readings("PSU").into_iter().collect();
+    assert_eq!(r["mode"], 1.0, "a set point step is not an overload: {r:?}");
+    for us in 1..=20 {
+        s.run_until(SimTime::from_us(us)).unwrap();
+        s.commit().unwrap();
+        let v = s.value("v(vdd)").unwrap();
+        let w = s.value("v(wiper)").unwrap();
+        assert!(v <= 5.0 + 1e-6, "rail {v} V above the 5 V set point at {us} us");
+        assert!(w <= v + 1e-9, "wiper {w} V above the rail {v} V at {us} us");
+    }
+    assert!((s.value("v(vdd)").unwrap() - 5.0).abs() < 0.01);
+}
+
 #[test]
 fn pot_position_moves_the_wiper() {
     let reg = registry();

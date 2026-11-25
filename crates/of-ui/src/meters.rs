@@ -194,15 +194,6 @@ pub fn add_led_series(out: &mut CircuitReadout, resistor: &str, diode: &str, gpi
     out.push_branch(diode, anode, "0", ir);
 }
 
-pub fn add_resistor(out: &mut CircuitReadout, name: &str, a: &str, b: &str, ohms: f64) {
-    if ohms <= 0.0 {
-        return;
-    }
-    if let Some(v) = out.voltage_between(a, b) {
-        out.push_branch(name, a, b, v / ohms);
-    }
-}
-
 /// Record the merged PSU branch using the sourced current from `SupplyStatus::amps`
 /// (positive when the instrument sources into the rail). The CurrentSource used in
 /// CC mode has no `i()` probe, so callers pass `supply_status.amps` rather than
@@ -215,9 +206,6 @@ pub fn add_psu(out: &mut CircuitReadout, sourced_amps: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adc_pwm::{PwmKind, PwmSim};
-    use crate::blink::Blink;
-    use crate::supply::SupplySettings;
 
     const R_SERIES: f64 = 330.0;
 
@@ -245,66 +233,5 @@ mod tests {
         assert_eq!(r.unique_current("gpio8", "0"), Err(AmpError::NoUniqueBranch));
         r.push_branch("extra", "gpio8", "led_a", 0.0);
         assert_eq!(r.unique_current("gpio8", "led_a"), Err(AmpError::NoUniqueBranch));
-    }
-
-    #[test]
-    fn blink_led_series_current_matches_the_resistor_drop() {
-        let mut sim = Blink::new().unwrap();
-        sim.advance(125e-6).unwrap();
-        let r = sim.circuit_readout();
-        let i_r = r.unique_current("gpio8", "led_a").unwrap();
-        let i_d = r.unique_current("led_a", "0").unwrap();
-        assert_eq!(i_r.0, "R1");
-        assert_eq!(i_d.0, "D1");
-        let analytic = (r.volts("gpio8").unwrap() - r.volts("led_a").unwrap()) / R_SERIES;
-        assert!((i_r.1 - analytic).abs() < 1e-9, "{} vs {analytic}", i_r.1);
-        assert!((i_d.1 - analytic).abs() < 1e-9, "{} vs {analytic}", i_d.1);
-        let ma = analytic * 1e3;
-        assert!((3.0..4.5).contains(&ma), "{ma} mA");
-        // Same current, opposite sign, if the leads are swapped.
-        assert!((r.unique_current("led_a", "gpio8").unwrap().1 + analytic).abs() < 1e-9);
-    }
-
-    #[test]
-    fn dimmer_pot_divider_voltage_matches_the_wiper() {
-        let mut sim = match PwmSim::new(PwmKind::Dimmer, 0.5) {
-            Ok(sim) => sim,
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("fetch-esp-rom-elfs") {
-                    assert!(
-                        std::env::var_os("OF_REQUIRE_ESP_ROM").is_none(),
-                        "OF_REQUIRE_ESP_ROM is set but the ROM was not found: {msg}"
-                    );
-                    return;
-                }
-                panic!("{msg}");
-            }
-        };
-        let r = sim.circuit_readout();
-        let vdd = r.volts("vdd").unwrap();
-        let wiper = r.voltage_between("gpio2", "0").unwrap();
-        assert!((wiper - 0.5 * vdd).abs() < 0.05, "wiper {wiper} V, VDD {vdd} V");
-        // The two pot legs are unique branches and their currents match.
-        let i_a = r.unique_current("0", "gpio2").expect("pin 1 to wiper");
-        let i_b = r.unique_current("vdd", "gpio2").expect("pin 3 to wiper");
-        assert!(
-            (i_a.1 + i_b.1).abs() < 5e-6,
-            "unloaded wiper: {} A vs {} A",
-            i_a.1,
-            i_b.1
-        );
-
-        let hi = SupplySettings {
-            volts: 5.0,
-            ..SupplySettings::default()
-        };
-        sim.set_supply(hi).unwrap();
-        let r = sim.circuit_readout();
-        let wiper = r.voltage_between("gpio2", "0").unwrap();
-        assert!(
-            (wiper - 0.5 * r.volts("vdd").unwrap()).abs() < 0.08,
-            "wiper should scale with the rail: {wiper}"
-        );
     }
 }

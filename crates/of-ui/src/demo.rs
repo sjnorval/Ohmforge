@@ -62,21 +62,15 @@ impl Default for OhmforgeDemo {
 }
 
 impl OhmforgeDemo {
-    /// Start on the LED blink demo, which needs no fetched ROM, with the
-    /// hand-wired demos.
-    pub fn new() -> Self {
-        Self::with_circuit_files(false)
-    }
-
-    /// Start on the LED blink demo; with `circuit_files` every demo's
+    /// Start on the LED blink demo, which needs no fetched ROM. Every demo's
     /// schematic and simulation are built from its embedded circuit file
-    /// (`circuits/demos`) instead of the hand-wired board (engine E4c).
-    pub fn with_circuit_files(circuit_files: bool) -> Self {
+    /// (`circuits/demos`).
+    pub fn new() -> Self {
         let mut monitor = SerialMonitor::new();
         monitor.set_delivery(Delivery::Attached);
         Self {
             kind: DemoKind::Blink,
-            session: LiveSession::start(DemoKind::Blink, circuit_files),
+            session: LiveSession::start(DemoKind::Blink),
             monitor,
             serial_panel: SerialMonitorPanel::default(),
             uart_cursor: 0,
@@ -256,10 +250,8 @@ impl OhmforgeDemo {
                 let mut show = self.show_startup_animation;
                 if ui.checkbox(&mut show, "Show startup animation").changed() {
                     self.show_startup_animation = show;
-                    // Keep the other saved settings (for example `circuit_files`).
                     let prefs = crate::prefs::AppPrefs {
                         show_startup_animation: show,
-                        ..crate::prefs::load()
                     };
                     if let Err(err) = crate::prefs::save(&prefs) {
                         eprintln!("Ohmforge preferences: {err}");
@@ -483,9 +475,8 @@ fn schematic(
     pos: Option<f64>,
     snap: &Snapshot,
     meters: &MeterView<'_>,
-    circuit_files: bool,
 ) -> SchematicHit {
-    let board = boards::board(kind, pos, circuit_files);
+    let board = boards::board(kind, pos);
     match kind {
         DemoKind::Blink => blink::show_schematic(ui, &board, current, glow, snap.supply_status, meters),
         DemoKind::Dimmer | DemoKind::Fade => {
@@ -585,18 +576,17 @@ fn instruments(
     let current = snap.led_ma;
     let glow = brightness(current);
     let pos = kind.has_pot().then_some(snap.pot);
-    let files = session.circuit_files();
     let mut hit = SchematicHit {
         button: snap.button,
         probe: None,
     };
     if ui.available_width() >= 820.0 {
         ui.columns(2, |columns| {
-            hit = schematic(&mut columns[0], kind, current, glow, pos, snap, meters, files);
+            hit = schematic(&mut columns[0], kind, current, glow, pos, snap, meters);
             scope_panel(&mut columns[1], snap, kind, time_div, scope_hold, held_scope, session);
         });
     } else {
-        hit = schematic(ui, kind, current, glow, pos, snap, meters, files);
+        hit = schematic(ui, kind, current, glow, pos, snap, meters);
         ui.add_space(12.0);
         scope_panel(ui, snap, kind, time_div, scope_hold, held_scope, session);
     }

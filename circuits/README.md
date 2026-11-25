@@ -11,9 +11,8 @@ The desktop demos live in `demos/` (engine phase E4b,
 path and SHA-256 and give the ESP32-C3 its datasheet supply current
 (`quiescent_a`: 23 mA with the CPU running at 160 MHz, 16 mA for
 `button-irq`, which sleeps in `wfi`; datasheet v2.5 Table 5-8). `of-circuit` embeds
-them (feature `demos`), and the desktop app draws and runs them with
-`--circuit-files` (or `OF_CIRCUIT_FILES=1`; engine phase E4c). The
-hand-wired boards stay the default until E4d.
+them (feature `demos`), and the desktop app draws and runs them (its only
+path since engine phase E4d).
 
 Run one headless (the ROM-booted demos need `scripts/fetch-esp-rom-elfs.sh`):
 

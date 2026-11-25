@@ -24,7 +24,6 @@ mod meters_ui;
 #[cfg(all(feature = "gui", test))]
 mod parity;
 #[cfg(feature = "gui")]
-mod pins;
 #[cfg(feature = "gui")]
 pub mod prefs;
 #[cfg(feature = "gui")]

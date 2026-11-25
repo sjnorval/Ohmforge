@@ -1,6 +1,5 @@
 //! The five demos built through the model registry and run on
-//! [`of_engine::Session`], with the same sampling loops as the hand-wired
-//! simulations. This is the engine half of trace parity (E4b): circuit files
+//! [`of_engine::Session`], with the desktop's sampling loops. This is the engine half of trace parity (E4b): circuit files
 //! (E4b-2, `parity::file`) build the same circuits and run here through [`run`].
 //! Both run on the desktop's [`SessionSim`] (E4c).
 
@@ -148,12 +147,18 @@ fn chip(firmware: Firmware, gpios: &[&'static str], inputs: &[&str]) -> Place {
     }
 }
 
-/// A demo on [`Session`] with the legacy sampling loop: the desktop's own
-/// [`SessionSim`], so parity checks the code `--circuit-files` runs.
+/// A demo on [`Session`] with the parity sampling loop: the desktop's own
+/// [`SessionSim`], so parity checks the code the desktop runs.
 pub(crate) struct SessionDemo(SessionSim);
 
 /// Build `demo` on a `Session` (parity runs: U1 `quiescent_a = 0`).
 pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
+    run(build(demo)?, demo)
+}
+
+/// Place `demo` through the model registry in Rust (U1 `quiescent_a = 0`),
+/// independently of its circuit file.
+pub(crate) fn build(demo: Demo) -> Result<Session, String> {
     let (places, max_step) = match demo {
         Demo::Blink => {
             let mut p = led_and_psu("R1");
@@ -202,12 +207,11 @@ pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
             (p, 5e-6)
         }
     };
-    let s = session(places, max_step)?;
-    run(s, demo)
+    session(places, max_step)
 }
 
 /// Run an already built `Session` of `demo` (for example one built from its
-/// circuit file) with the legacy sampling loop.
+/// circuit file) with the parity sampling loop.
 pub(crate) fn run(s: Session, demo: Demo) -> Result<Box<dyn DemoRun>, String> {
     Ok(Box::new(SessionDemo(SessionSim::run_logged(demo.kind(), s)?)))
 }
