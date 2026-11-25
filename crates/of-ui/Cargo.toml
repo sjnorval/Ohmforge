@@ -17,6 +17,7 @@ of-core = { workspace = true, optional = true }
 of-instruments = { workspace = true, optional = true }
 egui = { workspace = true, optional = true }
 of-analog = { workspace = true, optional = true }
+of-circuit = { workspace = true, optional = true, features = ["fs", "demos"] }
 of-components = { workspace = true, optional = true }
 of-firmware = { workspace = true, optional = true }
 of-parts = { workspace = true, optional = true }
@@ -36,6 +37,7 @@ of-engine.workspace = true
 gui = [
     "dep:egui",
     "dep:of-analog",
+    "dep:of-circuit",
     "dep:of-components",
     "dep:of-core",
     "dep:of-firmware",

@@ -13,9 +13,8 @@
 //! UART output. The GUI therefore requires the fetched files and explains
 //! how to get them when they are missing.
 
-use std::path::PathBuf;
-
-use of_firmware::{ElfImage, sha256};
+use of_circuit::fs::{FetchError, fetch_pinned};
+use of_firmware::ElfImage;
 use of_soc_esp32c3::Esp32c3;
 use of_soc_esp32c3::bootloader::{C3_BOOTLOADER_FILE, C3_BOOTLOADER_SHA256};
 use of_soc_esp32c3::rom::{C3_ROM_FILE, C3_ROM_SHA256, ROM_ELFS_RELEASE, RomImage, boot_from_rom};
@@ -23,42 +22,13 @@ use of_soc_esp32c3::rom::{C3_ROM_FILE, C3_ROM_SHA256, ROM_ELFS_RELEASE, RomImage
 /// Shown in the GUI when the ROM or bootloader has not been fetched.
 pub(crate) const MISSING_MESSAGE: &str = "This demo needs Espressif's ESP32-C3 ROM and espflash's second-stage bootloader, which are not bundled with Ohmforge. Run scripts/fetch-esp-rom-elfs.ps1 (or scripts/fetch-esp-rom-elfs.sh) and click Reset. Unlike the LED blink demo, these esp-hal apps (dimmer, fade, and the push-button demos) cannot start from the app image alone.";
 
-fn cache_dirs() -> Vec<PathBuf> {
-    let release = format!("esp-rom-elfs/{ROM_ELFS_RELEASE}");
-    let mut dirs = Vec::new();
-    if let Some(dir) = std::env::var_os("OF_ESP_ROM_DIR") {
-        dirs.push(PathBuf::from(dir));
-    }
-    if let Some(temp) = std::env::var_os("RUNNER_TEMP") {
-        dirs.push(PathBuf::from(temp).join(&release));
-    }
-    dirs.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.cache")
-            .join(&release),
-    );
-    if let Ok(cwd) = std::env::current_dir() {
-        dirs.push(cwd.join(".cache").join(&release));
-    }
-    dirs
-}
-
+/// The search folders and checks are `of_circuit::fs::fetch_pinned`'s
+/// (`OF_ESP_ROM_DIR`, `RUNNER_TEMP`, `.cache`; `OF_REQUIRE_ESP_ROM` panics).
 fn fetched(file: &str, want_sha256: &str) -> Result<Vec<u8>, String> {
-    let Some(path) = cache_dirs().into_iter().map(|d| d.join(file)).find(|p| p.is_file()) else {
-        if std::env::var_os("OF_REQUIRE_ESP_ROM").is_some() {
-            panic!("OF_REQUIRE_ESP_ROM is set but {file} was not found; run scripts/fetch-esp-rom-elfs.sh");
-        }
-        return Err(MISSING_MESSAGE.to_owned());
-    };
-    let bytes = std::fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
-    let digest: String = sha256(&bytes).iter().map(|b| format!("{b:02x}")).collect();
-    if digest != want_sha256 {
-        return Err(format!(
-            "{} is not the pinned file (SHA-256 {digest}, expected {want_sha256})",
-            path.display()
-        ));
-    }
-    Ok(bytes)
+    fetch_pinned(ROM_ELFS_RELEASE, file, want_sha256).map_err(|e| match e {
+        FetchError::Missing(_) => MISSING_MESSAGE.to_owned(),
+        FetchError::Invalid(msg) => msg,
+    })
 }
 
 fn rom_and_bootloader() -> Result<(RomImage, Vec<u8>), String> {

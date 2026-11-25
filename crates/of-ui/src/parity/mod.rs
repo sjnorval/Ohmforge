@@ -17,14 +17,19 @@
 //!   engine run is also compared with the hand-wired demo on the same machine
 //!   at the strict `Tolerance::PARITY`.
 //!
-//! E4b is split in two PRs. E4b-1 (here) builds the demos through the model
-//! registry and runs them on `of_engine::Session` (`session`). E4b-2 adds
-//! the circuit-file builder and resolvers, the five `circuits/demos` files,
-//! the idle-draw golden, parity from the files, `ohmforge run` and the CI
-//! `circuit fmt --check` step.
+//! Three engine paths are checked against the same goldens and, at the
+//! strict tolerance, against the hand-wired demo on the same machine:
+//! - `session`: the demos placed through the model registry in Rust (E4b-1);
+//! - `file`: the shipped `circuits/demos` files built by `of_circuit::build`
+//!   (E4b-2), with U1's idle draw forced off as in the hand-wired demos;
+//! - the idle-draw golden (`goldens/blink.idle-draw.trace.txt`): the blink
+//!   file as shipped, with the ESP32-C3's 5 mA `quiescent_a`. Only the PSU
+//!   current differs from `blink.trace.txt`, by the idle draw.
 //!
-//! Run with `OF_BLESS=1` to rewrite the goldens from the hand-wired demos.
+//! Run with `OF_BLESS=1` to rewrite the goldens from the hand-wired demos
+//! (and the idle-draw golden from the blink file), on Linux only.
 
+mod file;
 mod legacy;
 mod session;
 mod trace;
@@ -273,4 +278,104 @@ fn session_matches_legacy_button() {
 #[test]
 fn session_matches_legacy_button_irq() {
     run_session(Demo::ButtonIrq);
+}
+
+fn run_file(demo: Demo) {
+    let mut sim = match file::start(demo, file::IdleDraw::Off) {
+        Ok(sim) => sim,
+        Err(e) if skip_without_rom(&e) => return,
+        Err(e) => panic!("{}: {e}", demo.name()),
+    };
+    let trace = play(sim.as_mut(), &demo.script()).unwrap_or_else(|e| panic!("{}: {e}", demo.name()));
+    dump(demo, "file", &trace);
+    let golden = demo
+        .golden()
+        .unwrap_or_else(|| panic!("no golden for {}; run with OF_BLESS=1", demo.name()));
+    if let Err(e) = compare(&golden, &trace, session_tolerance(demo, Tolerance::GOLDEN)) {
+        panic!(
+            "{} from its circuit file does not match the legacy golden: {e}",
+            demo.name()
+        );
+    }
+    let legacy = play(legacy::start(demo).expect("legacy").as_mut(), &demo.script()).expect("legacy run");
+    if let Err(e) = compare_traces(&legacy, &trace, session_tolerance(demo, Tolerance::PARITY)) {
+        panic!(
+            "{} from its circuit file does not match the hand-wired demo: {e}",
+            demo.name()
+        );
+    }
+}
+
+#[test]
+fn file_matches_legacy_blink() {
+    run_file(Demo::Blink);
+}
+
+#[test]
+fn file_matches_legacy_dimmer() {
+    run_file(Demo::Dimmer);
+}
+
+#[test]
+fn file_matches_legacy_fade() {
+    run_file(Demo::Fade);
+}
+
+#[test]
+fn file_matches_legacy_button() {
+    run_file(Demo::Button);
+}
+
+#[test]
+fn file_matches_legacy_button_irq() {
+    run_file(Demo::ButtonIrq);
+}
+
+const IDLE_GOLDEN: &str = "blink.idle-draw";
+
+fn idle_golden_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src/parity/goldens")
+        .join(format!("{IDLE_GOLDEN}.trace.txt"))
+}
+
+/// The shipped blink file keeps the ESP32-C3's 5 mA idle draw. Its trace is
+/// a separate, reviewed golden: everything but the PSU current matches the
+/// hand-wired blink exactly, and the PSU current is higher by the idle draw
+/// (`quiescent_a` times the rail over 3.3 V).
+#[test]
+fn shipped_blink_file_matches_the_idle_draw_golden() {
+    let mut sim = file::start(Demo::Blink, file::IdleDraw::AsShipped).expect("blink file");
+    let trace = play(sim.as_mut(), &Demo::Blink.script()).expect("run");
+    let text = serialize(IDLE_GOLDEN, &trace);
+    if std::env::var_os("OF_BLESS").is_some() {
+        std::fs::write(idle_golden_path(), &text).expect("write golden");
+        eprintln!("blessed {}", idle_golden_path().display());
+    } else {
+        let golden = std::fs::read_to_string(idle_golden_path())
+            .unwrap_or_else(|_| panic!("no {IDLE_GOLDEN} golden; run with OF_BLESS=1"));
+        if let Err(e) = compare(&golden, &trace, Tolerance::GOLDEN) {
+            panic!("the shipped blink file does not match the idle-draw golden: {e}");
+        }
+    }
+    let off = play(
+        file::start(Demo::Blink, file::IdleDraw::Off)
+            .expect("blink file")
+            .as_mut(),
+        &Demo::Blink.script(),
+    )
+    .expect("run");
+    assert_eq!(trace.edges, off.edges, "idle draw must not move the GPIO edges");
+    assert_eq!(trace.uart, off.uart);
+    assert_eq!(trace.samples.len(), off.samples.len());
+    for (on, off) in trace.samples.iter().zip(&off.samples) {
+        assert_eq!(on.0, off.0, "sample times must not move");
+        assert!((on.1 - off.1).abs() < 0.05, "LED current moved by {} mA", on.1 - off.1);
+        let extra = on.2 - off.2;
+        assert!(
+            (4.8..=5.0).contains(&extra),
+            "idle draw adds {extra} mA at t = {}",
+            on.0
+        );
+    }
 }
