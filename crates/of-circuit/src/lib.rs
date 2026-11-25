@@ -1,0 +1,31 @@
+//! Circuit files (`*.circuit.toml`, [RFC 0003](https://github.com/sjnorval/Ohmforge/blob/main/rfcs/0003-circuit-file.md)).
+//!
+//! One TOML file describes a circuit for both the simulation and the schematic:
+//! components with typed parameters, firmware by path and SHA-256, nets in
+//! router order, per-instance schematic geometry, keepouts and probes.
+//!
+//! - [`parse`] reads a file and runs the structural checks ([`diagnostics`]);
+//!   every error carries a 1-based line and column ([`CircuitError`]).
+//! - [`save`] writes the canonical form; canonical files round-trip byte for byte.
+//! - Feature `engine`: [`library`] checks parts, pins and firmware hashes.
+//! - Feature `fs`: [`fs`] reads files and the parts directory from disk.
+//!
+//! The default build has no host I/O and builds for `wasm32-unknown-unknown`.
+//! The files themselves are data, licensed CC-BY-SA-4.0 (`circuits/LICENSE.md`).
+
+mod error;
+mod format;
+mod parse;
+mod save;
+mod validate;
+
+#[cfg(feature = "fs")]
+pub mod fs;
+#[cfg(feature = "engine")]
+pub mod library;
+
+pub use error::CircuitError;
+pub use format::*;
+pub use parse::{parse, parse_unchecked};
+pub use save::{same_content, save};
+pub use validate::diagnostics;
