@@ -417,7 +417,11 @@ impl SocBus {
             | st(u32::from(self.saradc.irq()), source::APB_ADC)
             | st(u32::from(gpio_cpu), source::GPIO)
             | st(u32::from(gpio_nmi), source::GPIO_NMI)
-            | st(u32::from(self.uart0.irq()), source::UART0);
+            | st(u32::from(self.uart0.irq()), source::UART0)
+            | st(u32::from(self.system.from_cpu_irq() & 1), source::FROM_CPU_INTR0)
+            | st(u32::from((self.system.from_cpu_irq() >> 1) & 1), source::FROM_CPU_INTR1)
+            | st(u32::from((self.system.from_cpu_irq() >> 2) & 1), source::FROM_CPU_INTR2)
+            | st(u32::from((self.system.from_cpu_irq() >> 3) & 1), source::FROM_CPU_INTR3);
         self.intmatrix.set_sources(levels);
     }
 

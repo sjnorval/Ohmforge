@@ -53,8 +53,14 @@ pub mod source {
     pub const SYSTIMER_TARGET1: u8 = 38;
     /// SYSTIMER comparator 2.
     pub const SYSTIMER_TARGET2: u8 = 39;
-    /// Software interrupt 0 (`FROM_CPU_INTR0`, used by FreeRTOS).
+    /// Software interrupt 0 (`FROM_CPU_INTR0`, used by FreeRTOS yield).
     pub const FROM_CPU_INTR0: u8 = 50;
+    /// Software interrupt 1.
+    pub const FROM_CPU_INTR1: u8 = 51;
+    /// Software interrupt 2.
+    pub const FROM_CPU_INTR2: u8 = 52;
+    /// Software interrupt 3.
+    pub const FROM_CPU_INTR3: u8 = 53;
 }
 
 /// Register offsets from [`crate::map::INTERRUPT_BASE`].
