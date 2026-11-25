@@ -12,7 +12,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 
 **Schematic wire routing** (under the P2 schematic editor; keep the existing look): [`docs/design/wire-routing.md`](docs/design/wire-routing.md).
 
-**Base engine and plug-in components** (E1 done in #43; PSU return fix #45 done, closed by #54; E2 done in #46/#62; E3 in progress #47; E4 to E6 in P3 / 0.2, #48 to #50, with E4a, the circuit file format, in RFC 0003): [`docs/design/engine-components.md`](docs/design/engine-components.md). The engine owns nets, solvers, time, events and measurement; every real part, the ESP32-C3 and the bench PSU are components on one API. New parts follow the engine API (no per-demo glue in `of-ui`, no hidden connections to ground); demos become circuit files in E4.
+**Base engine and plug-in components** (E1 done in #43; PSU return fix #45 done, closed by #54; E2 done in #46/#62; E3 done in #47/#63; E4 to E6 in P3 / 0.2, #48 to #50, with E4a, the circuit file format, in RFC 0003): [`docs/design/engine-components.md`](docs/design/engine-components.md). The engine owns nets, solvers, time, events and measurement; every real part, the ESP32-C3 and the bench PSU are components on one API. New parts follow the engine API (no per-demo glue in `of-ui`, no hidden connections to ground); demos become circuit files in E4.
 
 **Arduino-ESP32 and ESP-IDF MVP demos** (#60, design first): [`docs/design/arduino-idf-mvp-demos.md`](docs/design/arduino-idf-mvp-demos.md). Pin-parity with the esp-hal demos; real-ROM boot; committed images and CI toolchains; not the P4 Arduino IDE board package (I6).
 

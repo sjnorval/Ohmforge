@@ -55,7 +55,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-firmware` | ELF loading, ESP flash images and partition tables (DWARF later) |
 | `of-plugin-wasm` | Sandboxed WASM component host |
 | `of-instruments` | Measurement service and instruments: scope, logic analyser, decoders, multimeter, logger; serial monitor model (`SerialMonitor`, lean console; the rest to do, phase E5 in P3, #49). The bench PSU becomes a component (E2) |
-| `of-engine` (planned) | Base engine: builds components and circuit files into the solvers, checks the circuit, runs the kernel (phase E2, #46; not in the workspace yet) |
+| `of-engine` | Base engine: builds components and circuit files into the solvers, checks the circuit, runs the kernel (E2, #62; circuit files E4, #48) |
 | `of-bom` | Bill of materials, costing, CSV export |
 | `of-kicad` | KiCad netlist and schematic export |
 | `of-gdb` | GDB remote protocol |
@@ -64,7 +64,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-web` | WASM entry point |
 | `of-cli` | `ohmforge` headless runner |
 
-Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo, icons, and the [startup animation](assets/startup/README.md)), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
+Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `circuits/` (CC-BY-SA-4.0 circuit files, see [`circuits/README.md`](circuits/README.md)), `scripts/` (riscv-tests, ESP ROM fetch and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo, icons, and the [startup animation](assets/startup/README.md)), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
 
 ## Building
 
@@ -75,6 +75,7 @@ cargo check --workspace
 cargo test --workspace
 cargo run -p of-cli -- --version
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv   # SPICE netlist to CSV
+cargo run -p of-cli -- circuit check circuits/   # validate circuit files (*.circuit.toml, RFC 0003)
 cargo test -p of-soc-esp32c3          # blinky, timer-interrupt, XIP and button firmware on the ESP32-C3 model, LED and button co-simulated
 scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests and the pot dimmer / LED fade demos (never committed)
 cargo run -p of-app --features gui   # desktop app: load screen, then live blink, dimmer, fade and push-button demos
@@ -89,7 +90,7 @@ New to Ohmforge? [Your first schematic](docs/src/guide/first-schematic.md) previ
 
 Code: [GNU AGPL-3.0-or-later](LICENSE). If you distribute Ohmforge or a modified version, or offer it to users over a network, you must share the full source under the same licence. For closed-source commercial use, ask about a separate commercial licence.
 
-Parts data, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md)). See [NOTICE](NOTICE).
+Parts data, circuit files, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md), [circuits/LICENSE.md](circuits/LICENSE.md)). See [NOTICE](NOTICE).
 
 Contributions are accepted under the Developer Certificate of Origin; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
