@@ -18,9 +18,9 @@ of-cpu-riscv.workspace = true
 of-firmware.workspace = true
 of-analog.workspace = true
 of-component-api.workspace = true
+of-engine.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 of-components.workspace = true
-of-engine.workspace = true
 of-parts.workspace = true

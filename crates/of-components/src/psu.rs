@@ -2,7 +2,8 @@
 
 use of_analog::devices::{CurrentSource, PinDriver, SourceValue};
 use of_component_api::{
-    Component, ComponentEvent, ComponentInfo, ElabCtx, ElabError, EventCtx, Health, PinKind, PinSpec, SolutionView,
+    Component, ComponentEvent, ComponentInfo, DeviceRef, ElabCtx, ElabError, EventCtx, Health, PinKind, PinSpec,
+    SolutionView,
 };
 use of_core::SimTime;
 
@@ -74,6 +75,11 @@ pub struct BenchPsu {
     device: String,
     plus_net: Option<String>,
     minus_net: Option<String>,
+    /// Thevenin source and current-limit source handles.
+    refs: Option<(DeviceRef, DeviceRef)>,
+    /// Current reported at the last commit (A): the limit in CC, else the
+    /// CV current `(volts - v) / series_r` floored at 0.
+    amps: f64,
 }
 
 impl BenchPsu {
@@ -99,7 +105,38 @@ impl BenchPsu {
             device: refdes.to_ascii_lowercase(),
             plus_net: None,
             minus_net: None,
+            refs: None,
+            amps: 0.0,
         }
+    }
+
+    /// Settings in use.
+    pub fn settings(&self) -> SupplySettings {
+        self.settings
+    }
+
+    /// Regulation mode after the last commit.
+    pub fn mode(&self) -> SupplyMode {
+        self.mode
+    }
+
+    /// Put the sources in `mode` (no solve), as the desktop `supply::apply`.
+    fn apply(&self, mode: SupplyMode, cx: &mut dyn EventCtx) -> SupplyMode {
+        let Some((th, cc)) = self.refs else {
+            return mode;
+        };
+        let s = self.settings;
+        let (v, r, i, applied) = if !s.on {
+            (0.0, PinDriver::HI_Z, 0.0, SupplyMode::Off)
+        } else if mode == SupplyMode::Cc {
+            (0.0, PinDriver::HI_Z, s.current_limit, SupplyMode::Cc)
+        } else {
+            (s.volts, s.series_r, 0.0, SupplyMode::Cv)
+        };
+        let _ = cx.set(th, "v", v);
+        let _ = cx.set(th, "r", r);
+        let _ = cx.set(cc, "dc", i);
+        applied
     }
 
     fn thevenin_name(&self) -> String {
@@ -143,17 +180,19 @@ impl Component for BenchPsu {
             (0.0, PinDriver::HI_Z)
         };
         let name = self.thevenin_name();
-        cx.add_device(Box::new(PinDriver::new(&name, plus, minus, v, r)))?;
-        cx.add_device(Box::new(CurrentSource::new(
+        let th = cx.add_device(Box::new(PinDriver::new(&name, plus, minus, v, r)))?;
+        let cc = cx.add_device(Box::new(CurrentSource::new(
             &self.cc_name(),
             minus,
             plus,
             SourceValue::dc(0.0),
         )))?;
+        self.refs = Some((th, cc));
+        self.mode = if s.on { SupplyMode::Cv } else { SupplyMode::Off };
         Ok(())
     }
 
-    fn on_event(&mut self, ev: &ComponentEvent, _cx: &mut dyn EventCtx) {
+    fn on_event(&mut self, ev: &ComponentEvent, cx: &mut dyn EventCtx) {
         let ComponentEvent::HostParam { name, value } = ev else {
             return;
         };
@@ -162,27 +201,65 @@ impl Component for BenchPsu {
             "series_r" => self.settings.series_r = *value,
             "current_limit" => self.settings.current_limit = *value,
             "on" => self.settings.on = *value != 0.0,
-            _ => {}
+            _ => return,
         }
         self.settings = self.settings.sanitized();
+        // New set points take effect on the next step, in the current mode.
+        let mode = if self.settings.on && self.mode == SupplyMode::Off {
+            SupplyMode::Cv
+        } else {
+            self.mode
+        };
+        self.mode = self.apply(mode, cx);
     }
 
-    fn commit(&mut self, view: &dyn SolutionView, _t: SimTime) -> Health {
+    /// Regulate exactly like the desktop `supply::regulate`: read the rail,
+    /// switch CV/CC if needed (one sample of lag) and record the current.
+    fn commit_with(&mut self, view: &dyn SolutionView, t: SimTime, cx: &mut dyn EventCtx) -> Health {
         let Some(plus) = &self.plus_net else {
             return Health::Ok;
         };
         let v = view.value(&format!("v({plus})")).unwrap_or(0.0);
         let s = self.settings;
         if !s.on {
-            self.mode = SupplyMode::Off;
+            self.mode = self.apply(SupplyMode::Off, cx);
+            self.amps = 0.0;
             return Health::Ok;
         }
         let i_cv = (s.volts - v) / s.series_r;
-        self.mode = if i_cv > s.current_limit {
-            SupplyMode::Cc
-        } else {
-            SupplyMode::Cv
+        let next = match self.mode {
+            SupplyMode::Off | SupplyMode::Cv => {
+                if i_cv > s.current_limit {
+                    SupplyMode::Cc
+                } else {
+                    SupplyMode::Cv
+                }
+            }
+            SupplyMode::Cc => {
+                // Compliance: if the rail would rise above the set point, go back to CV.
+                if v > s.volts { SupplyMode::Cv } else { SupplyMode::Cc }
+            }
         };
+        if next != self.mode {
+            self.mode = self.apply(next, cx);
+        }
+        self.amps = match self.mode {
+            SupplyMode::Cc => s.current_limit,
+            SupplyMode::Cv => i_cv.max(0.0),
+            SupplyMode::Off => 0.0,
+        };
+        self.commit(view, t)
+    }
+
+    /// Rating check only; regulation happens in [`Component::commit_with`].
+    fn commit(&mut self, view: &dyn SolutionView, _t: SimTime) -> Health {
+        let Some(plus) = &self.plus_net else {
+            return Health::Ok;
+        };
+        let v = view.value(&format!("v({plus})")).unwrap_or(0.0);
+        if !self.settings.on {
+            return Health::Ok;
+        }
         if !(RATED_MIN_V..=RATED_MAX_V).contains(&v) && v > 0.05 {
             Health::Warning(format!("rail {v:.3} V outside {RATED_MIN_V}–{RATED_MAX_V} V"))
         } else {
@@ -215,6 +292,8 @@ impl Component for BenchPsu {
         let mut i = [0.0; 2];
         self.terminal_currents(view, &mut i);
         out.push(("amps".into(), -i[0]));
+        // The regulated current from the last commit, as the PSU face shows it.
+        out.push(("regulated_amps".into(), self.amps));
         out.push((
             "mode".into(),
             match self.mode {

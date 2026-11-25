@@ -19,6 +19,8 @@ mod live;
 mod meters;
 #[cfg(feature = "gui")]
 mod meters_ui;
+#[cfg(all(feature = "gui", test))]
+mod parity;
 #[cfg(feature = "gui")]
 mod pins;
 #[cfg(feature = "gui")]

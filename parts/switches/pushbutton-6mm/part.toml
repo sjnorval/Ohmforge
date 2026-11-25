@@ -2,8 +2,9 @@
 # each side are joined inside the part, so it is modelled as two pins.
 # Simulated as an ideal switch: `ron` closed, `roff` open; set the state per
 # placement (`closed = 1.0`) or at run time through the resistor's `r`
-# parameter (see `BuiltBoard::switch_param`). Contact bounce is not part of
-# the model: drive it as a sequence of closes and opens.
+# parameter (see `BuiltBoard::switch_param`). On the engine path a host
+# `closed` change plays the contact bounce from `of_components::bounce`
+# (placement param `bounce = false` turns it off).
 [part]
 id = "generic.pushbutton"
 name = "Tactile push button, 6 mm, SPST-NO"

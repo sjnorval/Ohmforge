@@ -17,10 +17,8 @@ use std::path::PathBuf;
 
 use of_firmware::{ElfImage, sha256};
 use of_soc_esp32c3::Esp32c3;
-use of_soc_esp32c3::bootloader::{C3_BOOTLOADER_FILE, C3_BOOTLOADER_SHA256, espflash_flash_image};
-use of_soc_esp32c3::rom::{C3_ROM_FILE, C3_ROM_SHA256, ROM_ELFS_RELEASE, RomImage};
-
-use of_core::SimTime;
+use of_soc_esp32c3::bootloader::{C3_BOOTLOADER_FILE, C3_BOOTLOADER_SHA256};
+use of_soc_esp32c3::rom::{C3_ROM_FILE, C3_ROM_SHA256, ROM_ELFS_RELEASE, RomImage, boot_from_rom};
 
 /// Shown in the GUI when the ROM or bootloader has not been fetched.
 pub(crate) const MISSING_MESSAGE: &str = "This demo needs Espressif's ESP32-C3 ROM and espflash's second-stage bootloader, which are not bundled with Ohmforge. Run scripts/fetch-esp-rom-elfs.ps1 (or scripts/fetch-esp-rom-elfs.sh) and click Reset. Unlike the LED blink demo, these esp-hal apps (dimmer, fade, and the push-button demos) cannot start from the app image alone.";
@@ -74,24 +72,7 @@ fn rom_and_bootloader() -> Result<(RomImage, Vec<u8>), String> {
 /// Power on the fetched ROM and boot `app` from flash until `banner` appears.
 pub(crate) fn boot_app(app: &[u8], partitions: &[u8], banner: &str) -> Result<Esp32c3, String> {
     let (rom, bootloader) = rom_and_bootloader()?;
-    let mut soc = Esp32c3::new();
-    let image = espflash_flash_image(&bootloader).map_err(|e| format!("bootloader image: {e}"))?;
-    soc.write_flash(0, &image);
-    soc.write_flash(0x8000, partitions);
-    soc.write_flash(0x1_0000, app);
-    soc.power_on_rom(&rom);
-    let mut t = SimTime::ZERO;
-    while !soc.uart_text().contains(banner) {
-        if t >= SimTime::from_ms(100) {
-            return Err(format!("firmware did not print its banner: {:?}", soc.uart_text()));
-        }
-        t = t.saturating_add(SimTime::from_ms(1));
-        soc.run_until(t);
-    }
-    if !soc.resets().is_empty() {
-        return Err(format!("chip reset during boot: {:?}", soc.resets()));
-    }
-    Ok(soc)
+    boot_from_rom(&rom, &bootloader, app, partitions, banner)
 }
 
 #[cfg(test)]

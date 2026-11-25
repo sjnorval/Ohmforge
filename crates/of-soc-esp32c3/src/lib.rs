@@ -71,7 +71,7 @@ pub mod watchdog;
 
 pub use boot::{FlashBoot, FlashBootError};
 pub use bus::SocBus;
-pub use component::{BootImage, Esp32c3Component, QUIESCENT_A, UART0_PORT};
+pub use component::{BootImage, Esp32c3Component, QUIESCENT_A, UART0_PORT, register};
 pub use engine::{
     Esp32c3Engine, InputWatch, PinLink, adc_request_code, adc_value_code, all_pin_codes, decode_adc_request,
     decode_input_code, decode_pin_code, initial_input_level, input_code, input_watches, pin_code,

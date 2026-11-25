@@ -11,6 +11,63 @@ pub use library_component::LibraryComponent;
 pub use of_parts::Corner;
 pub use psu::{BenchPsu, SupplyMode, SupplySettings};
 
+use std::sync::Arc;
+
+use of_engine::{ComponentSpec, Registry};
+
+/// Models built from a parts-library part through the analog bridge.
+pub const LIBRARY_MODELS: &[&str] = &[
+    "rust:resistor",
+    "rust:capacitor",
+    "rust:led",
+    "rust:bjt",
+    "rust:potentiometer",
+    "rust:switch",
+];
+
+/// Register the built-in models: every [`LIBRARY_MODELS`] entry as a
+/// [`LibraryComponent`] from `lib`, and `rust:bench-psu` as a [`BenchPsu`].
+pub fn register_builtin(reg: &mut Registry, lib: Arc<Library>, corner: Corner, env: Env) {
+    for &model in LIBRARY_MODELS {
+        let lib = Arc::clone(&lib);
+        reg.register(
+            model,
+            Box::new(move |spec: ComponentSpec<'_>| {
+                let c = LibraryComponent::new(
+                    spec.refdes,
+                    spec.part_id,
+                    Arc::clone(&lib),
+                    spec.numeric_params(),
+                    corner,
+                    env,
+                )?;
+                Ok(Box::new(c) as Box<dyn Component>)
+            }),
+        );
+    }
+    reg.register(
+        "rust:bench-psu",
+        Box::new(|spec: ComponentSpec<'_>| {
+            let mut s = SupplySettings::default();
+            let p = spec.numeric_params();
+            if let Some(&v) = p.get("volts") {
+                s.volts = v;
+            }
+            if let Some(&v) = p.get("series_r") {
+                s.series_r = v;
+            }
+            if let Some(&v) = p.get("current_limit") {
+                s.current_limit = v;
+            }
+            if let Some(&v) = p.get("on") {
+                s.on = v != 0.0;
+            }
+            Ok(Box::new(BenchPsu::new(spec.refdes, s)) as Box<dyn Component>)
+        }),
+    );
+}
+
+use analog::{Env, Library};
 use of_component_api::{Component, ComponentInfo, ElabCtx, ElabError, PinKind, PinSpec, SolutionView};
 
 /// Ideal resistor component (direct device, no library lookup).

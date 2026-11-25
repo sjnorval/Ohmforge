@@ -295,6 +295,35 @@ fn current_ma(gpio: f64, anode: f64) -> f64 {
 }
 
 #[cfg(test)]
+impl Blink {
+    /// Start the edge log used by the parity goldens.
+    pub(crate) fn parity_start(&mut self) {
+        self.kernel
+            .engine_as::<Esp32c3Engine>(self.cpu)
+            .expect("registered ESP32-C3")
+            .start_edge_log();
+    }
+
+    /// Raw outputs for the parity goldens.
+    pub(crate) fn parity_raw(&mut self) -> crate::parity::Raw {
+        let origin = SimTime::ZERO;
+        let led = self.samples.to_vec();
+        let psu = self.psu_samples.to_vec();
+        let cpu = self
+            .kernel
+            .engine_as::<Esp32c3Engine>(self.cpu)
+            .expect("registered ESP32-C3");
+        crate::parity::Raw {
+            edges: cpu.logged_edges(),
+            origin,
+            uart: cpu.soc.uart_text(),
+            led,
+            psu,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

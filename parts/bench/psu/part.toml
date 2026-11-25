@@ -1,0 +1,31 @@
+# Bench power supply: an instrument, not a part on the board. Constant
+# voltage with a series resistance, switching to constant current at the
+# limit (one sample of lag). Placement params: `volts`, `series_r`,
+# `current_limit` and `on`. The Rust model is `BenchPsu` in of-components
+# (`model = "rust:bench-psu"`); its solver devices are named `<ref>` and
+# `<ref>_cc`. It has no variant because nothing is bought; the `bom = false`
+# flag waits for E6.
+[part]
+id = "bench.psu"
+name = "Bench power supply"
+category = "instrument/power-supply"
+model = "rust:bench-psu"
+verification = "community"
+
+[[pin]]
+number = "1"
+name = "+"
+kind = "power"
+[[pin]]
+number = "2"
+name = "-"
+kind = "ground"
+
+[electrical]
+volts = { typ = 3.3, min = 0.0, max = 5.0, unit = "V", note = "set point" }
+series_r = { typ = 0.1, min = 1e-4, max = 1e3, unit = "ohm" }
+current_limit = { typ = 0.5, min = 1e-6, max = 2.0, unit = "A" }
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

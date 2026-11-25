@@ -1,14 +1,16 @@
 //! [`Component`] wrappers around library parts (bridge-backed elaboration).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use of_component_api::{
-    Component, ComponentEvent, ComponentInfo, ElabCtx, ElabError, EventCtx, PinKind, PinSpec, SolutionView,
+    Component, ComponentEvent, ComponentInfo, DeviceRef, ElabCtx, ElabError, EventCtx, PinKind, PinSpec, SolutionView,
 };
+use of_core::SimTime;
 use of_parts::{Corner, PartFile};
 
 use crate::analog::{Env, Library, Placement, Pot, Switch, add_placement};
+use crate::bounce::{BounceSettings, bounce_script};
 
 /// A placed library part that elaborates through [`add_placement`].
 pub struct LibraryComponent {
@@ -26,6 +28,17 @@ pub struct LibraryComponent {
     kind: String,
     /// Pin → net names captured at elaborate time.
     pin_nets: BTreeMap<String, String>,
+    /// Pot leg devices (first pin to wiper, wiper to last pin).
+    pot_refs: Option<(DeviceRef, DeviceRef)>,
+    /// Switch resistor device.
+    switch_ref: Option<DeviceRef>,
+    /// Held switch state as last requested by the host.
+    closed: bool,
+    /// Contact bounce for host `closed` changes (switches only).
+    bounce: BounceSettings,
+    /// Scheduled contact changes: (timer code, contact closed).
+    pending: VecDeque<(u32, bool)>,
+    next_code: u32,
 }
 
 impl LibraryComponent {
@@ -64,7 +77,51 @@ impl LibraryComponent {
             pot: None,
             kind,
             pin_nets: BTreeMap::new(),
+            pot_refs: None,
+            switch_ref: None,
+            closed: false,
+            bounce: BounceSettings::default(),
+            pending: VecDeque::new(),
+            next_code: 0,
         })
+    }
+
+    /// Contact bounce used when the host changes `closed`.
+    pub fn bounce(&self) -> BounceSettings {
+        self.bounce
+    }
+
+    /// Change contact bounce (the host parameter `bounce` does the same).
+    pub fn set_bounce(&mut self, bounce: BounceSettings) {
+        self.bounce = bounce;
+    }
+
+    fn set_contact(&mut self, closed: bool, cx: &mut dyn EventCtx) {
+        self.params.insert("closed".into(), if closed { 1.0 } else { 0.0 });
+        if let (Some(dev), Some(sw)) = (self.switch_ref, &self.switch) {
+            let _ = cx.set(dev, "r", if closed { sw.ron } else { sw.roff });
+        }
+    }
+
+    /// The host pressed or released a switch: play the bounce script, as the
+    /// desktop button demo's queue did (edges at t <= 0 apply at once).
+    fn host_closed(&mut self, closed: bool, cx: &mut dyn EventCtx) {
+        if self.closed == closed && self.pending.is_empty() {
+            return;
+        }
+        self.closed = closed;
+        self.pending.clear();
+        let now = cx.now();
+        for (dt, c) in bounce_script(closed, self.bounce) {
+            if dt <= 0.0 {
+                self.set_contact(c, cx);
+            } else {
+                self.next_code = self.next_code.wrapping_add(1);
+                let code = self.next_code;
+                self.pending.push_back((code, c));
+                cx.schedule(now.saturating_add(SimTime::from_secs_f64(dt)), code);
+            }
+        }
     }
 }
 
@@ -137,14 +194,50 @@ impl Component for LibraryComponent {
         self.instance = Some(added.instance);
         self.switch = added.switch;
         self.pot = added.pot;
+        if let Some(p) = &self.pot {
+            self.pot_refs = cx.device_ref(&p.a).zip(cx.device_ref(&p.b));
+        }
+        if let Some(sw) = &self.switch {
+            self.switch_ref = cx.device_ref(&sw.device);
+            self.closed = self.params.get("closed").copied().unwrap_or(0.0) != 0.0;
+        }
+        if let Some(b) = cx.param("bounce") {
+            self.bounce.enabled = b != 0.0;
+        }
+        self.bounce.seed = cx.seed();
         Ok(())
     }
 
-    fn on_event(&mut self, ev: &ComponentEvent, _cx: &mut dyn EventCtx) {
-        let ComponentEvent::HostParam { name, value } = ev else {
-            return;
-        };
-        self.params.insert(name.to_ascii_lowercase(), *value);
+    fn on_event(&mut self, ev: &ComponentEvent, cx: &mut dyn EventCtx) {
+        match ev {
+            ComponentEvent::HostParam { name, value } => {
+                let key = name.to_ascii_lowercase();
+                match key.as_str() {
+                    "position" if self.pot.is_some() => {
+                        let pos = value.clamp(0.0, 1.0);
+                        self.params.insert(key, pos);
+                        if let (Some((a, b)), Some(p)) = (self.pot_refs, &self.pot) {
+                            let (ra, rb) = p.legs(pos);
+                            let _ = cx.set(a, "r", ra);
+                            let _ = cx.set(b, "r", rb);
+                        }
+                    }
+                    "closed" if self.switch.is_some() => self.host_closed(*value != 0.0, cx),
+                    "bounce" => self.bounce.enabled = *value != 0.0,
+                    _ => {
+                        self.params.insert(key, *value);
+                    }
+                }
+            }
+            ComponentEvent::Timer { code } => {
+                if let Some(i) = self.pending.iter().position(|(c, _)| c == code) {
+                    // Earlier entries were superseded by this one firing.
+                    let (_, closed) = self.pending.remove(i).expect("pending entry");
+                    self.pending.drain(..i);
+                    self.set_contact(closed, cx);
+                }
+            }
+        }
     }
 
     fn terminal_currents(&self, view: &dyn SolutionView, out: &mut [f64]) {

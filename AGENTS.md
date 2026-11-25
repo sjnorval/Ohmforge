@@ -12,7 +12,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 
 **Schematic wire routing** (under the P2 schematic editor; keep the existing look): [`docs/design/wire-routing.md`](docs/design/wire-routing.md).
 
-**Base engine and plug-in components** (E1 done in #43; PSU return fix #45 done, closed by #54; E2 done in #46/#62; E3 done in #47/#63; E4 to E6 in P3 / 0.2, #48 to #50, with E4a, the circuit file format, in RFC 0003): [`docs/design/engine-components.md`](docs/design/engine-components.md). The engine owns nets, solvers, time, events and measurement; every real part, the ESP32-C3 and the bench PSU are components on one API. New parts follow the engine API (no per-demo glue in `of-ui`, no hidden connections to ground); demos become circuit files in E4.
+**Base engine and plug-in components** (E1 done in #43; PSU return fix #45 done, closed by #54; E2 done in #46/#62; E3 done in #47/#63; E4 to E6 in P3 / 0.2, #48 to #50, with E4a, the circuit file format, in RFC 0003; E4b-1, the model registry and `Session` runtime with trace parity against the legacy demos, in review; E4b-2, the demo circuit files, `ohmforge run` and parity from the files, next): [`docs/design/engine-components.md`](docs/design/engine-components.md). The engine owns nets, solvers, time, events and measurement; every real part, the ESP32-C3 and the bench PSU are components on one API. New parts follow the engine API (no per-demo glue in `of-ui`, no hidden connections to ground); demos become circuit files in E4.
 
 **Arduino-ESP32 and ESP-IDF MVP demos** (#60, design first): [`docs/design/arduino-idf-mvp-demos.md`](docs/design/arduino-idf-mvp-demos.md). Pin-parity with the esp-hal demos; real-ROM boot; committed images and CI toolchains; not the P4 Arduino IDE board package (I6).
 
@@ -34,7 +34,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-netlist` | Circuit graph, nets, analog/digital partitioning; SPICE netlist subset parser (`spice`) | Net types; SPICE parser implemented |
 | `of-analog` | MNA, Newton-Raphson, sparse LU (faer), trapezoidal/Gear-2, LTE timestep, device models | Implemented: DC op, DC sweeps (nested), AC, transient; R C L K V I E G F H (incl. POLY) S W, diode/LED, BJT (full SPICE3 Gummel-Poon), MOSFET L1/L3 with Meyer caps; temperature; `PinDriver`; `AnalogEngine` for the kernel; ngspice-checked |
 | `of-digital` | 4-state event-driven logic kernel | Logic type + test |
-| `of-component-api` | `Component` trait (`elaborate`, `terminal_currents`, …), `ElabCtx` / `EventCtx`, `Health`, `FaultKind` ([`docs/design/engine-components.md`](docs/design/engine-components.md), RFC 0001) | E2 API on `main` (#62, RFC 0001 Accepted); stable from P6 |
+| `of-component-api` | `Component` trait (`elaborate`, `terminal_currents`, …), `ElabCtx` / `EventCtx`, `Health`, `FaultKind` ([`docs/design/engine-components.md`](docs/design/engine-components.md), RFC 0001) | E2 API on `main` (#62, RFC 0001 Accepted); E4b adds `ParamValue`, `attach`, `commit_with` and `ElabCtx::device_ref` (RFC 0001 addendum); stable from P6 |
 | `of-components` | Built-in part models; `analog`: parts-to-devices bridge (`Library`, `Board`, `build`, `to_spice`) | Bridge implemented + tests |
 | `of-parts` | `part.toml` schema (pins, `[analog]`, tolerances/corners) and loader | Implemented + tests |
 | `of-circuit` | Circuit files (`*.circuit.toml`, RFC 0003): parse with line and column errors, structural validation, canonical `save` with byte-identical round trip; feature `engine`: parts-library and firmware SHA-256 checks through a `Resolver`; feature `fs`: `FsResolver`, file and parts loading (host only) | E4a (#48): format crate + tests; the engine `Session` builder follows in E4b |
@@ -46,7 +46,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-firmware` | ELF, flash images, UF2, DWARF | ELF32 RISC-V reader (segments, sections, symbols), ESP image parser/writer (checksum, SHA-256, 64 KiB flash alignment), partition tables (MD5 row) + tests |
 | `of-plugin-wasm` | Sandboxed WASM component host | Empty |
 | `of-instruments` | Measurement service (trace store, period-aligned averages) and instruments: scope, logic analyser, decoders, DMM, logger; serial monitor model (`serial::SerialMonitor`, lean console) | Serial monitor (text, hex, find, 64 KiB cap); the rest still to do (phase E5 in P3, #49). The bench PSU is planned as a component (`bench.psu`, E2), not an instrument |
-| `of-engine` | Base engine: elaborates components into `of-analog`, checks invariants (one ground, source return paths, KCL, no floating nets) | E2 (#46): `EngineBuilder`, KCL checks; ESP32-C3 component in of-soc (E3); circuit files still E4 |
+| `of-engine` | Base engine: elaborates components into `of-analog`, checks invariants (one ground, source return paths, KCL, no floating nets) | E2 (#46): `EngineBuilder`, KCL checks; ESP32-C3 component in of-soc (E3); E4b: `Registry` (model string to constructor) and `Session` (kernel, attach, timers, host params, commit); circuit files drive it from E4b-2 |
 | `of-bom` | BOM aggregation, ZAR costing, CSV export, demo-board placements and build checklist | Working + tests (#59) |
 | `of-kicad` | KiCad netlist and `.kicad_sch` export | Empty |
 | `of-gdb` | GDB remote serial protocol | Empty |

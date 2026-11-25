@@ -237,6 +237,18 @@ specific parts"). `project.toml` (P0) can live in `of-circuit` later.
   `max(1 nA, 1 ppm)` on analog samples. Parity runs set the ESP32 quiescent load
   to 0; the shipped demo files keep the true-to-life 5 mA, recorded as a separate
   reviewed change.
+- Accepted exceptions (Stefan, 25 November 2026, E4b-1), everything else keeps
+  the tolerances above:
+  - **Dimmer PSU current: 3.5 nA** instead of 1 nA. The engine's ESP32-C3
+    puts a GPIO pad on the ADC pin GPIO2 (1 GΩ to ground while idle), which
+    the hand-wired dimmer leaves out, so the wiper leaks up to 3.3 nA into the
+    supply. Digital outputs stay exact.
+  - **Against the committed goldens: 1 % relative on samples off the 50 µs
+    scope grid** (the samples taken on LEDC edges, so far only in the fade
+    demo). The goldens are recorded on Linux x86-64 (CI); Windows MSVC's libm
+    moves those edge samples by up to 0.35 %. Every run is also compared with
+    the hand-wired demo on the same machine at the strict tolerances, which
+    holds on Linux and Windows.
 
 ## Licensing impact
 

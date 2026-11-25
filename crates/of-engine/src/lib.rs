@@ -6,6 +6,12 @@ use std::collections::BTreeMap;
 use of_analog::{Circuit, Device, Var, analysis, results::OpPoint};
 use of_component_api::{Component, DeviceRef, ElabCtx, ElabError, PinKind, SolutionView};
 
+mod registry;
+mod session;
+
+pub use registry::{ComponentSpec, Ctor, Firmware, Registry};
+pub use session::{Session, SessionConfig};
+
 /// Engine build / invariant errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EngineError {
@@ -60,10 +66,19 @@ impl ElabCtx for ElabState<'_> {
 
     fn add_device(&mut self, dev: Box<dyn Device>) -> Result<DeviceRef, ElabError> {
         let name = dev.name().to_owned();
+        // A handle is the device's index in the circuit, so devices added
+        // through `circuit_mut` (bridge placements) get stable handles too.
+        let idx = self.circuit.devices().count() as u32;
         self.circuit.add_boxed(dev).map_err(ElabError::msg)?;
-        let idx = self.device_names.len() as u32;
         self.device_names.push(name);
         Ok(DeviceRef(idx))
+    }
+
+    fn device_ref(&self, name: &str) -> Option<DeviceRef> {
+        self.circuit
+            .devices()
+            .position(|d| d.name() == name)
+            .map(|i| DeviceRef(i as u32))
     }
 
     fn circuit_mut(&mut self) -> &mut Circuit {
@@ -193,8 +208,22 @@ impl EngineBuilder {
             )));
         }
         for (name, net) in &self.nets {
-            if net.pins.is_empty() && !net.ground {
+            if net.ground {
+                if net.pins.is_empty() && !self.pending.is_empty() {
+                    return Err(EngineError::Invariant(format!(
+                        "ground net '{name}' has no pins: nothing returns to ground"
+                    )));
+                }
+                continue;
+            }
+            if net.pins.is_empty() {
                 return Err(EngineError::Invariant(format!("net '{name}' has no pins (floating)")));
+            }
+            if net.pins.len() == 1 {
+                let (r, p) = &net.pins[0];
+                return Err(EngineError::Invariant(format!(
+                    "net '{name}' has only one pin ({r}.{p}): it is floating"
+                )));
             }
         }
 
@@ -250,10 +279,13 @@ impl EngineBuilder {
             });
         }
 
+        // Device names in circuit order, so `DeviceRef(i)` names `device_names[i]`.
+        let device_names = circuit.devices().map(|d| d.name().to_owned()).collect();
+        drop(all_devices);
         Ok(BuiltEngine {
             circuit,
             components,
-            device_names: all_devices,
+            device_names,
             ground: self.ground,
         })
     }
@@ -279,7 +311,7 @@ pub struct BuiltEngine {
     pub circuit: Circuit,
     /// Placed components.
     pub components: Vec<PlacedComponent>,
-    /// All device names in elaboration order.
+    /// All device names in circuit order (`DeviceRef(i)` is entry `i`).
     pub device_names: Vec<String>,
     /// Ground net name.
     pub ground: String,
