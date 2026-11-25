@@ -38,7 +38,7 @@ use of_core::{Engine, EngineError, Event, SimTime, SyncCtx, ValueCode};
 use of_cpu_riscv::{HaltReason, RunExit};
 
 use crate::gpio::{PinOut, VIH_FRACTION, VIL_FRACTION};
-use crate::soc::Esp32c3;
+use crate::soc::{Esp32c3, PinEdge};
 
 /// Send changes on `pin` to engine `target` as [`pin_code`] events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -232,6 +232,8 @@ pub struct Esp32c3Engine {
     /// yet (so an input event can wake it earlier).
     idle_claim: Option<SimTime>,
     max_lead: Option<SimTime>,
+    /// Forwarded pin edges kept for traces and parity tests (off by default).
+    edge_log: Option<Vec<PinEdge>>,
 }
 
 impl Esp32c3Engine {
@@ -246,7 +248,27 @@ impl Esp32c3Engine {
             inputs: 0,
             idle_claim: None,
             max_lead: None,
+            edge_log: None,
         }
+    }
+
+    /// Start keeping every pin edge from now on (forwarded or still pending).
+    ///
+    /// Edges already recycled are not recovered. Off by default so the live
+    /// demos do not grow a log.
+    pub fn start_edge_log(&mut self) {
+        self.edge_log.get_or_insert_with(Vec::new);
+    }
+
+    /// Edges seen since [`Self::start_edge_log`]: recycled ones first, then the
+    /// ones the chip still holds. Empty when logging is off.
+    pub fn logged_edges(&self) -> Vec<PinEdge> {
+        let Some(log) = &self.edge_log else {
+            return Vec::new();
+        };
+        let mut out = log.clone();
+        out.extend_from_slice(self.soc.pin_edges());
+        out
     }
 
     /// Forward changes of `link.pin` as events to `link.target`.
@@ -284,6 +306,10 @@ impl Esp32c3Engine {
     pub fn recycle_consumed_edges(&mut self) {
         if self.sent == 0 {
             return;
+        }
+        if let Some(log) = &mut self.edge_log {
+            let n = self.sent.min(self.soc.pin_edges().len());
+            log.extend_from_slice(&self.soc.pin_edges()[..n]);
         }
         self.soc.drain_pin_edges(self.sent);
         self.sent = 0;
