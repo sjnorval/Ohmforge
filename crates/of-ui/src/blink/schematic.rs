@@ -7,8 +7,11 @@ use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
 use crate::wiring::{self, Point};
 
+/// Draw the blink board; `board` is the routed schematic (hand-written or
+/// from the circuit file).
 pub(crate) fn show(
     ui: &mut Ui,
+    board: &wiring::Schematic,
     current_ma: f64,
     brightness: f32,
     supply: SupplyStatus,
@@ -17,7 +20,7 @@ pub(crate) fn show(
     let mut hit = SchematicHit::default();
     panel().show(ui, |ui| {
         ui.label(RichText::new("Schematic").strong());
-        hit = draw(ui, brightness, supply, meters);
+        hit = draw(ui, board, brightness, supply, meters);
         ui.horizontal(|ui| {
             let pct = (brightness * 100.0).round() as i32;
             ui.label(
@@ -38,7 +41,13 @@ pub(crate) fn show(
     hit
 }
 
-fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'_>) -> SchematicHit {
+fn draw(
+    ui: &mut Ui,
+    board: &wiring::Schematic,
+    brightness: f32,
+    supply: SupplyStatus,
+    meters: &MeterView<'_>,
+) -> SchematicHit {
     let (response, painter) = ui.allocate_painter(vec2(ui.available_width(), 268.0), Sense::hover());
     let description = format!(
         "ESP32-C3 GPIO{GPIO} connects through {RESISTOR_REF} ({R_SERIES:.0} ohms) to the {LED_REF} anode. The cathode returns to ESP32-C3 ground."
@@ -65,7 +74,6 @@ fn draw(ui: &mut Ui, brightness: f32, supply: SupplyStatus, meters: &MeterView<'
         painter.text(point(x, y), align, name, FontId::monospace(12.0), color);
     };
 
-    let board = wiring::blink_board();
     let paint_poly = |pts: &[Point], stroke: Stroke| {
         if pts.len() < 2 {
             return;

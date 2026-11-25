@@ -7,8 +7,11 @@ use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
 use crate::wiring::{self, Point};
 
+/// Draw the dimmer (`position` is `Some`) or fade board; `board` is the
+/// routed schematic (hand-written or from the circuit file).
 pub(crate) fn show(
     ui: &mut Ui,
+    board: &wiring::Schematic,
     current_ma: f64,
     brightness: f32,
     position: Option<f64>,
@@ -18,7 +21,7 @@ pub(crate) fn show(
     let mut hit = SchematicHit::default();
     panel().show(ui, |ui| {
         ui.label(RichText::new("Schematic").strong());
-        hit = draw(ui, brightness, position, supply, meters);
+        hit = draw(ui, board, brightness, position, supply, meters);
         ui.horizontal(|ui| {
             let pct = (brightness * 100.0).round() as i32;
             ui.label(RichText::new(format!("LED {pct}%")).strong());
@@ -36,6 +39,7 @@ pub(crate) fn show(
 
 fn draw(
     ui: &mut Ui,
+    board: &wiring::Schematic,
     brightness: f32,
     position: Option<f64>,
     supply: SupplyStatus,
@@ -72,11 +76,6 @@ fn draw(
         painter.text(point(x, y), align, name, FontId::monospace(12.0), color);
     };
 
-    let board = if let Some(pos) = position {
-        wiring::dimmer_board_at(pos)
-    } else {
-        wiring::fade_board()
-    };
     let paint_poly = |pts: &[Point], stroke: Stroke| {
         if pts.len() < 2 {
             return;
