@@ -101,7 +101,8 @@ Grammar rules:
 - `Probeable` is what a running circuit offers: `now_secs()` and `sample(&Signal) -> Result<f64, ProbeError>`. `Session` implements it in `of-instruments` (decision D4: `of-instruments` depends on `of-engine`, never the reverse).
 - `SamplePlan::Every(step)` or `EveryAndEvents(step)`. The grid is today's `SampleClock`; events are exact instants the run loop reports, LEDC edges today.
 - `MeasurementService::watch(signal, window)` returns a `ChannelId`. Watching the same signal twice shares the channel, and ids are never reused.
-- `on_step` samples every channel at the same instant, or none (a failed probe records nothing).
+- `on_step` samples every channel at the same instant, or none (a failed probe records nothing). `record` does the same without consulting the grid, for a run loop that keeps its own clock (the desktop's LEDC-edge loop, E5b), and `set_visible_window` re-sizes every ring and the grid together.
+- `Session` as `Probeable` (E5b): `v(net)` reads the solution, with the ground net (`0` or `gnd`) at 0 V when the solver does not name it; `i(R1)` needs a two-pin part; `i(REF.pin)` uses the pin order of `info()`; `r(..)` searches `readings`; `d(..)` is `NotAnalog` (the logic analyser reads edges, E5g). Unknown parts, pins, nets or readings are `Unresolved`.
 - Rings are `TraceBuf`: bounded by `MAX_TRACE_SAMPLES`, with retention tied to the window.
 - Statistics are pure functions over `(t, value)` slices:
   - `average_window` and `average_periods`, the period-aligned mean from #45;
