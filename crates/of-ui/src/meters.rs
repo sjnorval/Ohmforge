@@ -1,6 +1,12 @@
-//! Virtual voltmeters and ammeters on the live schematic.
+//! Virtual voltmeters and ammeters on the live schematic. Placement and
+//! readings are `of_instruments::meter` (E5c); this module keeps the
+//! schematic-side names. The pre-E5c readout below is test-only: it is the
+//! reference of the old-versus-new equality test.
 
+#[cfg(test)]
 use std::collections::BTreeMap;
+
+use of_instruments::Multimeter;
 
 /// A voltmeter or a non-disturbing ammeter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,31 +38,26 @@ pub struct ProbeRef {
 }
 
 /// A meter the user has placed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlacedMeter {
     pub id: u64,
     pub kind: MeterKind,
     pub a: ProbeRef,
     pub b: ProbeRef,
+    /// What the worker samples and averages.
+    pub meter: Multimeter,
 }
 
 /// Why an ammeter cannot be placed (or cannot be read).
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AmpError {
     SameNet,
     NoUniqueBranch,
 }
 
-impl AmpError {
-    pub fn message(&self) -> &'static str {
-        match self {
-            Self::SameNet => "those points are on the same net",
-            Self::NoUniqueBranch => "no single branch joins those points",
-        }
-    }
-}
-
 /// A two-terminal part and the current through it, from `a` toward `b`.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
     pub name: String,
@@ -67,6 +68,7 @@ pub struct Branch {
 
 /// Node voltages and two-terminal part currents, sampled from the solver
 /// without inserting sense elements.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CircuitReadout {
     /// Node voltages, including `"0"` / `"gnd"` at 0 V when present.
@@ -74,6 +76,7 @@ pub struct CircuitReadout {
     pub branches: Vec<Branch>,
 }
 
+#[cfg(test)]
 impl CircuitReadout {
     pub fn new() -> Self {
         Self::default()
@@ -129,14 +132,14 @@ impl CircuitReadout {
 }
 
 /// Live value of a placed meter.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum MeterReading {
     Volts(f64),
     Amps { amps: f64, part: String },
-    Error(AmpError),
-    Missing,
 }
 
+#[cfg(test)]
 impl MeterReading {
     pub fn display(&self) -> String {
         match self {
@@ -149,31 +152,12 @@ impl MeterReading {
                     format!("{ma:.2} mA")
                 }
             }
-            Self::Error(e) => e.message().to_owned(),
-            Self::Missing => "—".into(),
         }
     }
 }
 
-pub fn read_meter(meter: &PlacedMeter, readout: &CircuitReadout) -> MeterReading {
-    match meter.kind {
-        MeterKind::Volt => readout
-            .voltage_between(&meter.a.node, &meter.b.node)
-            .map(MeterReading::Volts)
-            .unwrap_or(MeterReading::Missing),
-        MeterKind::Amp => match readout.unique_current(&meter.a.node, &meter.b.node) {
-            Ok((part, amps)) => MeterReading::Amps { amps, part },
-            Err(e) => MeterReading::Error(e),
-        },
-    }
-}
-
-/// Try to finish an ammeter between `a` and `b`.
-pub fn place_ammeter(readout: &CircuitReadout, a: &ProbeRef, b: &ProbeRef) -> Result<(), AmpError> {
-    readout.unique_current(&a.node, &b.node).map(|_| ())
-}
-
 /// Fill voltages for the named nodes (missing nodes are skipped).
+#[cfg(test)]
 pub fn take_nodes(analog: &of_analog::AnalogEngine, names: &[&str], out: &mut CircuitReadout) {
     out.set_node("0", 0.0);
     out.set_node("gnd", 0.0);
@@ -186,6 +170,7 @@ pub fn take_nodes(analog: &of_analog::AnalogEngine, names: &[&str], out: &mut Ci
 }
 
 /// Series LED current equals the resistor current (the only path).
+#[cfg(test)]
 pub fn add_led_series(out: &mut CircuitReadout, resistor: &str, diode: &str, gpio: &str, anode: &str, ohms: f64) {
     let Some(ir) = out.voltage_between(gpio, anode).map(|v| v / ohms) else {
         return;
@@ -198,6 +183,7 @@ pub fn add_led_series(out: &mut CircuitReadout, resistor: &str, diode: &str, gpi
 /// (positive when the instrument sources into the rail). The CurrentSource used in
 /// CC mode has no `i()` probe, so callers pass `supply_status.amps` rather than
 /// summing `i(psu)` and `i(psu_cc)`.
+#[cfg(test)]
 pub fn add_psu(out: &mut CircuitReadout, sourced_amps: f64) {
     // Current from vdd toward 0 through the instrument is the opposite of the sourced current.
     out.push_branch("PSU", "vdd", "0", -sourced_amps);

@@ -9,7 +9,8 @@ use of_components::BounceSettings;
 use of_soc_esp32c3::UartByte;
 
 use crate::kind::DemoKind;
-use crate::meters::CircuitReadout;
+use of_instruments::{Multimeter, PartPins, Reading};
+
 use crate::session_sim::{SessionSim, StartOptions};
 use crate::supply::{SupplySettings, SupplyStatus};
 use crate::trace::{self, DEFAULT_VISIBLE_WINDOW};
@@ -50,6 +51,8 @@ pub(crate) enum Command {
     PushUart(Vec<u8>),
     /// Visible scope span in seconds (time/div x divisions).
     SetScopeWindow(f64),
+    /// The placed meters (id, meter); replaces the previous set (E5c).
+    SetMeters(Vec<(u64, Multimeter)>),
     Shutdown,
 }
 
@@ -80,7 +83,10 @@ pub(crate) struct Snapshot {
     pub led_trace: Vec<(f64, f64)>,
     pub uart: Vec<UartByte>,
     pub uart_baud: Option<f64>,
-    pub readout: CircuitReadout,
+    /// Every part's pins and nets, for placing meters (E5c).
+    pub layout: Vec<PartPins>,
+    /// Each placed meter's reading, by meter id.
+    pub meter_readings: Vec<(u64, Reading)>,
     /// Bumped on every boot/reset so the UI can drop stale UART.
     pub generation: u64,
 }
@@ -111,7 +117,8 @@ impl Snapshot {
             led_trace: Vec::new(),
             uart: Vec::new(),
             uart_baud: None,
-            readout: CircuitReadout::new(),
+            layout: Vec::new(),
+            meter_readings: Vec::new(),
             generation: 0,
         }
     }
@@ -170,6 +177,7 @@ struct Worker {
     booting: bool,
     generation: u64,
     scope_visible: f64,
+    meters: Vec<(u64, Multimeter)>,
 }
 
 impl Worker {
@@ -201,6 +209,7 @@ impl Worker {
         self.booting = false;
         self.playing = self.sim.is_ok();
         self.apply_scope_window();
+        self.apply_meters();
         self.generation = self.generation.saturating_add(1);
         self.rt_factor = 0.0;
         self.lagging = false;
@@ -251,6 +260,17 @@ impl Worker {
         }
     }
 
+    /// Sample the placed meters' signals (and only those).
+    fn apply_meters(&mut self) {
+        if let Ok(s) = &mut self.sim {
+            let keep: Vec<Multimeter> = self.meters.iter().map(|(_, m)| m.clone()).collect();
+            s.retain_meters(&keep);
+            for m in &keep {
+                s.watch_meter(m);
+            }
+        }
+    }
+
     fn apply_scope_window(&mut self) {
         let visible = self.scope_visible.max(trace::visible_window(trace::TIME_DIVS[0]));
         if let Ok(s) = &mut self.sim {
@@ -273,7 +293,10 @@ impl Worker {
         match &mut self.sim {
             Err(_) if self.booting => {}
             Err(e) => snap.error = Some(e.clone()),
-            Ok(s) => file_snapshot(s, &mut snap),
+            Ok(s) => {
+                file_snapshot(s, &mut snap);
+                snap.meter_readings = self.meters.iter().map(|(id, m)| (*id, s.read_meter(m))).collect();
+            }
         }
         snap
     }
@@ -315,7 +338,7 @@ fn file_snapshot(s: &mut SessionSim, snap: &mut Snapshot) {
     }
     snap.uart = s.uart_bytes().to_vec();
     snap.uart_baud = s.uart_baud();
-    snap.readout = s.circuit_readout();
+    snap.layout = s.layout();
 }
 
 fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) {
@@ -333,6 +356,7 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
         booting: true,
         generation: 0,
         scope_visible: DEFAULT_VISIBLE_WINDOW,
+        meters: Vec::new(),
     };
     // Publish a booting/starting snapshot, then build the first sim.
     publish(&shared, w.snapshot());
@@ -414,6 +438,8 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
         Command::Shutdown => return false,
         Command::SetKind(kind) => {
             if kind != w.kind {
+                // Meters belong to one circuit.
+                w.meters.clear();
                 w.boot(kind);
                 publish(shared, w.snapshot());
                 w.finish_boot();
@@ -465,6 +491,11 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
             publish(shared, w.snapshot());
         }
         Command::PushUart(bytes) => w.push_uart(&bytes),
+        Command::SetMeters(meters) => {
+            w.meters = meters;
+            w.apply_meters();
+            publish(shared, w.snapshot());
+        }
     }
     true
 }
@@ -633,8 +664,33 @@ mod tests {
             "{:?}",
             snap.supply_status
         );
-        let names: Vec<_> = snap.readout.branches.iter().map(|b| b.name.as_str()).collect();
-        assert_eq!(names, ["R1", "D1", "PSU"], "{names:?}");
+        let mut parts: Vec<_> = snap.layout.iter().map(|p| p.refdes.as_str()).collect();
+        parts.sort_unstable();
+        assert_eq!(parts, ["D1", "PSU", "R1", "U1"], "{parts:?}");
+
+        // A placed voltmeter reads the rail; an ammeter through PSU its current.
+        let psu = of_instruments::candidates(&snap.layout, "vdd", "0")
+            .unwrap()
+            .into_iter()
+            .find(|c| c.refdes == "PSU")
+            .expect("PSU joins vdd and ground");
+        live.send(Command::SetMeters(vec![
+            (1, of_instruments::Multimeter::voltmeter("vdd", "0")),
+            (2, of_instruments::Multimeter::ammeter(&psu)),
+        ]));
+        let t = snap.time;
+        let snap = wait_for(&live, |s| s.time > t + 1e-3 && s.meter_readings.len() == 2);
+        match &snap.meter_readings[..] {
+            [
+                (1, of_instruments::Reading::Volts(v)),
+                (2, of_instruments::Reading::Amps { amps, part }),
+            ] => {
+                assert!((3.2..3.31).contains(v), "{v}");
+                assert!((-30e-3..-15e-3).contains(amps), "{amps}");
+                assert_eq!(part, "PSU");
+            }
+            other => panic!("{other:?}"),
+        }
 
         live.send(Command::SetKind(DemoKind::ButtonIrq));
         let snap = wait_for(&live, |s| s.kind == DemoKind::ButtonIrq && !s.booting && s.time > 1e-3);
@@ -644,7 +700,8 @@ mod tests {
         }
         assert!(snap.time > 1e-3, "button-irq stalled at {} s", snap.time);
         assert!(snap.button_v.is_some());
-        assert!(snap.readout.branches.iter().any(|b| b.name == "SW1"));
+        assert!(snap.layout.iter().any(|p| p.refdes == "SW1"));
+        assert!(snap.meter_readings.is_empty(), "meters are cleared with the circuit");
     }
 
     #[test]

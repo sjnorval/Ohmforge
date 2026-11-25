@@ -22,16 +22,20 @@ use of_components::analog::{Env, Library};
 use of_components::{BounceSettings, register_builtin};
 use of_core::{SimTime, Stop};
 use of_engine::{Firmware, Registry, Session};
-use of_instruments::{ChannelId, MeasurementService, Probeable, SamplePlan, Signal};
+use of_instruments::{
+    Averaging, ChannelId, MeasurementService, MeterMode, Multimeter, PartPins, Probeable, Reading, SamplePlan, Signal,
+};
 use of_soc_esp32c3::{Esp32c3Engine, UartByte};
 
 use crate::adc_pwm::{self, PwmKind};
 use crate::button::{self, ButtonKind};
 use crate::kind::DemoKind;
+#[cfg(test)]
 use crate::meters::{self, CircuitReadout};
 use crate::supply::{RATED_MAX_V, RATED_MIN_V, SupplyMode, SupplySettings, SupplyStatus};
 use crate::trace::{self, SampleClock, TraceBuf};
 
+#[cfg(test)]
 const R_SERIES: f64 = 330.0;
 /// Display-average window of the PWM demos (as `PwmSim`).
 const PWM_AVG_WINDOW: f64 = 2e-3;
@@ -219,6 +223,13 @@ pub(crate) struct SessionSim {
     /// The measurement service; samples the file's `LED current` probe (A).
     meas: MeasurementService,
     led: ChannelId,
+    /// The placed meters' channels (E5c), with the LED probe again as the
+    /// averaging reference ([`Self::meter_ref`]).
+    meters: MeasurementService,
+    meter_ref: ChannelId,
+    /// Test only: the pre-E5c meter values at every sample instant.
+    #[cfg(test)]
+    old_log: Option<Vec<(f64, CircuitReadout)>>,
     psu_samples: TraceBuf,
     clock: SampleClock,
     /// Button loop: next grid sample (relative).
@@ -262,12 +273,18 @@ impl SessionSim {
         let style = Loop::of(kind);
         let mut meas = MeasurementService::new(SamplePlan::default());
         let led = meas.watch_default(led_probe(kind)?);
+        let mut meters = MeasurementService::new(SamplePlan::default());
+        let meter_ref = meters.watch_default(led_probe(kind)?);
         let mut d = Self {
             kind,
             s,
             style,
             meas,
             led,
+            meters,
+            meter_ref,
+            #[cfg(test)]
+            old_log: None,
             psu_samples: TraceBuf::default_scope(),
             clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             next_sample: SimTime::ZERO,
@@ -297,6 +314,7 @@ impl SessionSim {
     }
 
     /// The series resistor of the LED (`R1` on blink, `R2` elsewhere).
+    #[cfg(test)]
     fn resistor_ref(&self) -> &'static str {
         if self.kind == DemoKind::Blink { "R1" } else { "R2" }
     }
@@ -329,6 +347,12 @@ impl SessionSim {
     fn record_sample(&mut self) -> Result<(), String> {
         let t = self.time();
         self.meas.record(&mut self.s).map_err(|e| e.to_string())?;
+        self.meters.record(&mut self.s).map_err(|e| e.to_string())?;
+        #[cfg(test)]
+        if self.old_log.is_some() {
+            let r = self.old_instant();
+            self.old_log.as_mut().expect("checked").push((t, r));
+        }
         self.cpu().recycle_consumed_edges();
         self.s.commit().map_err(|e| e.to_string())?;
         self.supply_status = self.read_supply();
@@ -638,10 +662,92 @@ impl SessionSim {
         }
     }
 
+    // Meters (E5c).
+
+    /// Every part's pins and their nets in pin order, for
+    /// [`of_instruments::candidates`] (an unconnected pin has net `""`).
+    pub(crate) fn layout(&self) -> Vec<PartPins> {
+        self.s
+            .components()
+            .iter()
+            .map(|c| {
+                let info = c.component.info();
+                PartPins {
+                    refdes: info.refdes.clone(),
+                    pins: info
+                        .pins
+                        .iter()
+                        .map(|p| (p.name.clone(), c.pin_nets.get(&p.name).cloned().unwrap_or_default()))
+                        .collect(),
+                }
+            })
+            .collect()
+    }
+
+    /// Sample `meter`'s signal from the next sample on.
+    pub(crate) fn watch_meter(&mut self, meter: &Multimeter) {
+        self.meters.watch_default(meter.signal.clone());
+    }
+
+    /// Stop sampling signals that none of `keep` reads.
+    pub(crate) fn retain_meters(&mut self, keep: &[Multimeter]) {
+        let drop: Vec<ChannelId> = self
+            .meters
+            .channels()
+            .filter(|(id, c)| *id != self.meter_ref && !keep.iter().any(|m| m.signal == c.signal))
+            .map(|(id, _)| id)
+            .collect();
+        for id in drop {
+            self.meters.unwatch(id);
+        }
+    }
+
+    /// Averaging of every meter: whole PWM periods of the LED current, or
+    /// the kind's display window when no period is seen (as the PSU readout).
+    fn averaging(&self) -> Averaging {
+        Averaging {
+            reference: self.meter_ref,
+            high: trace::PWM_EDGE_HIGH * 1e-3,
+            periods: trace::PWM_AVG_PERIODS,
+            fallback: match self.style {
+                Loop::Pwm => PWM_AVG_WINDOW,
+                Loop::Blink | Loop::Button => trace::LED_AVG_WINDOW,
+            },
+        }
+    }
+
+    /// `meter`'s reading now; before its first sample (placed while paused)
+    /// the instantaneous value.
+    pub(crate) fn read_meter(&mut self, meter: &Multimeter) -> Reading {
+        let avg = self.averaging();
+        match meter.read(&self.meters, &avg, self.time()) {
+            Reading::Missing => match self.s.sample(&meter.signal) {
+                Ok(v) => match meter.mode {
+                    MeterMode::DcVolts => Reading::Volts(v),
+                    MeterMode::DcAmps => Reading::Amps {
+                        amps: if meter.negate { -v } else { v },
+                        part: meter.part.clone().unwrap_or_default(),
+                    },
+                },
+                Err(_) => Reading::Missing,
+            },
+            r => r,
+        }
+    }
+
     /// Node voltages and branch currents for the meters, with the same names
     /// as the hand-wired demos (ground is `0`, branches `R1`/`R2`, `D1`,
     /// `RV1 (1–W)`, `RV1 (W–3)`, `SW1`, `PSU`).
+    #[cfg(test)]
     pub(crate) fn circuit_readout(&mut self) -> CircuitReadout {
+        let mut out = self.old_instant();
+        meters::add_psu(&mut out, self.supply_status().display_amps());
+        out
+    }
+
+    /// [`Self::circuit_readout`] without the (already averaged) PSU branch.
+    #[cfg(test)]
+    fn old_instant(&mut self) -> CircuitReadout {
         let mut out = CircuitReadout::new();
         let mut nodes = vec!["gpio8", "led_a", "vdd"];
         match self.kind {
@@ -666,7 +772,6 @@ impl SessionSim {
             }
             DemoKind::Blink | DemoKind::Fade => {}
         }
-        meters::add_psu(&mut out, self.supply_status().display_amps());
         out
     }
 }
@@ -1075,6 +1180,116 @@ mod tests {
             }
         }
         eprintln!("i(R) vs V/R: {compared} samples, worst |diff| = {worst:e} A");
+    }
+
+    /// The pre-E5c meters' probe nodes of `kind` (ground is `0`).
+    fn old_nodes(kind: DemoKind) -> Vec<&'static str> {
+        let mut nodes = vec!["gpio8", "led_a", "vdd", "0"];
+        match kind {
+            DemoKind::Dimmer => nodes.push("gpio2"),
+            DemoKind::ButtonPoll | DemoKind::ButtonIrq => nodes.push("gpio9"),
+            DemoKind::Blink | DemoKind::Fade => {}
+        }
+        nodes
+    }
+
+    /// E5c: on all five demos, every voltmeter and every ammeter the old
+    /// meters resolved reads what they read, averaged the same way (old
+    /// instantaneous values put through the same whole-period average; the
+    /// PSU's old value was already averaged): displayed strings equal, values
+    /// within max(1 nA, 1 ppm) (1 nV for volts).
+    #[test]
+    fn the_multimeter_matches_the_old_meters_on_all_demos() {
+        use of_instruments::{candidates, stats::average_periods};
+        let close = |x: f64, y: f64| (x - y).abs() <= 1e-9_f64.max(1e-6 * x.abs().max(y.abs()));
+        let mut report = Vec::new();
+        for kind in KINDS {
+            let Some(mut s) = start(kind, StartOptions::default()) else {
+                continue;
+            };
+            s.old_log = Some(Vec::new());
+            let nodes = old_nodes(kind);
+            let layout = s.layout();
+            let mut volts = Vec::new();
+            let mut amps = Vec::new();
+            for (i, a) in nodes.iter().enumerate() {
+                for b in &nodes[i + 1..] {
+                    for (x, y) in [(*a, *b), (*b, *a)] {
+                        let m = Multimeter::voltmeter(x, y);
+                        s.watch_meter(&m);
+                        volts.push((x, y, m));
+                        for c in candidates(&layout, x, y).unwrap_or_default() {
+                            let m = Multimeter::ammeter(&c);
+                            s.watch_meter(&m);
+                            amps.push((x, y, m));
+                        }
+                    }
+                }
+            }
+            if matches!(kind, DemoKind::ButtonPoll | DemoKind::ButtonIrq) {
+                s.advance(8e-3).unwrap();
+                s.set_closed(true).unwrap();
+            }
+            s.advance(16e-3).unwrap();
+            let log = s.old_log.take().unwrap();
+            let now = s.time();
+            let avg = s.averaging();
+            let reference = s.meters.channel(avg.reference).unwrap().ring.to_vec();
+            let old_avg = |f: &dyn Fn(&CircuitReadout) -> Option<f64>| {
+                let pts: Vec<(f64, f64)> = log.iter().filter_map(|(t, r)| f(r).map(|v| (*t, v))).collect();
+                average_periods(&pts, &reference, now, avg.high, avg.periods, avg.fallback)
+            };
+            let old_final = s.circuit_readout();
+            let (mut nv, mut na, mut new_only) = (0, 0, Vec::new());
+            for (a, b, m) in &volts {
+                let Reading::Volts(v) = s.read_meter(m) else {
+                    panic!("{kind:?} V({a},{b}) unread");
+                };
+                let o = old_avg(&|r| r.voltage_between(a, b));
+                let (od, nd) = (meters::MeterReading::Volts(o).display(), Reading::Volts(v).display());
+                assert_eq!(od, nd, "{kind:?} V({a},{b}) display");
+                assert!(close(o, v), "{kind:?} V({a},{b}): old {o:e} new {v:e}");
+                nv += 1;
+            }
+            for (a, b, m) in &amps {
+                let part = m.part.clone().unwrap();
+                let Reading::Amps { amps: v, .. } = s.read_meter(m) else {
+                    panic!("{kind:?} I({a},{b}) {part} unread");
+                };
+                let old = old_final.unique_current(a, b).ok();
+                let Some((name, old_psu)) = old.filter(|(n, _)| n.split_whitespace().next() == Some(part.as_str()))
+                else {
+                    new_only.push(format!("{part} {a}->{b}"));
+                    continue;
+                };
+                let o = if part == "PSU" {
+                    old_psu
+                } else {
+                    old_avg(&|r| r.unique_current(a, b).ok().map(|x| x.1))
+                };
+                let od = meters::MeterReading::Amps {
+                    amps: o,
+                    part: name.clone(),
+                }
+                .display();
+                let nd = Reading::Amps {
+                    amps: v,
+                    part: part.clone(),
+                }
+                .display();
+                if part == "PSU" {
+                    report.push(format!("{kind:?} PSU {a}->{b}: old {od} ({o:e}) new {nd} ({v:e})"));
+                }
+                assert_eq!(od, nd, "{kind:?} I({a},{b}) {name} display");
+                assert!(close(o, v), "{kind:?} I({a},{b}) {name}: old {o:e} new {v:e}");
+                na += 1;
+            }
+            report.push(format!(
+                "{kind:?}: {nv} voltmeters, {na} ammeters equal; offered only now: {new_only:?}"
+            ));
+        }
+        eprintln!("{}", report.join("\n"));
+        assert!(!report.is_empty());
     }
 
     #[test]

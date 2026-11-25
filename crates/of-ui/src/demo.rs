@@ -6,7 +6,7 @@ use egui::{
     Align2, Color32, ComboBox, Event, FontId, Pos2, Rect, RichText, Sense, Shape, Slider, Stroke, Ui, pos2, vec2,
 };
 use of_core::SimTime;
-use of_instruments::{Delivery, SerialMonitor};
+use of_instruments::{Candidate, Delivery, Multimeter, PartPins, SerialMonitor, candidates};
 
 use crate::SerialMonitorPanel;
 use crate::adc_pwm;
@@ -15,8 +15,8 @@ use crate::boards;
 use crate::button;
 use crate::kind::DemoKind;
 use crate::live::{self, Command, LiveSession, Snapshot};
-use crate::meters::{MeterKind, PlacedMeter, ProbeRef, place_ammeter, read_meter};
-use crate::meters_ui::{MeterView, SchematicHit};
+use crate::meters::{MeterKind, PlacedMeter, ProbeRef};
+use crate::meters_ui::{MeterView, SchematicHit, reading_text};
 use of_components::BounceSettings;
 
 use crate::supply::{self, SupplySettings};
@@ -42,6 +42,8 @@ pub struct OhmforgeDemo {
     arm: Option<MeterKind>,
     pending_a: Option<ProbeRef>,
     meters: Vec<PlacedMeter>,
+    /// An ammeter whose two points several parts join: the user picks one.
+    choosing: Option<(ProbeRef, ProbeRef, Vec<Candidate>)>,
     next_meter: u64,
     meter_message: Option<String>,
     time_div: f64,
@@ -83,6 +85,7 @@ impl OhmforgeDemo {
             arm: None,
             pending_a: None,
             meters: Vec::new(),
+            choosing: None,
             next_meter: 0,
             meter_message: None,
             time_div: DEFAULT_TIME_DIV,
@@ -116,7 +119,9 @@ impl OhmforgeDemo {
         self.arm = None;
         self.pending_a = None;
         self.meters.clear();
+        self.choosing = None;
         self.meter_message = None;
+        self.sync_meters();
         self.reset_monitor();
         self.session.send(Command::SetKind(kind));
     }
@@ -134,35 +139,56 @@ impl OhmforgeDemo {
         }
     }
 
-    fn on_probe(&mut self, probe: ProbeRef, readout: &crate::meters::CircuitReadout) {
+    /// Tell the worker which meters to sample.
+    fn sync_meters(&self) {
+        let meters = self.meters.iter().map(|m| (m.id, m.meter.clone())).collect();
+        self.session.send(Command::SetMeters(meters));
+    }
+
+    fn place(&mut self, kind: MeterKind, a: ProbeRef, b: ProbeRef, meter: Multimeter) {
+        self.next_meter = self.next_meter.saturating_add(1);
+        self.meters.push(PlacedMeter {
+            id: self.next_meter,
+            kind,
+            a,
+            b,
+            meter,
+        });
+        self.arm = None;
+        self.choosing = None;
+        self.meter_message = None;
+        self.sync_meters();
+    }
+
+    fn on_probe(&mut self, probe: ProbeRef, layout: &[PartPins]) {
         let Some(kind) = self.arm else {
             return;
         };
         match self.pending_a.take() {
             None => {
                 self.pending_a = Some(probe);
+                self.choosing = None;
                 self.meter_message = None;
             }
-            Some(a) => {
-                if kind == MeterKind::Amp
-                    && let Err(e) = place_ammeter(readout, &a, &probe)
-                {
-                    self.meter_message = Some(e.message().to_owned());
-                    return;
+            Some(a) => match kind {
+                MeterKind::Volt => {
+                    let meter = Multimeter::voltmeter(&a.node, &probe.node);
+                    self.place(kind, a, probe, meter);
                 }
-                self.next_meter = self.next_meter.saturating_add(1);
-                self.meters.push(PlacedMeter {
-                    id: self.next_meter,
-                    kind,
-                    a,
-                    b: probe,
-                });
-                self.arm = None;
-                self.meter_message = None;
-            }
+                MeterKind::Amp => match candidates(layout, &a.node, &probe.node) {
+                    Err(e) => self.meter_message = Some(e.message().to_owned()),
+                    Ok(mut c) if c.len() == 1 => {
+                        let meter = Multimeter::ammeter(&c.remove(0));
+                        self.place(kind, a, probe, meter);
+                    }
+                    Ok(c) => {
+                        self.choosing = Some((a, probe, c));
+                        self.meter_message = None;
+                    }
+                },
+            },
         }
     }
-
     fn meter_bar(&mut self, ui: &mut Ui, snap: &Snapshot) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Meters").strong());
@@ -171,6 +197,7 @@ impl OhmforgeDemo {
                 self.arm = if volt { None } else { Some(MeterKind::Volt) };
                 self.pending_a = None;
                 self.meter_message = None;
+                self.choosing = None;
             }
             let amp = self.arm == Some(MeterKind::Amp);
             if ui.selectable_label(amp, "Ammeter").clicked() {
@@ -178,7 +205,7 @@ impl OhmforgeDemo {
                 self.pending_a = None;
                 self.meter_message = None;
             }
-            if self.arm.is_some() {
+            if self.arm.is_some() && self.choosing.is_none() {
                 let step = if self.pending_a.is_none() {
                     "click point A, then point B"
                 } else {
@@ -187,15 +214,46 @@ impl OhmforgeDemo {
                 ui.weak(step);
             }
         });
+        // Several parts join the two points: pick the one the ammeter goes through.
+        let mut picked = None;
+        let mut cancel = false;
+        if let Some((a, b, cands)) = &self.choosing {
+            ui.horizontal(|ui| {
+                ui.weak(format!("{} to {}: through", a.label, b.label));
+                for (i, c) in cands.iter().enumerate() {
+                    if ui.selectable_label(false, c.refdes.as_str()).clicked() {
+                        picked = Some(i);
+                    }
+                }
+                if ui.small_button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+        }
+        if let Some(i) = picked
+            && let Some((a, b, cands)) = self.choosing.take()
+        {
+            let meter = Multimeter::ammeter(&cands[i]);
+            self.place(MeterKind::Amp, a, b, meter);
+        } else if cancel {
+            self.choosing = None;
+            self.arm = None;
+        }
         if let Some(msg) = &self.meter_message {
             ui.colored_label(LED_RED, msg);
         }
         let mut remove = None;
         for meter in &self.meters {
             ui.horizontal(|ui| {
-                let reading = read_meter(meter, &snap.readout).display();
+                let reading = reading_text(&snap.meter_readings, meter.id);
+                let through = meter
+                    .meter
+                    .part
+                    .as_deref()
+                    .map(|p| format!(" via {p}"))
+                    .unwrap_or_default();
                 ui.monospace(format!(
-                    "{}  {} to {}  {reading}",
+                    "{}  {} to {}{through}  {reading}",
                     meter.kind.label(),
                     meter.a.label,
                     meter.b.label
@@ -207,6 +265,7 @@ impl OhmforgeDemo {
         }
         if let Some(id) = remove {
             self.meters.retain(|m| m.id != id);
+            self.sync_meters();
         }
     }
 
@@ -409,7 +468,7 @@ impl OhmforgeDemo {
                         arm: self.arm,
                         pending_a: self.pending_a.as_ref().map(|p| p.id.as_str()),
                         meters: &self.meters,
-                        readout: &snap.readout,
+                        readings: &snap.meter_readings,
                     };
                     instruments(
                         ui,
@@ -427,7 +486,7 @@ impl OhmforgeDemo {
                     self.session.send(Command::SetButton(hit.button));
                 }
                 if let Some(probe) = hit.probe {
-                    self.on_probe(probe, &snap.readout);
+                    self.on_probe(probe, &snap.layout);
                 }
                 ui.add_space(12.0);
                 let now = SimTime::from_secs_f64(snap.time);

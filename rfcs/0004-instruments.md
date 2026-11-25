@@ -105,6 +105,17 @@ Grammar rules:
 - `Session` as `Probeable` (E5b): `v(net)` reads the solution, with the ground net (`0` or `gnd`) at 0 V when the solver does not name it; `i(R1)` needs a two-pin part; `i(REF.pin)` uses the pin order of `info()`; `r(..)` searches `readings`; `d(..)` is `NotAnalog` (the logic analyser reads edges, E5g). Unknown parts, pins, nets or readings are `Unresolved`.
 - Diode currents (E5c): every analog diode reports `i(name)`, its anode-to-cathode current at the solution (series-resistance current, or the junction current without `rs`), so `terminal_currents` of LEDs and diodes is real rather than 0. This is an analog-probe addition; the `Component` API (RFC 0001) is unchanged.
 - Ideal multimeter (E5c, decided 2026-11-25; `of_instruments::meter`): voltmeter and ammeter readings both average over whole PWM periods of a reference channel (as a DMM's integrating ADC does). `candidates(parts, a, b)` lists every part with a pin on both nets (`0` and `gnd` both name ground). The ammeter reads from `a` toward `b`: into the pin on `a` when that is an end pin of the part (first or last in pin order), else out of the pin on `b`, so a potentiometer's `1`–`W` and `W`–`3` segments read their own current. A pair joined only through middle pins is not offered; when several parts join the two clicked points the user picks one from a chooser; resistance mode waits for E5f.
+  Old-versus-new check (E5c, `the_multimeter_matches_the_old_meters_on_all_demos`, to 16 ms, the button closed at 8 ms): every voltmeter (both directions) and every ammeter the pre-E5c meters resolved, the old instantaneous values put through the same whole-period average; the PSU's old value was already averaged. Displayed strings equal and values within max(1 nA, 1 ppm) (1 nV for volts) on all five demos:
+
+  | Demo | Voltmeters | Ammeters | PSU (vdd→0), old = new display | Offered only now |
+  |---|---|---|---|---|
+  | blink | 12 | 6 | −22.98 mA (bit-identical) | U1 on gpio8/vdd/0 pairs |
+  | dimmer | 20 | 10 | −25.88 mA (last digit) | U1 on 6 pairs; RV1 on vdd/0 |
+  | fade | 12 | 6 | −23.97 mA (last digit) | U1 on gpio8/vdd/0 pairs |
+  | button | 20 | 8 | −27.01 mA (last digits) | U1 on 5 pairs |
+  | button-irq | 20 | 8 | −20.02 mA (last digits) | U1 on 5 pairs |
+
+  "Offered only now" pairs were "no single branch" before; Stefan accepted them as a behaviour change (2026-11-25), so the check compares only pairs the old meter resolved.
 - Rings are `TraceBuf`: bounded by `MAX_TRACE_SAMPLES`, with retention tied to the window.
 - Statistics are pure functions over `(t, value)` slices:
   - `average_window` and `average_periods`, the period-aligned mean from #45;
