@@ -7,7 +7,7 @@ mod blink;
 mod button;
 mod dimmer;
 #[cfg(test)]
-mod files;
+mod from_circuit;
 mod golden;
 mod hops;
 mod invariants;
