@@ -153,6 +153,17 @@ impl MeasurementService {
         self.clock.set_step(step, now);
     }
 
+    /// Time of the next grid sample (seconds), for run loops that step to it.
+    pub fn next_due(&self) -> f64 {
+        self.clock.next()
+    }
+
+    /// Whether the grid is due at `now`; if so, advance it (the run loop
+    /// then calls [`Self::record`]). Same rule as [`SampleClock::take`].
+    pub fn take_due(&mut self, now: f64) -> bool {
+        self.clock.take(now)
+    }
+
     /// Call after each engine step. Records one sample on every channel when
     /// the grid is due, or when `event_hit` and the plan samples events.
     /// Returns whether a sample was recorded.
@@ -171,6 +182,32 @@ impl MeasurementService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// E5d: the service's grid is the run loop's `SampleClock`, sample for
+    /// sample, including after a zoom (`set_visible_window`).
+    #[test]
+    fn the_grid_matches_a_sample_clock_through_zoom() {
+        use crate::ring::{TraceBuf, retention_window, sample_step_for_window};
+        let mut svc = MeasurementService::new(SamplePlan::default());
+        let mut clock = SampleClock::new(0.0, SAMPLE_STEP);
+        let mut ring = TraceBuf::default_scope();
+        let mut t = 0.0;
+        for k in 0..20_000 {
+            if k == 7_000 || k == 13_000 {
+                let visible = if k == 7_000 { 2e-3 } else { 50e-3 };
+                svc.set_visible_window(visible, t);
+                ring.set_visible_window(visible);
+                clock.set_step(ring.sample_step(), t);
+                assert_eq!(
+                    ring.sample_step(),
+                    sample_step_for_window(visible, retention_window(visible))
+                );
+            }
+            assert_eq!(svc.next_due(), clock.next(), "at {t}");
+            assert_eq!(svc.take_due(t), clock.take(t), "at {t}");
+            t += 7.3e-6;
+        }
+    }
     use std::collections::BTreeMap;
 
     /// A fake circuit: fixed values per signal at a settable time.

@@ -23,15 +23,16 @@ use of_components::{BounceSettings, register_builtin};
 use of_core::{SimTime, Stop};
 use of_engine::{Firmware, Registry, Session};
 use of_instruments::{
-    Averaging, ChannelId, MeasurementService, MeterMode, Multimeter, PartPins, Probeable, Reading, SamplePlan, Signal,
+    Averaging, ChannelId, MeasurementService, MeterMode, Multimeter, PartPins, Probeable, PsuReadout, Reading,
+    SamplePlan, Scope, ScopeTrace, Signal,
 };
 use of_soc_esp32c3::{Esp32c3Engine, UartByte};
 
 use crate::adc_pwm::{self, PwmKind};
 use crate::button::{self, ButtonKind};
 use crate::kind::DemoKind;
-use crate::supply::{RATED_MAX_V, RATED_MIN_V, SupplyMode, SupplySettings, SupplyStatus};
-use crate::trace::{self, SampleClock, TraceBuf};
+use crate::supply::{SupplySettings, SupplyStatus};
+use crate::trace;
 
 /// Display-average window of the PWM demos (as `PwmSim`).
 const PWM_AVG_WINDOW: f64 = 2e-3;
@@ -219,12 +220,15 @@ pub(crate) struct SessionSim {
     /// The measurement service; samples the file's `LED current` probe (A).
     meas: MeasurementService,
     led: ChannelId,
+    /// The scope on the LED channel (mA; PWM demos: whole-period moving average).
+    scope: Scope,
     /// The placed meters' channels (E5c), with the LED probe again as the
     /// averaging reference ([`Self::meter_ref`]).
     meters: MeasurementService,
     meter_ref: ChannelId,
-    psu_samples: TraceBuf,
-    clock: SampleClock,
+    /// Readings taken after each commit (the PSU face, E5d).
+    settled: MeasurementService,
+    psu: PsuReadout,
     /// Button loop: next grid sample (relative).
     next_sample: SimTime,
     closed: bool,
@@ -266,18 +270,34 @@ impl SessionSim {
         let style = Loop::of(kind);
         let mut meas = MeasurementService::new(SamplePlan::default());
         let led = meas.watch_default(led_probe(kind)?);
+        let scope = Scope {
+            channel: led,
+            scale: 1e3,
+            mode: if style == Loop::Pwm {
+                ScopeTrace::PeriodAverage {
+                    high: trace::PWM_EDGE_HIGH,
+                    periods: trace::PWM_AVG_PERIODS,
+                    fallback: PWM_AVG_WINDOW,
+                }
+            } else {
+                ScopeTrace::Raw
+            },
+        };
         let mut meters = MeasurementService::new(SamplePlan::default());
         let meter_ref = meters.watch_default(led_probe(kind)?);
+        let mut settled = MeasurementService::new(SamplePlan::default());
+        let psu = PsuReadout::watch(&mut settled, "PSU");
         let mut d = Self {
             kind,
             s,
             style,
             meas,
             led,
+            scope,
             meters,
             meter_ref,
-            psu_samples: TraceBuf::default_scope(),
-            clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
+            settled,
+            psu,
             next_sample: SimTime::ZERO,
             closed: false,
             bounce: BounceSettings::default(),
@@ -290,8 +310,8 @@ impl SessionSim {
         }
         d.record_sample()?;
         if style == Loop::Button {
-            d.clock.take(d.time());
-            d.next_sample = SimTime::from_secs_f64(d.clock.next().max(0.0));
+            d.meas.take_due(d.time());
+            d.next_sample = SimTime::from_secs_f64(d.meas.next_due().max(0.0));
         }
         Ok(d)
     }
@@ -326,58 +346,24 @@ impl SessionSim {
     }
 
     /// The LED probe's ring (A).
-    fn led_ring(&self) -> &TraceBuf {
+    #[cfg(test)]
+    fn led_ring(&self) -> &trace::TraceBuf {
         &self.meas.channel(self.led).expect("LED channel").ring
     }
 
     /// The LED probe's samples in mA, as the scope, averages and goldens use them.
     fn led_ma(&self) -> Vec<(f64, f64)> {
-        self.led_ring().iter().map(|(t, a)| (t, a * 1e3)).collect()
+        self.scope.samples(&self.meas)
     }
 
     fn record_sample(&mut self) -> Result<(), String> {
-        let t = self.time();
         self.meas.record(&mut self.s).map_err(|e| e.to_string())?;
         self.meters.record(&mut self.s).map_err(|e| e.to_string())?;
         self.cpu().recycle_consumed_edges();
         self.s.commit().map_err(|e| e.to_string())?;
-        self.supply_status = self.read_supply();
-        self.psu_samples.push(t, self.supply_status.amps * 1e3);
+        self.settled.record(&mut self.s).map_err(|e| e.to_string())?;
+        self.supply_status = self.psu.status(&mut self.s, self.supply);
         Ok(())
-    }
-
-    /// The PSU's state after its last commit, as `supply::regulate` reports it.
-    fn read_supply(&mut self) -> SupplyStatus {
-        let mut volts = 0.0;
-        let mut amps = 0.0;
-        let mut mode = SupplyMode::Off;
-        for (k, v) in self.s.readings("PSU") {
-            match k.as_str() {
-                "volts" => volts = v,
-                "regulated_amps" => amps = v,
-                "mode" => {
-                    mode = match v as i64 {
-                        1 => SupplyMode::Cv,
-                        2 => SupplyMode::Cc,
-                        _ => SupplyMode::Off,
-                    }
-                }
-                _ => {}
-            }
-        }
-        let rated = RATED_MIN_V..=RATED_MAX_V;
-        let outside_rated = if self.supply.on {
-            !rated.contains(&self.supply.volts) || !rated.contains(&volts)
-        } else {
-            !rated.contains(&volts) && volts > 0.05
-        };
-        SupplyStatus {
-            volts,
-            amps,
-            amps_avg: None,
-            mode,
-            outside_rated,
-        }
     }
 
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), String> {
@@ -391,14 +377,14 @@ impl SessionSim {
     fn advance_blink(&mut self, seconds: f64) -> Result<(), String> {
         let until = SimTime::from_secs_f64(seconds.max(0.0));
         while self.s.now() < until {
-            let grid = SimTime::from_secs_f64(self.clock.next().max(0.0));
+            let grid = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
             let next = grid.min(until);
             if next > self.s.now() {
                 self.run_to(next)?;
             } else if self.s.now() < until {
                 self.run_to(until)?;
             }
-            if self.clock.take(self.time()) {
+            if self.meas.take_due(self.time()) {
                 self.record_sample()?;
             }
         }
@@ -410,7 +396,7 @@ impl SessionSim {
         let origin = self.s.origin();
         while self.s.now() < until {
             let now = self.s.now();
-            let grid = SimTime::from_secs_f64(self.clock.next().max(0.0));
+            let grid = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
             let pwm = self
                 .cpu()
                 .soc
@@ -419,7 +405,7 @@ impl SessionSim {
                 .next_event()
                 .map(|t| SimTime(t.0.saturating_sub(origin.0)));
             if grid <= now {
-                if self.clock.take(self.time()) {
+                if self.meas.take_due(self.time()) {
                     self.record_sample()?;
                 } else if now < until {
                     let nudge = now.saturating_add(SimTime::from_ns(1)).min(until);
@@ -439,7 +425,7 @@ impl SessionSim {
             } else if self.s.now() < until {
                 self.run_to(until)?;
             }
-            let hit_grid = self.clock.take(self.time());
+            let hit_grid = self.meas.take_due(self.time());
             let hit_pwm = pwm.is_some_and(|p| p <= self.s.now());
             if hit_grid || hit_pwm {
                 self.record_sample()?;
@@ -456,10 +442,10 @@ impl SessionSim {
                 self.run_to(next)?;
             }
             if self.s.now() >= self.next_sample {
-                if self.clock.take(self.time()) {
+                if self.meas.take_due(self.time()) {
                     self.record_sample()?;
                 }
-                self.next_sample = SimTime::from_secs_f64(self.clock.next().max(0.0));
+                self.next_sample = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
                 if self.next_sample <= self.s.now() {
                     self.next_sample = self.s.now().saturating_add(SimTime::from_ns(1));
                 }
@@ -471,10 +457,9 @@ impl SessionSim {
     pub(crate) fn set_scope_window(&mut self, visible: f64) {
         let now = self.time();
         self.meas.set_visible_window(visible, now);
-        self.psu_samples.set_visible_window(visible);
-        self.clock.set_step(self.led_ring().sample_step(), now);
+        self.settled.set_visible_window(visible, now);
         if self.style == Loop::Button {
-            self.next_sample = SimTime::from_secs_f64(self.clock.next().max(0.0));
+            self.next_sample = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
         }
     }
 
@@ -502,25 +487,7 @@ impl SessionSim {
 
     /// The scope trace: raw samples, or the PWM demos' moving average.
     pub(crate) fn trace(&self) -> Vec<(f64, f64)> {
-        if self.style != Loop::Pwm {
-            return self.led_ma();
-        }
-        let pts = self.led_ma();
-        pts.iter()
-            .map(|&(t, _)| {
-                (
-                    t,
-                    trace::average_periods(
-                        &pts,
-                        &pts,
-                        t,
-                        trace::PWM_EDGE_HIGH,
-                        trace::PWM_AVG_PERIODS,
-                        PWM_AVG_WINDOW,
-                    ),
-                )
-            })
-            .collect()
+        self.scope.trace(&self.meas)
     }
 
     pub(crate) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
@@ -529,22 +496,19 @@ impl SessionSim {
 
     pub(crate) fn supply_status(&self) -> SupplyStatus {
         let led = self.led_ma();
-        let psu = self.psu_samples.to_vec();
         let window = match self.style {
             Loop::Pwm => PWM_AVG_WINDOW,
             Loop::Blink | Loop::Button => trace::LED_AVG_WINDOW,
         };
         let mut status = self.supply_status;
-        status.amps_avg = Some(
-            trace::average_periods(
-                &psu,
-                &led,
-                self.time(),
-                trace::PWM_EDGE_HIGH,
-                trace::PWM_AVG_PERIODS,
-                window,
-            ) * 1e-3,
-        );
+        status.amps_avg = Some(self.psu.average_amps(
+            &self.settled,
+            &led,
+            self.time(),
+            trace::PWM_EDGE_HIGH,
+            trace::PWM_AVG_PERIODS,
+            window,
+        ));
         status
     }
 
@@ -728,7 +692,7 @@ impl SessionSim {
     pub(crate) fn parity_raw(&mut self) -> crate::parity::Raw {
         let origin = self.s.origin();
         let led = self.led_ma();
-        let psu = self.psu_samples.to_vec();
+        let psu = self.psu.samples_ma(&self.settled);
         let cpu = self.cpu();
         crate::parity::Raw {
             edges: cpu.logged_edges(),
@@ -763,6 +727,7 @@ impl SessionSim {
 mod tests {
     use super::*;
     use crate::parity::{Demo, registry_session, skip_without_rom};
+    use crate::supply::SupplyMode;
     use of_instruments::candidates;
 
     /// The LED series resistor of every demo.
@@ -1315,6 +1280,81 @@ mod tests {
             }
         }
         eprintln!("{checked} recorded meter readings matched");
+    }
+    /// The PSU face and LED average before E5d (`psu_samples` ring and the
+    /// desktop's own sample clock), recorded on 31ff9f6: (demo, current
+    /// limit if lowered, time, volts, amps, averaged amps, mode, outside
+    /// rated, `average_ma`). The button demos close SW1 at 8 ms.
+    #[rustfmt::skip]
+    #[allow(clippy::type_complexity)]
+    const FACES: &[(DemoKind, Option<f64>, f64, f64, f64, f64, SupplyMode, bool, f64)] = &[
+        (DemoKind::Blink, None, 1.2e-2, 3.297701601913488e0, 2.298398086511888e-2, 2.298398086511888e-2, SupplyMode::Cv, false, 3.291305306999763e-12),
+        (DemoKind::Blink, None, 1.6e-2, 3.297701601913488e0, 2.298398086511888e-2, 2.4953786453914883e-2, SupplyMode::Cv, false, 1.9711783577801563e0),
+        (DemoKind::Dimmer, None, 1.2e-2, 3.297273011213674e0, 2.7269887863257125e-2, 2.5881843413710973e-2, SupplyMode::Cv, false, 2.5701402772434303e0),
+        (DemoKind::Dimmer, None, 1.6e-2, 3.2972730014380813e0, 2.7269985619184922e-2, 2.588199090653242e-2, SupplyMode::Cv, false, 2.570287874345841e0),
+        (DemoKind::Fade, None, 1.2e-2, 3.297701601913488e0, 2.298398086511888e-2, 2.397275294302185e-2, SupplyMode::Cv, false, 9.894612498139179e-1),
+        (DemoKind::Fade, None, 1.6e-2, 3.297701601913488e0, 2.298398086511888e-2, 2.3970827208051357e-2, SupplyMode::Cv, false, 9.875341543354996e-1),
+        (DemoKind::ButtonPoll, None, 1.2e-2, 3.297299090568152e0, 2.7009094318479754e-2, 2.700909431847977e-2, SupplyMode::Cv, false, 3.954645685288708e0),
+        (DemoKind::ButtonPoll, None, 1.6e-2, 3.297299090568152e0, 2.7009094318479754e-2, 2.700909431847977e-2, SupplyMode::Cv, false, 3.954645685288709e0),
+        (DemoKind::ButtonIrq, None, 1.2e-2, 3.297998473867777e0, 2.0015261322230415e-2, 2.0014715136282488e-2, SupplyMode::Cv, false, 3.951130544092355e0),
+        (DemoKind::ButtonIrq, None, 1.6e-2, 3.2979982788436564e0, 2.00172115634345e-2, 2.0016754894261343e-2, SupplyMode::Cv, false, 3.953171295577258e0),
+        (DemoKind::Blink, Some(0.002), 1.2e-2, 2.8695652165678637e-1, 2e-3, 2e-3, SupplyMode::Cc, true, 2.812003567523824e-4),
+        (DemoKind::Blink, Some(0.002), 1.6e-2, 2.8695652165678637e-1, 2e-3, 2e-3, SupplyMode::Cc, true, 2.8161368386905313e-4),
+        (DemoKind::Dimmer, Some(0.005), 1.2e-2, 7.072438667498492e-1, 5e-3, 5e-3, SupplyMode::Cc, true, 2.4933372214307668e-5),
+        (DemoKind::Dimmer, Some(0.005), 1.6e-2, 7.072438667498492e-1, 5e-3, 5e-3, SupplyMode::Cc, true, 1.8216836455929914e-5),
+    ];
+
+    /// E5d: the PSU face on the measurement service and the service's grid
+    /// read what the desktop read before, on all five demos and in CC
+    /// (max(1 nA, 1 ppm); 1 nV; mode and rating exact).
+    #[test]
+    fn the_supply_face_and_led_average_are_unchanged_by_e5d() {
+        let close = |x: f64, y: f64| (x - y).abs() <= 1e-9_f64.max(1e-6 * x.abs().max(y.abs()));
+        let mut checked = 0;
+        let mut worst: f64 = 0.0;
+        let mut last: Option<(DemoKind, Option<f64>, SessionSim)> = None;
+        for &(kind, limit, t, volts, amps, avg, mode, outside, led) in FACES {
+            let same = last.as_ref().is_some_and(|(k, l, _)| *k == kind && *l == limit);
+            if !same {
+                let Some(mut s) = start(kind, StartOptions::default()) else {
+                    last = None;
+                    continue;
+                };
+                if let Some(l) = limit {
+                    s.set_supply(SupplySettings {
+                        current_limit: l,
+                        ..SupplySettings::default()
+                    })
+                    .unwrap();
+                }
+                if matches!(kind, DemoKind::ButtonPoll | DemoKind::ButtonIrq) {
+                    s.advance(8e-3).unwrap();
+                    s.set_closed(true).unwrap();
+                }
+                last = Some((kind, limit, s));
+            }
+            let Some((_, _, s)) = last.as_mut() else { continue };
+            s.advance(t).unwrap();
+            let st = s.supply_status();
+            let got = st.amps_avg.unwrap();
+            let at = format!("{kind:?} {limit:?} at {t}");
+            assert!(close(st.volts, volts), "{at}: volts {} vs {volts}", st.volts);
+            assert!(close(st.amps, amps), "{at}: amps {} vs {amps}", st.amps);
+            assert!(close(got, avg), "{at}: average {got} vs {avg}");
+            assert_eq!((st.mode, st.outside_rated), (mode, outside), "{at}");
+            // average_ma is in mA: 1 nA is 1e-6 mA.
+            let ma = s.average_ma();
+            assert!(
+                (ma - led).abs() <= 1e-6_f64.max(1e-6 * led.abs()),
+                "{at}: LED {ma} vs {led} mA"
+            );
+            worst = worst
+                .max((got - avg).abs())
+                .max((st.amps - amps).abs())
+                .max((ma - led).abs() * 1e-3);
+            checked += 1;
+        }
+        eprintln!("{checked} faces matched; worst current difference {worst:e} A");
     }
     #[test]
     fn the_led_current_agrees_with_its_series_resistor() {

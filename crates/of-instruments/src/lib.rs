@@ -10,7 +10,9 @@
 //! live in `of-ui`.
 
 pub mod meter;
+pub mod psu;
 pub mod ring;
+pub mod scope;
 pub mod serial;
 pub mod service;
 pub mod session;
@@ -18,7 +20,9 @@ pub mod signal;
 pub mod stats;
 
 pub use meter::{Averaging, Candidate, MeterError, MeterMode, Multimeter, PartPins, Reading, candidates};
+pub use psu::PsuReadout;
 pub use ring::{SampleClock, TraceBuf};
+pub use scope::{Scope, ScopeTrace};
 pub use serial::{Delivery, Dir, Entry, FindHit, SendError, SerialMonitor};
 pub use service::{Channel, ChannelId, MeasurementService, ProbeError, Probeable, SamplePlan};
 pub use signal::{ParseSignalError, Signal};
