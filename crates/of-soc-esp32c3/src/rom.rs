@@ -166,6 +166,41 @@ impl RomImage {
     }
 }
 
+/// Longest a ROM boot may take to print the app's ready text.
+pub const BOOT_TIMEOUT: of_core::SimTime = of_core::SimTime::from_ms(100);
+
+/// Power on `rom` with espflash's second-stage `bootloader`, `partitions` and
+/// `app` in flash, and run until UART0 shows `ready` (E4b; moved from the
+/// desktop app). Fails if the text does not appear within [`BOOT_TIMEOUT`]
+/// or the chip resets on the way.
+pub fn boot_from_rom(
+    rom: &RomImage,
+    bootloader: &[u8],
+    app: &[u8],
+    partitions: &[u8],
+    ready: &str,
+) -> Result<crate::Esp32c3, String> {
+    use of_core::SimTime;
+    let mut soc = crate::Esp32c3::new();
+    let image = crate::bootloader::espflash_flash_image(bootloader).map_err(|e| format!("bootloader image: {e}"))?;
+    soc.write_flash(0, &image);
+    soc.write_flash(0x8000, partitions);
+    soc.write_flash(0x1_0000, app);
+    soc.power_on_rom(rom);
+    let mut t = SimTime::ZERO;
+    while !soc.uart_text().contains(ready) {
+        if t >= BOOT_TIMEOUT {
+            return Err(format!("firmware did not print its banner: {:?}", soc.uart_text()));
+        }
+        t = t.saturating_add(SimTime::from_ms(1));
+        soc.run_until(t);
+    }
+    if !soc.resets().is_empty() {
+        return Err(format!("chip reset during boot: {:?}", soc.resets()));
+    }
+    Ok(soc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
