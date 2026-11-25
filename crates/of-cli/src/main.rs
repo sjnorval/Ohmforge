@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! ohmforge run <netlist.cir> [--out results.csv] [--vcd waves.vcd]
+//! ohmforge run <file.circuit.toml> [--until 10ms] [--step 10us] [--out FILE.csv] [--vcd FILE.vcd] [--uart] [--parts DIR]
 //! ohmforge validate-parts <parts-dir>
 //! ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out bom.csv] [--checklist FILE.md]
 //! ohmforge circuit check [--parts DIR] <file|dir>...
@@ -13,6 +14,14 @@
 //! and transients are written as CSV to `--out` (or standard output) and
 //! optionally as a VCD file; `.ac` results are written as CSV with
 //! magnitude and phase (degrees) columns.
+//!
+//! `run` on a circuit file (`*.circuit.toml`, RFC 0003) builds it through
+//! the model registry, firmware included, and runs it headless: every
+//! non-ground net voltage and every `[[probe]]` signal is sampled each
+//! `--step` (default 10 us) until `--until` (default 10 ms) and written as
+//! CSV (standard output unless `--out` or `--uart` is given) and optionally
+//! VCD; `--uart` prints the MCU's UART0 text. ROM-booted firmware needs the
+//! fetched ESP32-C3 ROM (`scripts/fetch-esp-rom-elfs.sh`).
 //!
 //! `validate-parts` walks a parts tree, parses every `part.toml`, runs the
 //! loader consistency checks and requires the CC-BY-SA-4.0 licence fields.
@@ -36,9 +45,11 @@ use of_netlist::spice::{self, Analysis};
 use of_parts::load_dir;
 
 mod circuit;
+mod run_circuit;
 
 const USAGE: &str = "Usage:
   ohmforge run <netlist.cir> [--out FILE.csv] [--vcd FILE.vcd]
+  ohmforge run <FILE.circuit.toml> [--until 10ms] [--step 10us] [--out FILE.csv] [--vcd FILE.vcd] [--uart] [--parts DIR]
   ohmforge validate-parts <parts-dir>
   ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out FILE.csv] [--checklist FILE.md]
   ohmforge circuit check [--parts DIR] <FILE.circuit.toml|DIR>...
@@ -223,6 +234,15 @@ fn main() -> ExitCode {
         Some("--version" | "-V") => {
             println!("ohmforge {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
+        }
+        Some("run") if args.get(1).is_some_and(|f| run_circuit::is_circuit_file(Path::new(f))) => {
+            match run_circuit::parse_args(PathBuf::from(&args[1]), &args[2..]).and_then(|a| run_circuit::run(&a)) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         Some("run") => match parse_run(&args[1..]).and_then(|a| run(&a)) {
             Ok(()) => ExitCode::SUCCESS,

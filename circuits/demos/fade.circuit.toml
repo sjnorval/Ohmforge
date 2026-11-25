@@ -1,0 +1,122 @@
+format = 1
+
+[circuit]
+name = "LED fade"
+ground = "gnd"
+description = "The ESP32-C3 LEDC fades a red LED on GPIO8 up and down in hardware (esp-hal app, booted through the ROM). The ESP32-C3 draws its 5 mA idle current (quiescent_a)."
+
+[sim]
+max_step = 2e-5
+
+[[component]]
+ref = "U1"
+part = "espressif.esp32-c3"
+at = [18, 49]
+params = { quiescent_a = 0.005 }
+
+[component.firmware]
+app = "../../firmware/esp32c3-esp-hal-adc-pwm/led_fade.bin"
+app_sha256 = "bb0d85b3e233f36446d177f869365c5804a2920155e08e2e1877b76d117ec08b"
+boot = "rom"
+partitions = "../../firmware/esp32c3-esp-hal-adc-pwm/partitions.bin"
+partitions_sha256 = "c9a826e85500d14d1854ce78e47452d4614a1be371bbd056278d2cb3398fbbfd"
+ready_text = "ohmforge esp-hal led fade\n"
+
+[component.schematic]
+id = "u1"
+body = [0, 0, 102, 100]
+pins = [
+  { pin = "3V3", id = "vdd", name = "VDD", at = [0, 15], dir = "W" },
+  { pin = "GPIO8", id = "gpio8", at = [102, 33], dir = "E" },
+  { pin = "GND", id = "gnd", at = [102, 84], dir = "E" },
+]
+
+[[component]]
+ref = "R2"
+part = "generic.resistor"
+at = [157, 70]
+params = { resistance = 330 }
+
+[component.schematic]
+body = [0, 0, 50, 24]
+pins = [
+  { pin = "1", at = [0, 12], dir = "W" },
+  { pin = "2", at = [50, 12], dir = "E" },
+]
+
+[[component]]
+ref = "D1"
+part = "generic.led-red-0603"
+at = [267, 70]
+
+[component.schematic]
+body = [0, 0, 24, 25]
+pins = [
+  { pin = "A", at = [0, 12], dir = "W" },
+  { pin = "K", at = [24, 12], dir = "E" },
+]
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+at = [18, 210]
+params = { current_limit = 0.5, on = true, series_r = 0.1, volts = 3.3 }
+
+[component.schematic]
+id = "psu"
+body = [0, 0, 78, 52]
+pins = [
+  { pin = "+", id = "plus", at = [78, 14], dir = "E" },
+  { pin = "-", id = "minus", name = "−", at = [78, 42], dir = "E" },
+]
+
+[[symbol]]
+ref = "GND"
+kind = "ground"
+id = "gnd_sym"
+at = [211, 174]
+body = [0, 0, 22, 10]
+pins = [
+  { pin = "1", id = "pin", at = [11, 0], dir = "N" },
+]
+
+[[net]]
+name = "gpio8"
+label = "GPIO8"
+kind = "signal"
+pins = ["U1.GPIO8", "R2.1"]
+
+[[net]]
+name = "led_a"
+label = "LED anode"
+kind = "signal"
+pins = ["R2.2", "D1.A"]
+
+[[net]]
+name = "vdd"
+label = "VDD"
+kind = "power"
+pins = ["U1.3V3", "PSU.+"]
+
+[[net]]
+name = "gnd"
+label = "GND"
+kind = "ground"
+pins = ["U1.GND", "D1.K", "PSU.-", "GND.1"]
+
+[schematic]
+keepouts = [
+  { rect = [18, 28, 112, 40], note = "U1 / ESP32-C3" },
+  { rect = [168, 28, 196, 40], note = "R2" },
+  { rect = [160, 47, 204, 59], note = "330 ohm" },
+  { rect = [264, 28, 288, 40], note = "D1" },
+  { rect = [251, 100, 265, 112], note = "A" },
+  { rect = [294, 100, 308, 112], note = "K" },
+  { rect = [254, 119, 304, 131], note = "Red LED" },
+  { rect = [211, 195, 233, 207], note = "GND under symbol" },
+  { rect = [104, 256, 128, 268], note = "GND right of the PSU, under its return" },
+]
+
+[[probe]]
+name = "LED current"
+signal = "i(R2)"

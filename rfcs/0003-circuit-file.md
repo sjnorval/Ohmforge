@@ -183,8 +183,8 @@ Checks against the parts library (`of-circuit` feature `engine`):
 ### Canonical form
 
 `save` is a hand-written writer, so the layout is stable and readable, and the
-committed files are stored in canonical form (CI will run
-`ohmforge circuit fmt --check circuits` once E4b adds the demos):
+committed files are stored in canonical form (CI runs
+`ohmforge circuit fmt --check circuits` and `ohmforge circuit check circuits`):
 
 1. `format`, then `[circuit]` (`ground` is always written).
 2. `[sim]` with only the keys that differ from the defaults; left out when none do.
@@ -204,6 +204,31 @@ writes refs in net pins as declared and pin names as `part.toml` spells them.
 a keepout `note`. Comment preservation (for example with `toml_edit`, MIT/Apache)
 is left for the editor.
 
+### Building (E4b-2)
+
+`of_circuit::build::build(src, file, parts, registry, resolver)` turns a parsed
+file into a running `of_engine::Session`; `build_engine` stops after
+elaboration. In order:
+
+1. Parts and pins are checked against the library, and every firmware file is
+   read and its SHA-256 compared. The first problem is returned with the line
+   and column of the part, pin or hash (a wrong hash shows the actual one).
+2. The ground net must be `gnd` (or `0`) for now; another name is an error at
+   `[circuit] ground`.
+3. Each component's electrical pins are taken from the nets in file order,
+   spelled as in `part.toml`. Its model (`part.toml` `model`) must be in the
+   registry. Params pass through typed (`ParamValue`); numbers and flags also
+   reach `ElabCtx::param`. The seed is the component's, or `[sim] seed`.
+4. Firmware: `direct` passes the ELF; `rom` first asks the resolver for a
+   pre-booted chip (`Resolver::booted(part, app_sha256, ready_text)`, the
+   desktop's pre-boot cache), then reads the app and partition table and asks
+   `Resolver::rom(part)` for the fetched mask ROM and bootloader.
+5. Components are added in file order (symbols are skipped), the circuit is
+   elaborated, and the session starts with `[sim] quantum_us` and `max_step`.
+
+The registry decides the corner and temperature of library parts
+(`build::corner` maps `[sim] corner`); `ohmforge run` builds it from `[sim]`.
+
 ### Versioning
 
 Within format 1, new **optional** sections and keys may be added without a
@@ -218,8 +243,9 @@ than it knows.
 |---|---|
 | Format types, parse with positions, structural validation, canonical `save` | `of-circuit`, default features (serde and toml only) |
 | Parts-library and firmware-hash checks through a `Resolver` trait | `of-circuit` feature `engine` (adds `of-parts`, `of-firmware`) |
-| Circuit file → `of_engine::Session` builder, model `Registry` | E4b: `of-circuit` feature `engine`; `Registry` and `Session` in `of-engine` |
-| `FsResolver` (paths relative to the file), file and parts-directory loading; the fetched-ROM lookup in E4b | `of-circuit` feature `fs` |
+| Circuit file → `of_engine::Session` builder (`build::build`, `build::build_engine`), `EmbeddedResolver`; model `Registry` | `of-circuit` feature `engine` (adds `of-engine`, `of-component-api`, `of-core`); `Registry` and `Session` in `of-engine` |
+| `FsResolver` (paths relative to the file, `with_rom` for the fetched mask ROM), file and parts-directory loading, `fetch_pinned` | `of-circuit` feature `fs` |
+| The shipped `circuits/demos` files and the firmware they name, embedded | `of-circuit` feature `demos` |
 | Circuit file → `wiring::Schematic` | E4c: `of-ui/src/wiring/from_circuit.rs` with no default features |
 
 Loading inside `of-engine` was rejected: the engine would depend on the parts
@@ -236,7 +262,8 @@ specific parts"). `project.toml` (P0) can live in `of-circuit` later.
   ADC codes and LEDC duty, within 1 ns on edge times, and within
   `max(1 nA, 1 ppm)` on analog samples. Parity runs set the ESP32 quiescent load
   to 0; the shipped demo files keep the true-to-life 5 mA, recorded as a separate
-  reviewed change.
+  reviewed golden (`blink.idle-draw.trace.txt`: identical edges, UART and LED
+  current; PSU current higher by the idle draw, about 5 mA).
 - Accepted exceptions (Stefan, 25 November 2026, E4b-1), everything else keeps
   the tolerances above:
   - **Dimmer PSU current: 3.5 nA** instead of 1 nA. The engine's ESP32-C3
@@ -279,7 +306,8 @@ E4d switch-over, which drops the `--circuit-files` flag); files in
 `circuits/demos/`, embedded in the app; per-instance geometry stays in the file
 until E6.
 
-Still open, to settle in E4b without a new RFC unless the format changes:
+Settled in E4b-2: the ROM-booted demos use the app's banner line as
+`ready_text` (for example `"ohmforge esp-hal pot dimmer\n"`), and the pre-boot
+cache is asked by part, app SHA-256 and ready text (`Resolver::booted`).
 
-1. The exact `ready_text` for the ROM-booted demos and the pre-boot cache key.
-2. Whether `bench.psu` gets a `bom = false` marker before E6.
+Still open: whether `bench.psu` gets a `bom = false` marker before E6.

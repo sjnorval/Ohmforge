@@ -2024,8 +2024,14 @@ dependencies = [
 name = "of-circuit"
 version = "0.0.1"
 dependencies = [
+ "of-circuit",
+ "of-component-api",
+ "of-components",
+ "of-core",
+ "of-engine",
  "of-firmware",
  "of-parts",
+ "of-soc-esp32c3",
  "serde",
  "toml",
 ]
@@ -2037,8 +2043,12 @@ dependencies = [
  "of-analog",
  "of-bom",
  "of-circuit",
+ "of-components",
+ "of-core",
+ "of-engine",
  "of-netlist",
  "of-parts",
+ "of-soc-esp32c3",
 ]
 
 [[package]]
@@ -2164,6 +2174,7 @@ dependencies = [
  "egui",
  "image",
  "of-analog",
+ "of-circuit",
  "of-component-api",
  "of-components",
  "of-core",

@@ -107,9 +107,10 @@ Build your firmware the way you already do, then load it in one of these ways:
 |---|---|
 | Run the five built-in demos in the desktop app (LED blink, potentiometer dimmer, LED fade, push button poll and irq) and change the bench supply, pot and button | Creating or saving a schematic, or opening an official example pack, in the app |
 | Simulate your own **analog** circuit as a SPICE netlist with `ohmforge run` | An ESP32-C3 or firmware in a netlist |
+| Run a demo **circuit file** headless, firmware included: `ohmforge run circuits/demos/blink.circuit.toml --uart` (CSV of every net and probe, VCD), and check or format circuit files with `ohmforge circuit check` / `fmt` | Opening a circuit file in the app (E4c) |
 | Add a part under `parts/` and check it with `ohmforge validate-parts parts/` | Using a new part in the app |
 | Export a demo board's BOM with `ohmforge bom <blink\|dimmer\|fade\|button>` | A BOM for your own circuit |
 
 - **Build and run**: `cargo build --release -p of-app --features gui` and `cargo run --release -p of-app --features gui`; the CLI is `cargo run --release -p of-cli -- <command>`. There are no released binaries yet. All demos except LED blink need `scripts/fetch-esp-rom-elfs.sh` (or `.ps1`) first.
 - **SPICE netlists**: example circuits checked against ngspice are in `crates/of-analog/tests/circuits/` (for example `led_dc.cir`, `rc_step.cir`, `mvp_board.cir`). Run one with `cargo run --release -p of-cli -- run <file.cir> --out out.csv --vcd out.vcd`.
-- **New boards with firmware** can only be built in Rust today: see `crates/of-soc-esp32c3/tests/` (`blinky_led.rs`, `esp_hal_blinky.rs`), `crates/of-engine/tests/e2_ports.rs`, and the demo boards in `crates/of-ui/src/` with schematic coordinates placed by hand in `crates/of-ui/src/wiring/*.rs`.
+- **New boards with firmware** can be written as a circuit file by hand, starting from a copy of one in `circuits/demos/` (format: [RFC 0003](https://github.com/sjnorval/Ohmforge/blob/main/rfcs/0003-circuit-file.md)), and run with `ohmforge run`; the app shows only the built-in demos. In Rust: see `crates/of-soc-esp32c3/tests/` (`blinky_led.rs`, `esp_hal_blinky.rs`), `crates/of-engine/tests/e2_ports.rs`, and the demo boards in `crates/of-ui/src/` with schematic coordinates placed by hand in `crates/of-ui/src/wiring/*.rs`.

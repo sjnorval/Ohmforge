@@ -147,6 +147,23 @@ impl Waveforms {
         self.columns.len() - 1
     }
 
+    /// Results gathered outside the solver (for example a co-simulation
+    /// sampled by the CLI), for the CSV and VCD writers. Every column must
+    /// have one value per `x`.
+    pub fn from_columns(x_name: impl Into<String>, x: Vec<f64>, names: Vec<String>, columns: Vec<Vec<f64>>) -> Self {
+        assert_eq!(names.len(), columns.len(), "one column per name");
+        assert!(columns.iter().all(|c| c.len() == x.len()), "one value per x");
+        Self {
+            x_name: x_name.into(),
+            x,
+            names,
+            columns,
+            stats: TranStats::default(),
+            vars: Vec::new(),
+            n_probes: 0,
+        }
+    }
+
     /// A signal's samples by name (case-insensitive).
     pub fn signal(&self, name: &str) -> Option<&[f64]> {
         let key = name.to_ascii_lowercase();

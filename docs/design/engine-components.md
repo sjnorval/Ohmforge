@@ -1,6 +1,6 @@
 # Base engine and plug-in components
 
-Status: E1 (this document) merged in #43. The PSU return and current-averaging fix (#45) landed in #54. E2 (#46, #62) and E3 (#47, #63: `Esp32c3Component`, pad helpers, engine blinky parity) are on `main`. E4 to E6 are planned in P3 / 0.2 (#48, #49, #50); E4a, the circuit file format, landed in #73; E4b-1 (model registry, `Session` runtime, trace parity goldens) is in review. Section 1 still describes the pre-E2 demo glue; demos move onto circuit files in E4.
+Status: E1 (this document) merged in #43. The PSU return and current-averaging fix (#45) landed in #54. E2 (#46, #62) and E3 (#47, #63: `Esp32c3Component`, pad helpers, engine blinky parity) are on `main`. E4 to E6 are planned in P3 / 0.2 (#48, #49, #50); E4a, the circuit file format, landed in #73; E4b-1 (model registry, `Session` runtime, trace parity goldens) landed in #77; E4b-2 (the demo circuit files, `of_circuit::build`, `ohmforge run`) is in review. Section 1 still describes the pre-E2 demo glue; demos move onto circuit files in E4.
 Date: 2026-11-22 (status updated 2026-11-23).
 Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §5 (mixed-signal co-simulation), §6 (system architecture), §7 (component model and library), §11 (BOM); [`wire-routing.md`](wire-routing.md) (the shared schematic router); [`COMPONENTS.md`](../COMPONENTS.md) (the parts the library should grow to); roadmap P2 item “Base engine and plug-in components”.
 

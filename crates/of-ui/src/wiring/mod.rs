@@ -6,6 +6,8 @@
 mod blink;
 mod button;
 mod dimmer;
+#[cfg(test)]
+mod files;
 mod golden;
 mod hops;
 mod invariants;

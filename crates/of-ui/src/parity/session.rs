@@ -1,7 +1,7 @@
 //! The five demos built through the model registry and run on
 //! [`of_engine::Session`], with the same sampling loops as the hand-wired
 //! simulations. This is the engine half of trace parity (E4b): circuit files
-//! (E4b-2) only have to produce the same placements.
+//! (E4b-2, `parity::file`) build the same circuits and run here through [`run`].
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use crate::trace::{self, SampleClock, TraceBuf};
 const BLINKY: &[u8] = include_bytes!("../../../../firmware/esp32c3-blinky/blinky.elf");
 const R_SERIES: f64 = 330.0;
 
-fn parts_dir() -> std::path::PathBuf {
+pub(crate) fn parts_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parts")
 }
 
@@ -218,6 +218,25 @@ pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
         }
     };
     let s = session(places, max_step)?;
+    wrap(s, style)
+}
+
+/// The legacy sampling loop of `demo`.
+fn style(demo: Demo) -> Loop {
+    match demo {
+        Demo::Blink => Loop::Blink,
+        Demo::Dimmer | Demo::Fade => Loop::Pwm,
+        Demo::Button | Demo::ButtonIrq => Loop::Button,
+    }
+}
+
+/// Run an already built `Session` of `demo` (for example one built from its
+/// circuit file) with the legacy sampling loop.
+pub(crate) fn run(s: Session, demo: Demo) -> Result<Box<dyn DemoRun>, String> {
+    wrap(s, style(demo))
+}
+
+fn wrap(s: Session, style: Loop) -> Result<Box<dyn DemoRun>, String> {
     let mut d = SessionDemo {
         s,
         style,
