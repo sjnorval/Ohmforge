@@ -218,6 +218,7 @@ Measuring is an engine service; instruments are components (or probes) that use 
   - *Logger:* records chosen signals to CSV or VCD (as `ohmforge run` does for SPICE decks).
   - *UART console:* attaches to a serial port of a component (today's `SerialMonitor` on UART0).
 - Instruments are listed in the circuit file (section 3h) or placed by the user at run time; they are never in the BOM.
+- Signal names, the `[[instrument]]` table and the load-element API are specified in [RFC 0004](../../rfcs/0004-instruments.md) (Draft). The service core (`Signal`, `Probeable`, `MeasurementService`, sample rings and statistics) is in `of-instruments` since E5a.
 
 ### 3g. Parts library
 

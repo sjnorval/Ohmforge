@@ -62,7 +62,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-soc-esp32c3`, `of-soc-esp32` | SoC memory maps and peripherals (ESP32-C3 first) |
 | `of-firmware` | ELF loading, ESP flash images and partition tables (DWARF later) |
 | `of-plugin-wasm` | Sandboxed WASM component host |
-| `of-instruments` | Measurement service and instruments: scope, logic analyser, decoders, multimeter, logger; serial monitor model (`SerialMonitor`, lean console; the rest to do, phase E5 in P3, #49). The bench PSU becomes a component (E2) |
+| `of-instruments` | Measurement service and instruments: scope, logic analyser, decoders, multimeter, logger; serial monitor model (`SerialMonitor`, lean console) and the E5a measurement-service core (signals, sample rings, statistics; the instruments to do, phase E5 in P3, #49, RFC 0004). The bench PSU becomes a component (E2) |
 | `of-engine` | Base engine: builds components and circuit files into the solvers, checks the circuit, runs the kernel (E2, #62; circuit files E4, #48) |
 | `of-bom` | Bill of materials, costing, CSV export |
 | `of-kicad` | KiCad netlist and schematic export |
