@@ -11,6 +11,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Circuit files (RFC 0003) stay canonical, and their parts, pins and firmware hashes check.
+      - run: cargo run -q -p of-cli -- circuit fmt --check circuits
+      - run: cargo run -q -p of-cli -- circuit check circuits
       - uses: EmbarkStudios/cargo-deny-action@v2   # licences, advisories, bans
   test:
     strategy:
@@ -29,8 +32,8 @@ jobs:
         with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
       # Simulation core crates must build for the web target.
-      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-circuit -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3
-      - run: cargo check --target wasm32-unknown-unknown -p of-circuit --features engine
+      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-circuit -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3 -p of-engine -p of-component-api
+      - run: cargo check --target wasm32-unknown-unknown -p of-circuit --features engine,demos
   gui:
     runs-on: ubuntu-latest
     steps:
