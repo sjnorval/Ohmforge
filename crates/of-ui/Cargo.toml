@@ -25,6 +25,11 @@ image = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 
+[dev-dependencies]
+# Trace parity tests (E4b) build the demos through the engine registry.
+of-component-api.workspace = true
+of-engine.workspace = true
+
 [features]
 gui = [
     "dep:egui",
