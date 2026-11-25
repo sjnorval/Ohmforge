@@ -40,6 +40,9 @@
 | UI | egui + wgpu via eframe; native and WASM from one codebase |
 | Plugins | Native Rust components in-tree; sandboxed WASM components for the community |
 | BOM | First-class: MPN, supplier SKUs, ZAR pricing snapshots, CSV/XLSX/KiCad/JLCPCB export |
+| Firmware workflow | The user's editor and toolchain (VS Code, Arduino IDE 2, esptool, cargo); no in-app sketch editor in P2–P6 |
+| Project sharing | File-based project packs and share links, no account required; cloud sync stays parked |
+| MicroPython | Unmodified official images on the ESP32-C3 in P4; later chips in P6 |
 | Licence | Code AGPL-3.0-or-later (commercial licence available separately); parts data and docs CC-BY-SA-4.0; QEMU bridge kept separate under GPL-2.0 |
 
 ---
@@ -300,7 +303,7 @@ artwork = "CC-BY-SA-4.0"
 
 ## 8. Firmware loading
 
-1. **Accept what the toolchains produce.** ELF from ESP-IDF, Arduino-ESP32, esp-hal/esp-idf-hal (Rust), MicroPython; merged flash `.bin`; UF2.
+1. **Accept what the toolchains produce.** ELF from ESP-IDF, Arduino-ESP32, esp-hal/esp-idf-hal (Rust), MicroPython; merged flash `.bin`; UF2. MicroPython on the ESP32-C3 is scheduled in P4 ([`design/micropython.md`](design/micropython.md)); it is not part of the P2 Arduino/ESP-IDF demo family.
 2. **Parse and map.** Our own minimal ELF32 reader in `of-firmware` for segments and symbols (`object`/`goblin` remain options for wider formats), `gimli` for DWARF so the debugger and profiler show source lines and variables.
 3. **Build a flash image.** Ohmforge parses and writes ESP images with its own code (`of_firmware::EspImage`: header, segments, checksum and our own SHA-256; no espflash dependency) and will place bootloader, partition table and app at real offsets; eFuses from a per-chip default file.
 4. **Boot like silicon.** Run the real mask ROM from Espressif's esp-rom-elfs (Apache-2.0 files around closed-source ROM code, so fetched by a script with a pinned checksum and never committed or bundled), through the ESP-IDF second-stage bootloader (espflash's prebuilt one, fetched the same way; an esp-hal app boots this way), or a fast direct-boot path that skips the bootloader.
@@ -324,6 +327,10 @@ artwork = "CC-BY-SA-4.0"
 | Serial monitor and plotter | UART and USB-CDC, with input |
 | Power profiler | Current over time per rail, sleep-mode breakdown, battery-life estimate |
 | Debugger panel | Registers, disassembly, FreeRTOS task list, peripheral register viewer |
+| Example gallery | Official, documented projects that open as user-owned copies ([`design/examples-and-sharing.md`](design/examples-and-sharing.md)) |
+| Checks | Visible, cited compatibility and wiring findings ([`design/compatibility-checks.md`](design/compatibility-checks.md)) |
+
+Firmware is written in the user's editor, not inside Ohmforge ([`design/editor-integration.md`](design/editor-integration.md)). The breadboard is a 2D, true-pitch view of the same circuit ([`design/breadboard.md`](design/breadboard.md)), not a 3D bench. A project can be handed on as a file pack, without an account.
 
 Schematic net routing for the editor (and for replacing the hand-authored demo polylines) is specified in [`docs/design/wire-routing.md`](design/wire-routing.md), under decision d1.
 
@@ -512,8 +519,8 @@ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
 | P0 Foundations | 0–6 | Workspace, scheduler, virtual time, project format, CI, licences, docs skeleton | Repo public, CI green on three OSes and WASM |
 | P1 Analog core | 4–16 | MNA, DC op, transient, R/C/L/D/BJT/MOSFET, LTE timestep, CLI netlist runner | Reference set within 1 % of ngspice |
 | P2 ESP32-C3 MVP | 12–28 | RV32IMC core, ROM boot, GPIO/IOMUX, UART, timers, ADC, LEDC; schematic editor; scope and logic analyser; BOM v1 | MVP release 0.1 |
-| P3 Breadth | 28–42 | Classic ESP32 via QEMU sidecar; I2C, SPI, RMT, DAC; breadboard view; 50 parts; KiCad and XLSX export | 0.2: common hobby projects run |
-| P4 Own Xtensa and web | 40–60 | LX6/LX7 core, web app, Wi-Fi virtual radio, sleep modes and power profiler | 0.3: classic ESP32 in the browser |
+| P3 Breadth | 28–42 | Classic ESP32 via QEMU sidecar; I2C, SPI, RMT, DAC; breadboard view; official examples and file-based sharing; first compatibility checks; 50 parts; KiCad and XLSX export | 0.2: common hobby projects run |
+| P4 Own Xtensa and web | 40–60 | LX6/LX7 core, web app, Wi-Fi virtual radio with a fidelity page, MicroPython on the C3, sleep modes and power profiler | 0.3: classic ESP32 in the browser |
 | P5 Realism | 56–72 | Monte Carlo, thermal, fault injection, hardware-in-the-loop lab, supplier price plugins | 0.4: validation report published |
 | P6 1.0 | 70–84 | Stable component API and WASM SDK, ESP32-S3 and C6, docs complete, BLE stretch | 1.0 |
 

@@ -35,7 +35,7 @@ Non-goals:
 
 - Shipping the Arduino-ESP32 core, ESP-IDF, or their GPL/LGPL toolchains inside the Ohmforge repo or release (see §13.1 and editor-integration §5b).
 - The Arduino IDE / VS Code **upload** workflow for arbitrary user sketches (that is I6 / I5 in P4).
-- MicroPython, PlatformIO as a third first-class tree (PlatformIO may be used later as a *build helper* if it simplifies CI; it is not a third demo family for #60).
+- MicroPython, PlatformIO as a third first-class tree (PlatformIO may be used later as a *build helper* if it simplifies CI; it is not a third demo family for #60). MicroPython on the ESP32-C3 is scheduled in P4; see [`micropython.md`](micropython.md).
 - Changing the desktop demo picker to prefer Arduino/IDF images (tests prove the ELFs; the UI may keep loading esp-hal until a follow-up).
 
 ## 3. What “unmodified” means here

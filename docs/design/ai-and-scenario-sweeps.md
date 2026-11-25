@@ -2,7 +2,7 @@
 
 Status: proposed (design only, no code). Nothing in this document is implemented yet; section 1 lists what exists today. Phase X0 is this document (P2). The sweep items S1 to S5, the AI items AI1 to AI5 and the datasheet items D1 to D3 are spread over P3 / 0.2 to P5 / 0.4 after the engine, control-API and parts-availability work they build on (section 9).
 Date: 2026-11-23.
-Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §5 (accuracy tiers), §7 (`part.toml`), §10 (fault injection), §13.1 (licensing); [`engine-components.md`](engine-components.md) (base engine, components, circuit files, readings and `Health`); [`editor-integration.md`](editor-integration.md) §4a (I1 control API and `ohmforge serve`); [`parts-availability.md`](parts-availability.md) (`of-suppliers`, the lookup planner, the hand-entered `bom.toml`, the `availability/` dataset); [`interconnects.md`](interconnects.md) (wire and trace sizes as sweep variables); [`buses.md`](buses.md) (bus faults as sweep variables); [`component-stress-states.md`](component-stress-states.md) (the stress levels that sweeps and reviews read); roadmap items “Monte Carlo runs over part tolerances”, “Optional GPU acceleration for batch runs” and “Fault injection” (P5).
+Related: [`compatibility-checks.md`](compatibility-checks.md) (P3 visible check panel and cited `part.toml` fields; AI4 and D2 stay the P4 batch and limits store); [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §5 (accuracy tiers), §7 (`part.toml`), §10 (fault injection), §13.1 (licensing); [`engine-components.md`](engine-components.md) (base engine, components, circuit files, readings and `Health`); [`editor-integration.md`](editor-integration.md) §4a (I1 control API and `ohmforge serve`); [`parts-availability.md`](parts-availability.md) (`of-suppliers`, the lookup planner, the hand-entered `bom.toml`, the `availability/` dataset); [`interconnects.md`](interconnects.md) (wire and trace sizes as sweep variables); [`buses.md`](buses.md) (bus faults as sweep variables); [`component-stress-states.md`](component-stress-states.md) (the stress levels that sweeps and reviews read); roadmap items “Monte Carlo runs over part tolerances”, “Optional GPU acceleration for batch runs” and “Fault injection” (P5).
 
 Stefan asked for three things that share one foundation:
 
@@ -298,6 +298,9 @@ review = "reviewed"      # reviewed | unreviewed
 - The validator (`validate-parts`) checks units, page references and that every `source` hash exists in the datasheet index.
 
 ## 7. Design review
+
+The user-facing check panel, the first P3 rule slice, and the requirement that every rating a check uses is cited, are specified in [`compatibility-checks.md`](compatibility-checks.md). This section remains the home of the full P4 `ohmforge review` rule set and the optional AI advisory review.
+
 
 **Proposed.**
 
