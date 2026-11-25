@@ -153,6 +153,31 @@ dependencies on the `deny.toml` allow list and must not link ngspice or QEMU.
 3. **Ship `of-engine` in the same PR as the RFC.** Deferred: keep the design gate
    separate so implementation PRs can cite an Accepted RFC.
 
+## E4 changes (addendum, E4b, #48)
+
+Additive changes for the circuit-file runtime. Every new method has a default,
+so E2 and E3 components compile unchanged.
+
+- `ParamValue { Number, Bool, Text, List }`: typed parameters from a circuit
+  file. Numbers and flags still reach `ElabCtx::param` as `f64`; text and
+  lists (for example the ESP32-C3's `inputs = ["GPIO9"]`) reach the model's
+  constructor through the registry's `ComponentSpec`.
+- `ElabCtx::device_ref(name)`: a handle for a device added through
+  `circuit_mut` (bridge placements such as a pot's two legs). A `DeviceRef`
+  is the device's index in the circuit.
+- `AttachCtx` and `Component::attach`: once the analog engine exists and
+  before the kernel starts, a component may register watches and sample
+  points, read the operating point, learn its own and the analog engine's
+  kernel ids (`Component::has_engine` reserves an id), and ask the session to
+  start at a later origin (`set_origin`, for a pre-booted chip).
+- `Component::commit_with(view, t, cx)`: the accepted-step hook with an
+  `EventCtx`, so a component can change devices (the bench PSU's CV/CC
+  switch). The default calls `commit`. Changes take effect on the next step.
+- `of-engine` gains `Registry` (model string to constructor, `ComponentSpec`,
+  `Firmware`) and `Session` (`BuiltEngine::into_session`). This settles
+  unresolved question 3: `bench.psu` lives in `parts/bench/psu/part.toml` with
+  `model = "rust:bench-psu"`.
+
 ## Unresolved questions
 
 These may be settled in the first E2 implementation PR without a new RFC unless
