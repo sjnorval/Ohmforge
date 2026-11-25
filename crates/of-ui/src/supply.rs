@@ -1,7 +1,7 @@
 //! The bench PSU on the desktop: labels and warnings. The settings and status
 //! types are `of_components::psu`'s (E5d folded the duplicates).
 
-pub use of_components::psu::{RATED_MAX_V, RATED_MIN_V, SupplyMode, SupplySettings, SupplyStatus};
+pub use of_components::psu::{SupplyMode, SupplySettings, SupplyStatus};
 
 /// Short warning when the supply is outside the modelled chip's ratings.
 pub fn rating_warning(status: &SupplyStatus) -> Option<&'static str> {

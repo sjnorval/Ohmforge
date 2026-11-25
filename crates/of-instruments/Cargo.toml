@@ -15,4 +15,5 @@ workspace = true
 [dependencies]
 of-core.workspace = true
 of-engine.workspace = true
+of-components.workspace = true
 thiserror.workspace = true
