@@ -1078,6 +1078,41 @@ mod tests {
     }
 
     #[test]
+    fn the_led_current_agrees_with_its_series_resistor() {
+        use of_instruments::{Probeable, Signal};
+        // E5c: the solver's diode current `i(D1)` against the series-R current,
+        // at max(1 nA, 1 ppm), on every demo, at the scope's sample instants.
+        let mut worst: f64 = 0.0;
+        let mut compared = 0;
+        for kind in [
+            DemoKind::Blink,
+            DemoKind::Dimmer,
+            DemoKind::Fade,
+            DemoKind::ButtonPoll,
+            DemoKind::ButtonIrq,
+        ] {
+            let Some(mut sim) = start(kind, StartOptions::default()) else {
+                continue;
+            };
+            let r: Signal = format!("i({})", sim.resistor_ref()).parse().unwrap();
+            let d: Signal = "i(D1)".parse().unwrap();
+            for k in 1..=400 {
+                sim.advance(k as f64 * 50e-6).unwrap();
+                let ir = sim.s.sample(&r).unwrap();
+                let id = sim.s.sample(&d).unwrap();
+                assert!(
+                    parity_close(ir, id),
+                    "{kind:?} t = {}: R {ir:e} vs D1 {id:e}",
+                    sim.time()
+                );
+                worst = worst.max((ir - id).abs());
+                compared += 1;
+            }
+        }
+        eprintln!("i(D1) vs i(R): {compared} samples, worst |diff| = {worst:e} A");
+    }
+
+    #[test]
     fn the_session_resolves_every_signal_kind() {
         use of_instruments::{ProbeError, Probeable, Signal};
         let Some(mut sim) = start(DemoKind::Blink, StartOptions::default()) else {

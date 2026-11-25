@@ -103,6 +103,8 @@ Grammar rules:
 - `MeasurementService::watch(signal, window)` returns a `ChannelId`. Watching the same signal twice shares the channel, and ids are never reused.
 - `on_step` samples every channel at the same instant, or none (a failed probe records nothing). `record` does the same without consulting the grid, for a run loop that keeps its own clock (the desktop's LEDC-edge loop, E5b), and `set_visible_window` re-sizes every ring and the grid together.
 - `Session` as `Probeable` (E5b): `v(net)` reads the solution, with the ground net (`0` or `gnd`) at 0 V when the solver does not name it; `i(R1)` needs a two-pin part; `i(REF.pin)` uses the pin order of `info()`; `r(..)` searches `readings`; `d(..)` is `NotAnalog` (the logic analyser reads edges, E5g). Unknown parts, pins, nets or readings are `Unresolved`.
+- Diode currents (E5c): every analog diode reports `i(name)`, its anode-to-cathode current at the solution (series-resistance current, or the junction current without `rs`), so `terminal_currents` of LEDs and diodes is real rather than 0. This is an analog-probe addition; the `Component` API (RFC 0001) is unchanged.
+- Ideal multimeter (E5c, decided 2026-11-25): ammeter readings average over whole PWM periods (as a DMM's integrating ADC does); when several parts join the two clicked points the user picks one from a chooser; resistance mode waits for E5f.
 - Rings are `TraceBuf`: bounded by `MAX_TRACE_SAMPLES`, with retention tied to the window.
 - Statistics are pure functions over `(t, value)` slices:
   - `average_window` and `average_periods`, the period-aligned mean from #45;

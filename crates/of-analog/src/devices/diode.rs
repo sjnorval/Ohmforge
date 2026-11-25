@@ -325,8 +325,12 @@ impl Device for Diode {
         cx.current(self.ai, self.k, id - gd * vd);
     }
     fn probes(&self, x: &[f64], out: &mut Vec<(String, f64)>) {
+        // Anode-to-cathode current through the diode at this solution (E5c):
+        // the series-resistance current when `rs > 0`, else the junction current.
+        let id = self.current_at(x);
+        out.push((format!("i({})", self.name), id));
         if let Some(led) = self.model.led {
-            let i = self.current_at(x).max(0.0);
+            let i = id.max(0.0);
             out.push((format!("popt({})", self.name), led.eqe * i * HC_OVER_Q / led.wavelength));
             out.push((format!("bright({})", self.name), i / led.if_rated));
         }
@@ -336,6 +340,17 @@ impl Device for Diode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probes_report_the_diode_current() {
+        // E5c: `i(name)` is the junction (Shockley) current at the solution,
+        // for plain diodes and LEDs alike.
+        let d = Diode::new("d1", 1, 0, DiodeModel::default(), 1.0, false);
+        let mut out = Vec::new();
+        d.probes(&[0.0, 0.6], &mut out);
+        let i = out.iter().find(|(n, _)| n == "i(d1)").expect("i(d1) probe").1;
+        assert_eq!(i, d.dc(0.6, 0.0).0);
+    }
 
     #[test]
     fn shockley_and_reverse_regions() {
@@ -397,9 +412,10 @@ mod tests {
         assert!((i - 20e-3).abs() < 1e-9, "{i}");
         let mut out = Vec::new();
         d.probes(&[0.0, 2.0], &mut out);
-        let popt = out[0].1;
+        let get = |k: &str| out.iter().find(|(n, _)| n == k).map(|(_, v)| *v).unwrap();
+        let popt = get("popt(d1)");
         let expected = 0.1 * 20e-3 * HC_OVER_Q / 620e-9;
         assert!((popt - expected).abs() < 1e-9 * expected, "{popt}");
-        assert!((out[1].1 - 1.0).abs() < 1e-6);
+        assert!((get("bright(d1)") - 1.0).abs() < 1e-6);
     }
 }
