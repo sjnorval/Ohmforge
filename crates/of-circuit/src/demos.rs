@@ -5,8 +5,11 @@
 //! Table 5-8, 160 MHz): `quiescent_a = 0.023` with the CPU running, and
 //! `0.016` for `button-irq`, which sleeps in `wfi`. The mask ROM and bootloader are never embedded:
 //! add them with [`EmbeddedResolver::with_rom`] for the ROM-booted demos.
+//! The parts they place are embedded too ([`PARTS`], [`parts`]), so an app
+//! can build them without the repository's `parts/` directory.
 
 use crate::embedded::EmbeddedResolver;
+use crate::library::PartsIndex;
 
 /// One embedded demo file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,4 +68,34 @@ pub fn resolver() -> EmbeddedResolver {
     FIRMWARE
         .iter()
         .fold(EmbeddedResolver::new(), |r, (path, bytes)| r.with_file(path, *bytes))
+}
+
+macro_rules! parts {
+    ($($dir:literal),* $(,)?) => {
+        &[$(($dir, include_str!(concat!("../../../parts/", $dir, "/part.toml")))),*]
+    };
+}
+
+/// The `part.toml` of every part the demos place, keyed by its directory
+/// under `parts/` (no SPICE models: the demo parts are built-in models).
+pub const PARTS: &[(&str, &str)] = parts![
+    "bench/psu",
+    "leds/red-0603",
+    "mcu/esp32-c3",
+    "passives/bourns-ptv09a",
+    "passives/resistor",
+    "switches/pushbutton-6mm",
+];
+
+/// The embedded demo parts, parsed.
+pub fn part_files() -> Result<Vec<of_parts::PartFile>, String> {
+    PARTS
+        .iter()
+        .map(|(dir, text)| of_parts::parse_part(text).map_err(|e| format!("parts/{dir}/part.toml: {e}")))
+        .collect()
+}
+
+/// The embedded demo parts as an index for [`crate::build::build`].
+pub fn parts() -> Result<PartsIndex, String> {
+    part_files().map(PartsIndex::new)
 }
