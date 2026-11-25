@@ -22,6 +22,7 @@ use of_components::analog::{Env, Library};
 use of_components::{BounceSettings, register_builtin};
 use of_core::{SimTime, Stop};
 use of_engine::{Firmware, Registry, Session};
+use of_instruments::{ChannelId, MeasurementService, Probeable, SamplePlan, Signal};
 use of_soc_esp32c3::{Esp32c3Engine, UartByte};
 
 use crate::adc_pwm::{self, PwmKind};
@@ -37,6 +38,18 @@ const PWM_AVG_WINDOW: f64 = 2e-3;
 /// Display-average window of the button demos (as `ButtonSim`).
 const BUTTON_AVG_WINDOW: f64 = 2e-3;
 const APB_HZ: u64 = 80_000_000;
+
+/// The signal of `kind`'s `[[probe]] name = "LED current"` (E5b: the scope
+/// and averages read it through the measurement service).
+fn led_probe(kind: DemoKind) -> Result<Signal, String> {
+    let file = parsed(kind)?;
+    let probe = file
+        .probes
+        .iter()
+        .find(|p| p.name == "LED current")
+        .ok_or_else(|| format!("{}: no `LED current` probe", file_stem(kind)))?;
+    probe.signal.parse().map_err(|e| format!("{}: {e}", file_stem(kind)))
+}
 
 /// The circuit file stem of `kind` (`circuits/demos/<stem>.circuit.toml`).
 pub(crate) fn file_stem(kind: DemoKind) -> &'static str {
@@ -203,7 +216,9 @@ pub(crate) struct SessionSim {
     kind: DemoKind,
     s: Session,
     style: Loop,
-    samples: TraceBuf,
+    /// The measurement service; samples the file's `LED current` probe (A).
+    meas: MeasurementService,
+    led: ChannelId,
     psu_samples: TraceBuf,
     clock: SampleClock,
     /// Button loop: next grid sample (relative).
@@ -245,11 +260,14 @@ impl SessionSim {
 
     fn run_inner(kind: DemoKind, s: Session, edge_log: bool) -> Result<Self, String> {
         let style = Loop::of(kind);
+        let mut meas = MeasurementService::new(SamplePlan::default());
+        let led = meas.watch_default(led_probe(kind)?);
         let mut d = Self {
             kind,
             s,
             style,
-            samples: TraceBuf::default_scope(),
+            meas,
+            led,
             psu_samples: TraceBuf::default_scope(),
             clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
             next_sample: SimTime::ZERO,
@@ -292,16 +310,25 @@ impl SessionSim {
         reached(stop, self.time())
     }
 
+    /// LED current (mA) from the file's `LED current` probe, now.
     fn instant_ma(&mut self) -> Result<f64, String> {
-        let gpio = self.s.value("v(gpio8)").ok_or("no GPIO8 voltage in the solution")?;
-        let anode = self.s.value("v(led_a)").ok_or("no LED anode voltage in the solution")?;
-        Ok((gpio - anode) * 1e3 / R_SERIES)
+        let signal = &self.meas.channel(self.led).expect("LED channel").signal;
+        Ok(self.s.sample(signal).map_err(|e| e.to_string())? * 1e3)
+    }
+
+    /// The LED probe's ring (A).
+    fn led_ring(&self) -> &TraceBuf {
+        &self.meas.channel(self.led).expect("LED channel").ring
+    }
+
+    /// The LED probe's samples in mA, as the scope, averages and goldens use them.
+    fn led_ma(&self) -> Vec<(f64, f64)> {
+        self.led_ring().iter().map(|(t, a)| (t, a * 1e3)).collect()
     }
 
     fn record_sample(&mut self) -> Result<(), String> {
         let t = self.time();
-        let ma = self.instant_ma()?;
-        self.samples.push(t, ma);
+        self.meas.record(&mut self.s).map_err(|e| e.to_string())?;
         self.cpu().recycle_consumed_edges();
         self.s.commit().map_err(|e| e.to_string())?;
         self.supply_status = self.read_supply();
@@ -432,9 +459,10 @@ impl SessionSim {
     }
 
     pub(crate) fn set_scope_window(&mut self, visible: f64) {
-        self.samples.set_visible_window(visible);
+        let now = self.time();
+        self.meas.set_visible_window(visible, now);
         self.psu_samples.set_visible_window(visible);
-        self.clock.set_step(self.samples.sample_step(), self.time());
+        self.clock.set_step(self.led_ring().sample_step(), now);
         if self.style == Loop::Button {
             self.next_sample = SimTime::from_secs_f64(self.clock.next().max(0.0));
         }
@@ -447,7 +475,7 @@ impl SessionSim {
 
     /// Display-average LED current (mA), averaged as for this kind.
     pub(crate) fn average_ma(&self) -> f64 {
-        let pts = self.samples.to_vec();
+        let pts = self.led_ma();
         match self.style {
             Loop::Blink => trace::average_window(&pts, self.time(), trace::LED_AVG_WINDOW),
             Loop::Pwm => trace::average_periods(
@@ -465,9 +493,9 @@ impl SessionSim {
     /// The scope trace: raw samples, or the PWM demos' moving average.
     pub(crate) fn trace(&self) -> Vec<(f64, f64)> {
         if self.style != Loop::Pwm {
-            return self.samples.to_vec();
+            return self.led_ma();
         }
-        let pts = self.samples.to_vec();
+        let pts = self.led_ma();
         pts.iter()
             .map(|&(t, _)| {
                 (
@@ -486,11 +514,11 @@ impl SessionSim {
     }
 
     pub(crate) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
-        trace::pwm_duty_freq(&self.samples.to_vec(), self.time(), 0.5)
+        trace::pwm_duty_freq(&self.led_ma(), self.time(), 0.5)
     }
 
     pub(crate) fn supply_status(&self) -> SupplyStatus {
-        let led = self.samples.to_vec();
+        let led = self.led_ma();
         let psu = self.psu_samples.to_vec();
         let window = match self.style {
             Loop::Pwm => PWM_AVG_WINDOW,
@@ -648,7 +676,7 @@ impl SessionSim {
     /// Raw outputs for the parity goldens.
     pub(crate) fn parity_raw(&mut self) -> crate::parity::Raw {
         let origin = self.s.origin();
-        let led = self.samples.to_vec();
+        let led = self.led_ma();
         let psu = self.psu_samples.to_vec();
         let cpu = self.cpu();
         crate::parity::Raw {
@@ -664,14 +692,14 @@ impl SessionSim {
     #[cfg(all(feature = "gui", test))]
     pub(crate) fn perf_snapshot(&mut self) -> crate::stats::PerfSnapshot {
         let time = self.time();
-        let samples = self.samples.len();
+        let samples = self.led_ring().len();
         crate::stats::PerfSnapshot::from_session(&mut self.s, time, samples)
     }
 
     /// Capacity of the scope ring.
     #[cfg(all(feature = "gui", test))]
     pub(crate) fn trace_capacity(&self) -> usize {
-        self.samples.capacity()
+        self.led_ring().capacity()
     }
 
     /// The running session (parity steps set raw host params).
@@ -1006,6 +1034,79 @@ mod tests {
                 Some((mv.parse().ok()?, duty.parse().ok()?))
             })
             .collect()
+    }
+
+    /// `max(1 nA, 1 ppm)`, the strict parity tolerance on currents.
+    fn parity_close(a: f64, b: f64) -> bool {
+        (a - b).abs() <= f64::max(1e-9, 1e-6 * a.abs().max(b.abs()))
+    }
+
+    #[test]
+    fn the_led_probe_reads_like_the_old_v_over_r() {
+        use of_instruments::{Probeable, Signal};
+        // E5b: `i(R…)` through `terminal_currents` against the hand-coded
+        // `(v(gpio8) − v(led_a)) / 330` the desktop used until now.
+        let mut worst: f64 = 0.0;
+        let mut compared = 0;
+        for kind in [
+            DemoKind::Blink,
+            DemoKind::Dimmer,
+            DemoKind::Fade,
+            DemoKind::ButtonPoll,
+            DemoKind::ButtonIrq,
+        ] {
+            let Some(mut sim) = start(kind, StartOptions::default()) else {
+                continue;
+            };
+            let probe: Signal = format!("i({})", sim.resistor_ref()).parse().unwrap();
+            for k in 1..=400 {
+                sim.advance(k as f64 * 50e-6).unwrap();
+                let gpio = sim.s.value("v(gpio8)").unwrap();
+                let anode = sim.s.value("v(led_a)").unwrap();
+                let old = (gpio - anode) / R_SERIES;
+                let new = sim.s.sample(&probe).unwrap();
+                assert!(
+                    parity_close(old, new),
+                    "{kind:?} t = {}: {old:e} vs {new:e}",
+                    sim.time()
+                );
+                worst = worst.max((old - new).abs());
+                compared += 1;
+            }
+        }
+        eprintln!("i(R) vs V/R: {compared} samples, worst |diff| = {worst:e} A");
+    }
+
+    #[test]
+    fn the_session_resolves_every_signal_kind() {
+        use of_instruments::{ProbeError, Probeable, Signal};
+        let Some(mut sim) = start(DemoKind::Blink, StartOptions::default()) else {
+            return;
+        };
+        sim.advance(1e-3).unwrap();
+        let s = &mut sim.s;
+        let mut get = |x: &str| s.sample(&x.parse::<Signal>().unwrap());
+        let vdd = get("v(vdd)").unwrap();
+        assert!((3.0..3.4).contains(&vdd), "{vdd}");
+        assert_eq!(get("v(gnd)").unwrap(), 0.0);
+        assert_eq!(get("v(0)").unwrap(), 0.0);
+        assert_eq!(get("v(vdd,gnd)").unwrap(), vdd);
+        let i = get("i(R1)").unwrap();
+        assert_eq!(get("i(R1.1)").unwrap(), i);
+        assert_eq!(get("i(R1.2)").unwrap(), -i);
+        let psu = get("r(PSU.volts)").unwrap();
+        assert!((psu - vdd).abs() < 0.1, "{psu} vs {vdd}");
+        let unresolved = |x: &str| ProbeError::Unresolved(x.parse().unwrap());
+        assert_eq!(get("v(nowhere)"), Err(unresolved("v(nowhere)")));
+        assert_eq!(get("i(R9)"), Err(unresolved("i(R9)")));
+        assert_eq!(get("i(R1.3)"), Err(unresolved("i(R1.3)")));
+        assert_eq!(get("i(U1)"), Err(unresolved("i(U1)")), "U1 has more than two pins");
+        assert_eq!(get("r(PSU.nope)"), Err(unresolved("r(PSU.nope)")));
+        assert_eq!(
+            get("d(U1.GPIO8)"),
+            Err(ProbeError::NotAnalog("d(U1.GPIO8)".parse().unwrap()))
+        );
+        assert!((s.now_secs() - 1e-3).abs() < 1e-12);
     }
 
     #[test]

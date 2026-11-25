@@ -7,7 +7,7 @@
 //! event when the plan asks for events. Every channel is sampled at the same
 //! instant, or none is (a failed probe records nothing).
 
-use crate::ring::{SAMPLE_STEP, SampleClock, TRACE_WINDOW, TraceBuf};
+use crate::ring::{SAMPLE_STEP, SampleClock, TRACE_WINDOW, TraceBuf, retention_window, sample_step_for_window};
 use crate::signal::Signal;
 
 /// Why a signal could not be sampled.
@@ -129,6 +129,30 @@ impl MeasurementService {
             .filter_map(|(i, c)| c.as_ref().map(|c| (ChannelId(i), c)))
     }
 
+    /// Record one sample on every channel now, whatever the grid says (the
+    /// caller keeps its own sample clock). Every channel or none.
+    pub fn record<P: Probeable + ?Sized>(&mut self, src: &mut P) -> Result<(), ProbeError> {
+        let now = src.now_secs();
+        let mut values = Vec::with_capacity(self.channels.len());
+        for c in self.channels.iter().flatten() {
+            values.push(src.sample(&c.signal)?);
+        }
+        for (c, v) in self.channels.iter_mut().flatten().zip(values) {
+            c.ring.push(now, v);
+        }
+        Ok(())
+    }
+
+    /// Re-size every ring for a visible plot span (as
+    /// [`TraceBuf::set_visible_window`]) and move the grid to the new step.
+    pub fn set_visible_window(&mut self, visible: f64, now: f64) {
+        for c in self.channels.iter_mut().flatten() {
+            c.ring.set_visible_window(visible);
+        }
+        let step = sample_step_for_window(visible, retention_window(visible));
+        self.clock.set_step(step, now);
+    }
+
     /// Call after each engine step. Records one sample on every channel when
     /// the grid is due, or when `event_hit` and the plan samples events.
     /// Returns whether a sample was recorded.
@@ -139,13 +163,7 @@ impl MeasurementService {
         if !(grid || event) {
             return Ok(false);
         }
-        let mut values = Vec::with_capacity(self.channels.len());
-        for c in self.channels.iter().flatten() {
-            values.push(src.sample(&c.signal)?);
-        }
-        for (c, v) in self.channels.iter_mut().flatten().zip(values) {
-            c.ring.push(now, v);
-        }
+        self.record(src)?;
         Ok(true)
     }
 }
@@ -262,6 +280,41 @@ mod tests {
         let pts = ring.to_vec();
         assert!(pts.first().unwrap().0 >= 0.099 - 0.010 - 1e-12, "{pts:?}");
         assert_eq!(pts.last().unwrap().0, 0.099);
+    }
+
+    #[test]
+    fn record_samples_now_regardless_of_the_grid() {
+        let mut svc = MeasurementService::new(SamplePlan::Every(1.0));
+        let i = svc.watch_default(sig("i(R1)"));
+        let mut src = fake();
+        src.t = 3e-6;
+        svc.record(&mut src).unwrap();
+        src.t = 4e-6;
+        svc.record(&mut src).unwrap();
+        assert_eq!(svc.channel(i).unwrap().ring.to_vec(), vec![(3e-6, 4e-3), (4e-6, 4e-3)]);
+        svc.watch_default(sig("v(nowhere)"));
+        assert!(svc.record(&mut src).is_err());
+        assert_eq!(svc.channel(i).unwrap().ring.len(), 2);
+    }
+
+    #[test]
+    fn set_visible_window_resizes_every_ring_like_trace_buf() {
+        let mut svc = MeasurementService::new(SamplePlan::default());
+        let a = svc.watch_default(sig("i(R1)"));
+        let b = svc.watch_default(sig("v(vdd)"));
+        let mut want = TraceBuf::default_scope();
+        want.set_visible_window(1e-3);
+        svc.set_visible_window(1e-3, 0.0);
+        for id in [a, b] {
+            let ring = &svc.channel(id).unwrap().ring;
+            assert_eq!(ring.sample_step(), want.sample_step());
+            assert_eq!(ring.window(), want.window());
+            assert_eq!(ring.capacity(), want.capacity());
+        }
+        // The grid follows the finer step.
+        let mut src = fake();
+        src.t = want.sample_step();
+        assert!(svc.on_step(&mut src, false).unwrap());
     }
 
     #[test]
