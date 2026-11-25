@@ -26,6 +26,8 @@ serde = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Circuit-file naming tests (wiring, no gui) and trace parity (gui).
+of-circuit.workspace = true
 # Trace parity tests (E4b) build the demos through the engine registry.
 of-component-api.workspace = true
 of-engine.workspace = true
