@@ -9,14 +9,21 @@
 //!
 //! The ELF is not a plain memory image. Its code (`.fixed.text`,
 //! `.init.text`, `.bt_text`, `.text`) and read-only data (at `0x3ff1_9c00`,
-//! the data bus view of ROM1) are allocated sections, but the initial
-//! values of the ROM's RAM variables sit in non-allocated `.data*`
-//! sections at their RAM addresses. In the real ROM those bytes are stored
-//! after the code (`_rom_store`) and copied to RAM at reset by the startup
-//! code, which walks the table at `_rom_store_table` (entries of RAM start,
-//! RAM end, ROM source, padding; up to `_data_end`). [`RomImage::from_elf`]
-//! rebuilds that layout: it places every `.data*` section at the ROM source
-//! address the table gives for its RAM range, so the ROM's own startup
+//! the data bus view of ROM1) are mostly allocated sections, but:
+//!
+//! - A few ROM windows (notably `.rodata.interface`, which ends with
+//!   `ets_rom_layout_p` → `ets_rom_layout`) are `PROGBITS` in the ROM
+//!   address range **without** `SHF_ALLOC`. They still sit in the physical
+//!   mask ROM; ESP-IDF heap init reads `ets_rom_layout_p`, so those bytes
+//!   must be present or a full IDF app panics with a load fault at address 4.
+//! - The initial values of the ROM's RAM variables sit in non-allocated
+//!   `.data*` sections at their RAM addresses. In the real ROM those bytes
+//!   are stored after the code (`_rom_store`) and copied to RAM at reset by
+//!   the startup code, which walks the table at `_rom_store_table` (entries
+//!   of RAM start, RAM end, ROM source, padding; up to `_data_end`).
+//!
+//! [`RomImage::from_elf`] places every ROM-window `PROGBITS` (allocated or
+//! not), then rebuilds the `.data*` store layout so the ROM's own startup
 //! copies the right values.
 
 use of_firmware::ElfImage;
@@ -92,8 +99,10 @@ impl RomImage {
             return Err(RomError::Entry(elf.entry));
         }
         let mut bytes = vec![0u8; map::IROM_INTERNAL.1 as usize];
+        // Include non-ALLOC ROM `PROGBITS` (e.g. `.rodata.interface`). RAM
+        // `.data*` live outside the ROM windows, so `ibus` rejects them here.
         for s in &elf.sections {
-            if s.kind == SHT_PROGBITS && s.flags & SHF_ALLOC != 0 && ibus(s.addr, s.size.max(1)).is_some() {
+            if s.kind == SHT_PROGBITS && !s.data.is_empty() && ibus(s.addr, s.size.max(1)).is_some() {
                 put(&mut bytes, s.addr, &s.data, &format!("section {}", s.name))?;
             }
         }

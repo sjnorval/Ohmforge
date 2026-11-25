@@ -57,7 +57,7 @@ jobs:
       # code) and espflash's ESP-IDF bootloader (Apache-2.0): pinned,
       # checksummed downloads, never committed.
       - run: scripts/fetch-esp-rom-elfs.sh
-      - run: cargo test -p of-soc-esp32c3 --test rom_boot --test esp_hal_blinky --test esp_hal_button --test esp_hal_adc_pwm
+      - run: cargo test -p of-soc-esp32c3 --test rom_boot --test esp_hal_blinky --test esp_hal_button --test esp_hal_adc_pwm --test idf_blinky
         env: { OF_REQUIRE_ESP_ROM: "1" }
       # The committed test firmware must be reproducible from its source.
       - run: |
@@ -80,3 +80,9 @@ jobs:
           ESPFLASH="$RUNNER_TEMP/espflash" OF_CHECK_BOOTLOADER="$RUNNER_TEMP/esp-rom-elfs/20260528/espflash-v4.7.0-esp32c3-bootloader.bin" \
             bash firmware/esp32c3-esp-hal-adc-pwm/build.sh
           git diff --exit-code -- firmware/
+      # ESP-IDF v5.3.2 blinky: rebuild committed partitions.bin / app.bin
+      # inside the pinned Espressif Docker image (never vendor IDF in-tree).
+      - run: |
+          docker run --rm -v "$PWD:/project" -w /project/firmware/esp32c3-idf-blinky \
+            -e SOURCE_DATE_EPOCH=1767225600 espressif/idf:v5.3.2 bash ./build.sh
+          git diff --exit-code -- firmware/esp32c3-idf-blinky/
