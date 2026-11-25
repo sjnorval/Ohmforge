@@ -1,6 +1,6 @@
 # RFC 0004: Instruments and the measurement service (engine E5)
 
-- **Status:** Draft
+- **Status:** Accepted (2026-11-25)
 - **Author:** Stefan Norval \<sjnorval@gmail.com\>
 - **Date:** 2026-11-25
 - **Tracking issue:** [#49](https://github.com/sjnorval/Ohmforge/issues/49)
@@ -152,14 +152,55 @@ Profiles live at `parts/instruments/<vendor>.<model>/instrument.toml` (CC-BY-SA-
 - Saleae Logic 8 logic analyser;
 - Rigol DP832 PSU readback.
 
-The DP832 figures are verified against its datasheet before E5f uses them.
+The DS1054Z and DP832 figures below were checked against Rigol's own PDFs on
+2026-11-25 (verified); E5f's profiles copy them with these citations. Page numbers are the
+printed ones.
+
+Sources:
+
+- [DS]: DS1000Z datasheet DSA20100-2020-09, <https://www.rigol.com/dam/global/downloads/brochures/en/data-sheet/oscilloscopes/DS1000Z_DataSheet_EN.pdf>;
+- [PG]: MSO1000Z/DS1000Z Programming Guide PGA19108-1110 (Dec. 2015, software 00.04.03.SP2), <https://www.rigol.com/dam/global/downloads/brochures/en/program-guide/oscilloscopes/DS1000Z_ProgrammingGuide_EN.pdf>;
+- [DP]: DP800 datasheet DSH03108-1110-202505 (May 2025), <https://www.rigol.com/dam/global/downloads/brochures/en/data-sheet/dc-powers/DP800_DataSheet_EN.pdf>.
+
+Rigol DS1054Z (verified):
+
+| Figure | Value | Source |
+|---|---|---|
+| Bandwidth (−3 dB) | DC to 50 MHz (single-shot too); calculated rise time 7 ns | [DS] pp. 6–7 |
+| Sample rate | 1 GSa/s single channel, 500 MSa/s dual, 250 MSa/s three or four channels | [DS] p. 6 |
+| Memory depth | 24 Mpts single channel, 12 Mpts dual, 6 Mpts three or four channels | [DS] p. 6 |
+| Averaging | N = 2, 4, …, 1024 | [DS] p. 6 |
+| Input impedance | (1 MΩ ±1 %) ‖ (15 pF ±3 pF) | [DS] p. 6 |
+| Vertical resolution | 8 bits (High Resolution mode up to 12 bits) | [DS] p. 6 |
+| Vertical scale | 1 mV/div to 10 V/div (1X probe) | [DS] p. 7 |
+| Offset range | ±2 V at 1 mV/div to 499 mV/div; ±100 V at 500 mV/div to 10 V/div (1X probe) | [DS] p. 7 |
+| DC gain accuracy | ±4 % of full scale below 10 mV/div; ±3 % of full scale at 10 mV/div and above | [DS] p. 7 |
+| DC offset accuracy | ±0.1 div ± 2 mV ± 1 % of offset | [DS] p. 7 |
+| Vertical code step | VerticalScale / 25 per code, code 127 at the reference (NORMal mode) | [PG] pp. 2-223, 2-224 |
+
+Rigol DP832 PSU readback (verified; the DP832A has the same accuracy, [DP] p. 4):
+
+| Figure | CH1 | CH2 | CH3 | Source |
+|---|---|---|---|---|
+| Rating | 0–30 V, 0–3 A | 0–30 V, 0–3 A | 0–5 V, 0–3 A; 195 W total | [DP] pp. 1, 7 |
+| Programming accuracy, ±(% of output + offset) | V 0.05 % + 20 mV; I 0.2 % + 5 mA | V 0.05 % + 20 mV; I 0.2 % + 5 mA | V 0.1 % + 5 mV; I 0.2 % + 5 mA | [DP] p. 7 |
+| Readback accuracy, ±(% of output + offset) | V 0.05 % + 10 mV; I 0.15 % + 5 mA | V 0.05 % + 10 mV; I 0.15 % + 5 mA | V 0.1 % + 5 mV; I 0.15 % + 5 mA | [DP] p. 7 |
+| Resolution, standard (programming / readback / display) | V 10 / 10 / 10 mV; I 1 / 1 / 10 mA | same | same | [DP] p. 8 |
+| Resolution, high-resolution option | V 1 / 0.1 / 1 mV; I 1 / 0.1 / 1 mA | same | same | [DP] p. 8 |
+
+All DP832 channels: ripple and noise (20 Hz to 20 MHz) < 350 µVrms / 2 mVpp in normal-mode
+voltage and < 2 mArms in normal-mode current; load regulation and line regulation ("linear
+regulation rate") each < 0.01 % + 2 mV for voltage and < 0.01 % + 250 µA for current
+([DP] p. 7). Accuracy is annual at 25 °C ± 5 °C, after calibration at 25 °C and a one-hour
+warm-up (note 1). Only readback resolution and accuracy belong to the instrument profile;
+regulation and ripple describe the `bench.psu` component, not the readout.
 
 A profile models only deterministic effects:
 
 - loading or burden;
 - display resolution, counts, ranges and autorange with `OL`;
 - integration and averaging;
-- scope vertical quantisation;
+- scope vertical quantisation (V/div ÷ 25 per code on the DS1054Z);
 - logic thresholds and sample clock.
 
 The accuracy specification is shown as a ± band next to the reading and is never applied as a random error (decision D2).
@@ -197,7 +238,7 @@ Trace parity runs only ideal profiles.
 
 ## Licensing impact
 
-- There are no new dependencies (`thiserror` and `of-core` are already used).
+- There are no new external dependencies. `of-instruments` uses `thiserror` and the internal crates `of-core`, `of-engine` (E5b) and `of-components` (E5d).
 - Instrument profiles are parts data under CC-BY-SA-4.0. They hold facts taken from vendor datasheets with citations; no vendor text or artwork is copied.
 
 ## Alternatives
@@ -209,6 +250,9 @@ Trace parity runs only ideal profiles.
 
 ## Unresolved questions
 
-- The exact `Session` API for a series load element at run time (E5f): re-elaboration versus a pre-placed zero-ohm element per ammeter point.
-- Whether the scope's 8-bit step uses exactly 8 divisions as full scale on the DS1054Z. It has to be checked against the datasheet before E5f.
+- The exact `Session` API for a series load element at run time (E5f): re-elaboration versus a pre-placed zero-ohm element per ammeter point. Still open; it blocks E5f.
 - AC and resistance modes for the multimeter are left to a later RFC addendum.
+
+Resolved:
+
+- **DS1054Z full-scale span (resolved 2026-11-25).** The 8-bit step is not 1/256 of 8 divisions. The programming guide gives `YINCrement = VerticalScale/25` in NORMal mode (and in MAX mode while running) and `YREFerence` = 127 ([PG] pp. 2-223, 2-224), so a code is 1/25 of a division and the 256 codes span about 10.24 divisions around the reference. At 1 V/div the step is 40 mV, not 31.25 mV. Caveats: [PG] p. 2-224 also says the screen bottom is code 0 and the top 255, which does not fit 25 codes per division on the 8-division screen; in RAW (memory) mode the guide only says the increment depends on the internal waveform's scale; and the datasheet does not state the ADC span. E5f quantises at V/div ÷ 25 and cites [PG].
