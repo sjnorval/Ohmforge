@@ -1,0 +1,99 @@
+format = 1
+
+[circuit]
+name = "All sections"
+ground = "gnd"
+description = "Every section of format 1."
+
+[sim]
+quantum_us = 25
+max_step = 2e-5
+corner = "max"
+temperature_c = 85
+seed = 7
+
+[[component]]
+ref = "U1"
+part = "espressif.esp32-c3"
+at = [18, 49]
+params = { inputs = ["GPIO9"], quiescent_a = 0.005 }
+seed = 3
+
+[component.firmware]
+app = "fw/app.bin"
+app_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+boot = "rom"
+partitions = "fw/partitions.bin"
+partitions_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ready_text = "ready\n"
+
+[component.schematic]
+id = "u1"
+label = "U1"
+body = [0, 0, 102, 100]
+pins = [
+  { pin = "3V3", id = "vdd", name = "VDD", at = [0, 15], dir = "W" },
+  { pin = "GPIO8", at = [102, 33], dir = "E" },
+  { pin = "GND", at = [102, 84], dir = "E" },
+]
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+at = [150, 30]
+params = { resistance = 330 }
+
+[[component]]
+ref = "RV1"
+part = "bourns.ptv09a-b103"
+params = { position = 0.5 }
+
+[component.schematic]
+body = [0, 0, 30, 60]
+pins = [
+  { pin = "1", at = [15, 0], dir = "N" },
+  { pin = "W", id = "wiper", name = "W", at = [30, 60], dir = "E", slide = { to = [30, 0], param = "position" } },
+  { pin = "3", at = [15, 60], dir = "S", stub = true },
+]
+
+[[symbol]]
+ref = "GND"
+kind = "ground"
+id = "gnd_sym"
+at = [211, 174]
+body = [0, 0, 22, 10]
+pins = [
+  { pin = "1", id = "pin", at = [11, 0], dir = "N" },
+]
+
+[[net]]
+name = "vdd"
+label = "VDD"
+kind = "power"
+pins = ["U1.3V3", "RV1.1"]
+waypoints = [[40, 10.5]]
+
+[[net]]
+name = "led"
+kind = "signal"
+pins = ["U1.GPIO8", "R1.1", "RV1.W"]
+
+[[net]]
+name = "gnd"
+label = "GND"
+kind = "ground"
+pins = ["U1.GND", "R1.2", "GND.1"]
+
+[schematic]
+keepouts = [
+  { rect = [18, 28, 112, 40], note = "U1 label" },
+  { rect = [0, 0, 1.5, 2] },
+]
+
+[[probe]]
+name = "LED current"
+signal = "i(R1)"
+
+[[probe]]
+name = "Rail"
+signal = "v(vdd)"

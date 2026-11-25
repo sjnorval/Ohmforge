@@ -4,6 +4,8 @@
 //! ohmforge run <netlist.cir> [--out results.csv] [--vcd waves.vcd]
 //! ohmforge validate-parts <parts-dir>
 //! ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out bom.csv] [--checklist FILE.md]
+//! ohmforge circuit check [--parts DIR] <file|dir>...
+//! ohmforge circuit fmt [--check] [--update-hashes] [--parts DIR] <file|dir>...
 //! ```
 //!
 //! Runs every analysis in a SPICE netlist (`.op`, `.dc` including nested
@@ -17,6 +19,12 @@
 //!
 //! `bom` builds the 0.1 demo-board bill of materials (MPN, supplier links,
 //! ZAR snapshots) and an optional Markdown build checklist.
+//!
+//! `circuit check` parses circuit files (`*.circuit.toml`, RFC 0003; a
+//! directory means every circuit file below it), and reports every structural,
+//! parts-library and firmware-hash problem as `file:line:column: message`.
+//! `circuit fmt` rewrites files in canonical form (`--check` only reports
+//! files that would change; `--update-hashes` recomputes firmware hashes).
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -27,10 +35,14 @@ use of_analog::{analysis, netlist};
 use of_netlist::spice::{self, Analysis};
 use of_parts::load_dir;
 
+mod circuit;
+
 const USAGE: &str = "Usage:
   ohmforge run <netlist.cir> [--out FILE.csv] [--vcd FILE.vcd]
   ohmforge validate-parts <parts-dir>
   ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out FILE.csv] [--checklist FILE.md]
+  ohmforge circuit check [--parts DIR] <FILE.circuit.toml|DIR>...
+  ohmforge circuit fmt [--check] [--update-hashes] [--parts DIR] <FILE.circuit.toml|DIR>...
   ohmforge --version";
 
 #[derive(Debug, Default)]
@@ -246,6 +258,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("circuit") => circuit::run(&args[1..]),
         Some("--help" | "-h") => {
             println!("{USAGE}");
             ExitCode::SUCCESS

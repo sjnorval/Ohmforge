@@ -25,6 +25,7 @@ of-component-api = { path = "crates/of-component-api" }
 of-components = { path = "crates/of-components" }
 of-engine = { path = "crates/of-engine" }
 of-parts = { path = "crates/of-parts" }
+of-circuit = { path = "crates/of-circuit" }
 of-bom = { path = "crates/of-bom" }
 of-cpu-riscv = { path = "crates/of-cpu-riscv" }
 of-soc-esp32c3 = { path = "crates/of-soc-esp32c3" }
