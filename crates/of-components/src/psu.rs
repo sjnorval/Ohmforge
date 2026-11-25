@@ -80,6 +80,9 @@ pub struct BenchPsu {
     /// Current reported at the last commit (A): the limit in CC, else the
     /// CV current `(volts - v) / series_r` floored at 0.
     amps: f64,
+    /// Kernel time of the last host set-point change. A rail read at or
+    /// before it was solved for the old set point.
+    set_at: Option<SimTime>,
 }
 
 impl BenchPsu {
@@ -107,6 +110,7 @@ impl BenchPsu {
             minus_net: None,
             refs: None,
             amps: 0.0,
+            set_at: None,
         }
     }
 
@@ -204,6 +208,7 @@ impl Component for BenchPsu {
             _ => return,
         }
         self.settings = self.settings.sanitized();
+        self.set_at = Some(cx.now());
         // New set points take effect on the next step, in the current mode.
         let mode = if self.settings.on && self.mode == SupplyMode::Off {
             SupplyMode::Cv
@@ -226,6 +231,15 @@ impl Component for BenchPsu {
             self.amps = 0.0;
             return Health::Ok;
         }
+        // The rail was solved for the old set point (no step since the host
+        // change): it says nothing about the load at the new one, so keep
+        // the mode and the reading until the next step. Without this, a
+        // raised set point looked like `(volts - v) / series_r` of overload
+        // and the PSU forced its current limit into the load.
+        if self.set_at.is_some_and(|at| t <= at) {
+            return self.commit(view, t);
+        }
+        self.set_at = None;
         let i_cv = (s.volts - v) / s.series_r;
         let next = match self.mode {
             SupplyMode::Off | SupplyMode::Cv => {

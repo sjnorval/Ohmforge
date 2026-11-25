@@ -17,12 +17,6 @@ pub struct AppPrefs {
     /// without changing this value.
     #[serde(default = "default_true")]
     pub show_startup_animation: bool,
-    /// When `true`, the demos are built from their circuit files
-    /// (`circuits/demos`) instead of the hand-wired boards (engine E4c,
-    /// preview). `--circuit-files` and `OF_CIRCUIT_FILES` turn it on for one
-    /// run without changing this value.
-    #[serde(default)]
-    pub circuit_files: bool,
 }
 
 fn default_true() -> bool {
@@ -33,7 +27,6 @@ impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             show_startup_animation: true,
-            circuit_files: false,
         }
     }
 }
@@ -133,26 +126,6 @@ pub fn splash_choice(cli_no_splash: bool, env_blocked: bool, show_startup_animat
     !cli_no_splash && !env_blocked && show_startup_animation
 }
 
-/// True when `OF_CIRCUIT_FILES` is set to a truthy value (`1`, `true`, `yes`, or `on`).
-pub fn circuit_files_by_env() -> bool {
-    match std::env::var("OF_CIRCUIT_FILES") {
-        Ok(value) => matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
-        Err(_) => false,
-    }
-}
-
-/// Build the demos from their circuit files when `--circuit-files`,
-/// `OF_CIRCUIT_FILES` or the saved preference asks for it.
-pub fn use_circuit_files(cli_circuit_files: bool, saved: bool) -> bool {
-    circuit_files_choice(cli_circuit_files, circuit_files_by_env(), saved)
-}
-
-/// Pure policy used by [`use_circuit_files`]. Any one source turns the
-/// circuit files on; the hand-wired boards stay the default.
-pub fn circuit_files_choice(cli: bool, env: bool, saved: bool) -> bool {
-    cli || env || saved
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,7 +151,6 @@ mod tests {
         let path = temp_prefs_path("roundtrip");
         let prefs = AppPrefs {
             show_startup_animation: false,
-            circuit_files: true,
         };
         save_to(&path, &prefs).unwrap();
         assert_eq!(load_from(&path), prefs);
@@ -207,16 +179,16 @@ mod tests {
     }
 
     #[test]
-    fn circuit_files_are_off_unless_asked_for() {
-        assert!(!AppPrefs::default().circuit_files);
-        assert!(!circuit_files_choice(false, false, false));
-        assert!(circuit_files_choice(true, false, false));
-        assert!(circuit_files_choice(false, true, false));
-        assert!(circuit_files_choice(false, false, true));
-        // Older config files without the key keep the default.
-        let path = temp_prefs_path("no-circuit-files");
-        fs::write(&path, "show_startup_animation = true\n").unwrap();
-        assert!(!load_from(&path).circuit_files);
+    fn the_old_circuit_files_key_is_ignored() {
+        // E4c's preview setting; the circuit files are the only path since E4d.
+        let path = temp_prefs_path("old-circuit-files");
+        fs::write(&path, "show_startup_animation = false\ncircuit_files = true\n").unwrap();
+        assert_eq!(
+            load_from(&path),
+            AppPrefs {
+                show_startup_animation: false
+            }
+        );
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(path.parent().unwrap());
     }

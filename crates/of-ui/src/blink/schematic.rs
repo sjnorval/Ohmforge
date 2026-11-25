@@ -1,14 +1,14 @@
 use egui::{Align2, FontId, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
-use super::simulation::{GPIO, LED_REF, R_SERIES, RESISTOR_REF};
+use super::{GPIO, LED_REF, R_SERIES, RESISTOR_REF};
 use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
 use crate::schematic::{draw_psu, hover_tooltip};
 use crate::supply::{self, SupplyStatus};
 use crate::theme::{LED_RED, TEAL, panel};
 use crate::wiring::{self, Point};
 
-/// Draw the blink board; `board` is the routed schematic (hand-written or
-/// from the circuit file).
+/// Draw the blink board; `board` is the routed schematic from the
+/// circuit file.
 pub(crate) fn show(
     ui: &mut Ui,
     board: &wiring::Schematic,

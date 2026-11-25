@@ -240,6 +240,7 @@ impl TraceBuf {
     }
 
     /// Number of samples currently stored.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.len
     }

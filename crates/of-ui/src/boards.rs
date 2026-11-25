@@ -1,7 +1,5 @@
-//! The routed schematic of each desktop demo: the hand-written board, or with
-//! `--circuit-files` the one its embedded circuit file describes (E4c). The
-//! two are equal (`wiring` tests the unrouted boards and the route goldens;
-//! the tests here compare the routed boards the painters receive).
+//! The routed schematic of each desktop demo, built from its embedded circuit
+//! file (`wiring::from_circuit`). The route goldens in `wiring` pin the look.
 
 use crate::kind::DemoKind;
 use crate::session_sim;
@@ -9,24 +7,12 @@ use crate::wiring::{self, Schematic};
 
 /// The schematic to paint for `kind`. `position` is the dimmer's wiper
 /// (0 = pin 1) and is ignored by the other demos.
-pub(crate) fn board(kind: DemoKind, position: Option<f64>, circuit_files: bool) -> Schematic {
-    if circuit_files {
-        match file_board(kind, position) {
-            Ok(s) => return s,
-            // Unreachable for the shipped files (tested); never leave the canvas empty.
-            Err(e) => eprintln!("Ohmforge: {} schematic: {e}", session_sim::demo_file(kind).path),
-        }
-    }
-    hand_wired(kind, position)
-}
-
-fn hand_wired(kind: DemoKind, position: Option<f64>) -> Schematic {
-    match kind {
-        DemoKind::Blink => wiring::blink_board(),
-        DemoKind::Dimmer => wiring::dimmer_board_at(position.unwrap_or(0.5)),
-        DemoKind::Fade => wiring::fade_board(),
-        DemoKind::ButtonPoll | DemoKind::ButtonIrq => wiring::button_board(),
-    }
+pub(crate) fn board(kind: DemoKind, position: Option<f64>) -> Schematic {
+    file_board(kind, position).unwrap_or_else(|e| {
+        // Unreachable for the shipped files (tested).
+        eprintln!("Ohmforge: {} schematic: {e}", session_sim::demo_file(kind).path);
+        Schematic::default()
+    })
 }
 
 /// The routed schematic of `kind`'s embedded circuit file, with the live
@@ -53,20 +39,24 @@ mod tests {
         DemoKind::ButtonIrq,
     ];
 
+    /// What the painters get is the file's routed schematic: byte for byte
+    /// the route golden (the dimmer at mid-travel), and clean at every wiper
+    /// position.
     #[test]
-    fn file_boards_are_the_hand_written_boards_the_painters_get() {
+    fn the_painters_get_the_route_goldens() {
+        let golden = |kind| match kind {
+            DemoKind::Blink => include_str!("wiring/goldens/blink.routes.txt"),
+            DemoKind::Dimmer => include_str!("wiring/goldens/dimmer.routes.txt"),
+            DemoKind::Fade => include_str!("wiring/goldens/fade.routes.txt"),
+            DemoKind::ButtonPoll | DemoKind::ButtonIrq => include_str!("wiring/goldens/button.routes.txt"),
+        };
         for kind in KINDS {
+            let mid = kind.has_pot().then_some(0.5);
+            assert_eq!(wiring::serialize(&board(kind, mid)), golden(kind), "{kind:?}");
             for position in [None, Some(0.0), Some(0.3), Some(0.5), Some(1.0)] {
-                let file = file_board(kind, position).unwrap_or_else(|e| panic!("{kind:?}: {e}"));
-                let hand = hand_wired(kind, position);
-                assert_eq!(
-                    wiring::serialize(&file),
-                    wiring::serialize(&hand),
-                    "{kind:?} at {position:?}"
-                );
-                assert_eq!(file, hand, "{kind:?} at {position:?}");
-                assert_eq!(board(kind, position, true), hand, "{kind:?} at {position:?}");
-                assert!(wiring::check(&file).is_empty(), "{kind:?} at {position:?}");
+                let b = board(kind, position);
+                assert_eq!(b, file_board(kind, position).unwrap(), "{kind:?} at {position:?}");
+                assert!(wiring::check(&b).is_empty(), "{kind:?} at {position:?}");
             }
         }
     }

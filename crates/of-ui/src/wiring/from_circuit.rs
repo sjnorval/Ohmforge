@@ -2,8 +2,9 @@
 //!
 //! A file carries each component's layout in `[component.schematic]` (body,
 //! pins, the board's ids and labels) and the nets in router order, so
-//! [`from_circuit`] yields the same [`Schematic`] the hand-written boards
-//! build: components in file order (symbols after them), pins with their
+//! [`from_circuit`] yields the [`Schematic`] the route goldens pin (the
+//! hand-written boards it replaced in E4d drew the same):
+//! components in file order (symbols after them), pins with their
 //! drawn ids and names, nets with their terminals in file order, waypoints
 //! and keepouts. [`super::route`] then routes it. Live parameters (the pot
 //! wiper) come from a closure so the dimmer's wiper pin follows the slider.
@@ -174,35 +175,10 @@ mod tests {
     use super::*;
     use crate::wiring::{check, serialize};
 
-    const BLINK: &str = include_str!("../../../../circuits/demos/blink.circuit.toml");
-    const DIMMER: &str = include_str!("../../../../circuits/demos/dimmer.circuit.toml");
-    const FADE: &str = include_str!("../../../../circuits/demos/fade.circuit.toml");
-    const BUTTON: &str = include_str!("../../../../circuits/demos/button.circuit.toml");
-    const BUTTON_IRQ: &str = include_str!("../../../../circuits/demos/button-irq.circuit.toml");
+    use crate::wiring::demos::{BLINK, BUTTON, BUTTON_IRQ, DIMMER, FADE};
 
     fn file(name: &str, text: &str) -> CircuitFile {
         parse(text).unwrap_or_else(|e| panic!("{name}: {e}"))
-    }
-
-    fn without_routes(mut s: Schematic) -> Schematic {
-        for n in &mut s.nets {
-            n.route = None;
-        }
-        s
-    }
-
-    /// Before routing, the file's schematic is the hand-written board
-    /// exactly: components in the same order, bodies, pin ids, names and
-    /// positions, nets, terminal order, waypoints and keepouts.
-    fn assert_same_board(name: &str, got: Schematic, legacy: Schematic) {
-        let want = without_routes(legacy);
-        assert_eq!(got.components.len(), want.components.len(), "{name}: component count");
-        for (g, w) in got.components.iter().zip(&want.components) {
-            assert_eq!(g, w, "{name}: component {}", w.id);
-        }
-        assert_eq!(got.nets, want.nets, "{name}: nets");
-        assert_eq!(got.keepouts, want.keepouts, "{name}: keepouts");
-        assert_eq!(got, want, "{name}");
     }
 
     /// Routed, the file's schematic serialises byte for byte to the route
@@ -222,13 +198,8 @@ mod tests {
     }
 
     #[test]
-    fn blink_file_is_the_hand_written_board() {
+    fn blink_file_routes_match_the_golden() {
         let f = file("blink", BLINK);
-        assert_same_board(
-            "blink",
-            unrouted(&f, &file_params).unwrap(),
-            super::super::blink_board(),
-        );
         assert_routes(
             "blink",
             &from_circuit(&f, &file_params).unwrap(),
@@ -236,32 +207,43 @@ mod tests {
         );
     }
 
+    /// The wiper pin follows the live position (clamped to 0..=1), the router
+    /// invariants hold at every position, and mid-travel is the golden.
     #[test]
-    fn dimmer_file_is_the_hand_written_board_at_every_wiper_position() {
+    fn dimmer_file_routes_match_the_golden_at_every_wiper_position() {
         let f = file("dimmer", DIMMER);
-        assert_same_board(
-            "dimmer",
-            unrouted(&f, &file_params).unwrap(),
-            super::super::dimmer_board(),
-        );
         assert_routes(
             "dimmer",
             &from_circuit(&f, &file_params).unwrap(),
             include_str!("goldens/dimmer.routes.txt"),
         );
-        for pos in [0.0, 0.1, 0.25, 1.0 / 3.0, 0.75, 0.9, 1.0, -0.5, 1.5] {
+        let at = |pos: f64| {
             let live = move |r: &str, p: &str| (r == "RV1" && p == "position").then_some(pos);
-            let got = from_circuit(&f, &live).unwrap();
-            let want = super::super::dimmer_board_at(pos);
-            assert_eq!(serialize(&got), serialize(&want), "dimmer at {pos}");
-            assert_eq!(got, want, "dimmer at {pos}");
+            from_circuit(&f, &live).unwrap()
+        };
+        let wiper_y = |s: &Schematic| {
+            let rv1 = s.components.iter().find(|c| c.reference == "RV1").expect("RV1");
+            // Pin ids are the drawn ids (`wiper`), not the part's pin names.
+            rv1.pins.iter().find(|p| p.id == "wiper").expect("wiper").position.y
+        };
+        assert_eq!(serialize(&at(0.5)), include_str!("goldens/dimmer.routes.txt"));
+        assert_eq!(serialize(&at(-0.5)), serialize(&at(0.0)), "clamped below");
+        assert_eq!(serialize(&at(1.5)), serialize(&at(1.0)), "clamped above");
+        let mut last = f32::INFINITY;
+        for pos in [0.0, 0.1, 0.25, 1.0 / 3.0, 0.5, 0.75, 0.9, 1.0] {
+            let s = at(pos);
+            let v = check(&s);
+            assert!(v.is_empty(), "dimmer at {pos}: {v:?}");
+            // 0 is pin 1 at the bottom; the wiper climbs as the position rises.
+            let y = wiper_y(&s);
+            assert!(y < last || pos == 0.0, "wiper at {pos}: y {y} after {last}");
+            last = y;
         }
     }
 
     #[test]
-    fn fade_file_is_the_hand_written_board() {
+    fn fade_file_routes_match_the_golden() {
         let f = file("fade", FADE);
-        assert_same_board("fade", unrouted(&f, &file_params).unwrap(), super::super::fade_board());
         assert_routes(
             "fade",
             &from_circuit(&f, &file_params).unwrap(),
@@ -270,10 +252,9 @@ mod tests {
     }
 
     #[test]
-    fn button_files_are_the_hand_written_board() {
+    fn button_files_route_like_the_golden() {
         for (name, text) in [("button", BUTTON), ("button-irq", BUTTON_IRQ)] {
             let f = file(name, text);
-            assert_same_board(name, unrouted(&f, &file_params).unwrap(), super::super::button_board());
             assert_routes(
                 "button",
                 &from_circuit(&f, &file_params).unwrap(),
