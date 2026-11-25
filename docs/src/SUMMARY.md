@@ -22,6 +22,7 @@
 - [Component stress states](design/component-stress-states.md)
 - [Schematic themes](design/schematic-themes.md)
 - [Schematic layout](design/schematic-layout.md)
+- [Signal flow and memory](design/signal-flow-visualisation.md)
 
 # RFCs
 
