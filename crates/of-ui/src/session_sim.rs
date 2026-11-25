@@ -238,6 +238,12 @@ impl SessionSim {
         Self::run_inner(kind, s, false)
     }
 
+    /// [`Self::run`] with the GPIO edge log on from the start (parity).
+    #[cfg(test)]
+    pub(crate) fn run_logged(kind: DemoKind, s: Session) -> Result<Self, String> {
+        Self::run_inner(kind, s, true)
+    }
+
     fn run_inner(kind: DemoKind, s: Session, edge_log: bool) -> Result<Self, String> {
         let style = Loop::of(kind);
         let mut d = Self {
@@ -635,6 +641,29 @@ impl SessionSim {
         }
         meters::add_psu(&mut out, self.supply_status().display_amps());
         out
+    }
+}
+
+#[cfg(test)]
+impl SessionSim {
+    /// Raw outputs for the parity goldens.
+    pub(crate) fn parity_raw(&mut self) -> crate::parity::Raw {
+        let origin = self.s.origin();
+        let led = self.samples.to_vec();
+        let psu = self.psu_samples.to_vec();
+        let cpu = self.cpu();
+        crate::parity::Raw {
+            edges: cpu.logged_edges(),
+            origin,
+            uart: cpu.soc.uart_text(),
+            led,
+            psu,
+        }
+    }
+
+    /// The running session (parity steps set raw host params).
+    pub(crate) fn session(&mut self) -> &mut Session {
+        &mut self.s
     }
 }
 

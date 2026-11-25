@@ -19,7 +19,9 @@
 //! strict tolerance, against the hand-wired demo on the same machine:
 //! - `session`: the demos placed through the model registry in Rust (E4b-1);
 //! - `file`: the shipped `circuits/demos` files built by `of_circuit::build`
-//!   (E4b-2), with U1's idle draw forced off as in the hand-wired demos;
+//!   (E4b-2) from the embedded files, parts and firmware, exactly as the
+//!   desktop's `--circuit-files` path builds them (`session_sim`, E4c), with
+//!   U1's idle draw forced off as in the hand-wired demos;
 //! - the idle-draw golden (`goldens/blink.idle-draw.trace.txt`): the blink
 //!   file as shipped, with the ESP32-C3's 23 mA `quiescent_a` (datasheet
 //!   v2.5 Table 5-8, CPU running at 160 MHz). Only the PSU current differs
@@ -58,6 +60,18 @@ impl Demo {
             Demo::Fade => "fade",
             Demo::Button => "button",
             Demo::ButtonIrq => "button-irq",
+        }
+    }
+
+    /// The desktop demo it is.
+    pub(crate) fn kind(self) -> crate::kind::DemoKind {
+        use crate::kind::DemoKind;
+        match self {
+            Demo::Blink => DemoKind::Blink,
+            Demo::Dimmer => DemoKind::Dimmer,
+            Demo::Fade => DemoKind::Fade,
+            Demo::Button => DemoKind::ButtonPoll,
+            Demo::ButtonIrq => DemoKind::ButtonIrq,
         }
     }
 
