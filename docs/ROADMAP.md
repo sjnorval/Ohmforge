@@ -177,11 +177,14 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
   - [ ] I2 Virtual serial port and auto-reset: the “Flash like real hardware” item above
   - [ ] I3 `of-gdb` GDB remote stub (from the phase-one list): breakpoints, registers and memory through the bus, virtual time stopped while halted
   - [ ] I4 Build-folder watch and hot reload (`DESIGN_AND_PLAN.md` §8 step 5): new firmware with the circuit state kept
-- [ ] Breadboard view alongside the schematic editor (uses the same routed net paths as the schematic; [`docs/design/wire-routing.md`](design/wire-routing.md))
-- [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour and tests (checklist with priorities and simulator dependencies: [`COMPONENTS.md`](COMPONENTS.md))
+- [ ] Breadboard view alongside the schematic editor (design: [`design/breadboard.md`](design/breadboard.md); uses the same circuit file as the schematic, true 2.54 mm geometry, jumper and fit checks; schematic routing stays in [`docs/design/wire-routing.md`](design/wire-routing.md)). Needs E4, E6, W1
+- [ ] Official example gallery (design: [`design/examples-and-sharing.md`](design/examples-and-sharing.md)): at least five complete, documented, openable projects in the desktop app, copied into a user folder; CI smoke for each example. Needs E4, E6
+- [ ] File-based project packs and share links (same design note): export and open a project folder or archive (`ohmforge pack` / `ohmforge unpack`) with no account; documented share-link form for the P4 web app; secrets never packed. Needs E4
+- [ ] Compatibility and electrical-rule checks, first slice (design: [`design/compatibility-checks.md`](design/compatibility-checks.md)): cited interface and rating fields in `part.toml`, a visible Checks panel, and CLI findings for LED-without-resistor, supply out of range, logic-level mismatch and missing decoupling when the citations exist. The full `ohmforge review` rule set remains AI4 in P4. Needs E4, E6
+- [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour, tests and, where a check uses a rating, a citation (growth targets: [`COMPONENTS.md`](COMPONENTS.md)). Needs E6
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
-- [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (exported wires use the same routed paths)
+- [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (design: [`design/kicad-export.md`](design/kicad-export.md); exported wires use the same routed paths). Needs E4, E6
 - [ ] Parts availability, first slice (design: [`design/parts-availability.md`](design/parts-availability.md); builds on BOM v1 #59 and E6 #50)
   - [ ] A1 Data model and offline cache: offers, price breaks (`Money` in millionths), lifecycle and alternates in `of-bom`; host-only `of-suppliers` with a SQLite cache, TTLs and `fetched_at`, ECB rates to ZAR, manual import; `ohmforge bom check --offline`; BOM v1's `part.toml` snapshot prices read as dated, lowest-priority offers; an `availability/` dataset kept apart from the CC-BY-SA `part.toml` definitions
   - [ ] A2 LCSC, Mouser and DigiKey providers with the user's own keys in the OS keychain, per-provider rate budgets; `ohmforge parts refresh`
@@ -207,15 +210,16 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
   - [ ] G1 Schematic levels, current dots and summaries: toggleable overlay with logic-level colouring, current-direction dots, and automatic summarised mode (activity glow, duty-cycle fill, frequency labels) when a signal is faster than about 30 Hz on screen; theme colours; reduce-motion; samples from the live scope ring, not per-step hooks. Needs E4 (demos can start earlier); T1 preferred
   - [ ] G2 Chip view for the C3: block-diagram panel of pads, IO MUX, GPIO matrix, LEDC, SAR ADC, UART0, the interrupt matrix and the CPU, with routes taken from the live register state; hover or click a schematic pin to open its route; activity cues and interrupt flashes. Needs G1
   - [ ] G3 Memory map and hex view: live map of SRAM, RTC, flash windows (MMU translation) and peripheral space; hex/ASCII dump; follow-PC and follow-SP; ELF symbol names; sampled access heat (no per-access hook by default); ROM bytes only if the ROM was fetched; jump from a flash window to the SPI NOR contents. Needs G2
-- [ ] Explore compatibility with PCB fabrication services (JLCPCB, PCBWay, OSH Park and similar): export of board designs (Gerber/drill, BOM and pick-and-place/CPL for assembly), likely via the KiCad export
-- [ ] Illustrated step-by-step guide to creating your own schematic: screenshots or GIFs for every step, replacing the simple guide ([`src/guide/first-schematic.md`](src/guide/first-schematic.md)) once users can build circuits without Rust; kept current for each release and folded into the P6 user guide. Needs E4 (circuit files), E6 (components and BOM) and the schematic editor's place-and-wire work
+- [ ] Explore compatibility with PCB fabrication services (JLCPCB, PCBWay, OSH Park and similar): export of board designs (Gerber/drill, BOM and pick-and-place/CPL for assembly), likely via the KiCad export (decision recorded in [`design/kicad-export.md`](design/kicad-export.md))
+- [ ] Illustrated step-by-step guide to creating your own schematic: screenshots or GIFs for every step, replacing the simple guide ([`src/guide/first-schematic.md`](src/guide/first-schematic.md)) once users can build circuits without Rust; kept current for each release and folded into the P6 user guide. Needs E4 (circuit files), E6 (components and BOM) and the schematic editor's place-and-wire work. The example-gallery and compatibility-check previews ([`src/guide/examples-and-sharing.md`](src/guide/examples-and-sharing.md), [`src/guide/compatibility-checks.md`](src/guide/compatibility-checks.md)) are updated in the same pass.
 - [ ] Release 0.2
 
 ## P4 Own Xtensa core and web (weeks 40 to 60), exit 0.3: classic ESP32 in the browser
 
 - [ ] Own Rust Xtensa LX6/LX7 core (`of-cpu-xtensa`) replacing the QEMU sidecar where possible
-- [ ] Web app (`of-web`, wasm32) running the simulation in the browser
-- [ ] Wi-Fi virtual radio (simulated network between boards and a host bridge)
+- [ ] Web app (`of-web`, wasm32) running the simulation in the browser, including opening a P3 project pack or share link (design: [`design/examples-and-sharing.md`](design/examples-and-sharing.md))
+- [ ] Wi-Fi virtual radio (simulated network between boards and a host bridge) with a shipped fidelity page (design: [`design/wireless.md`](design/wireless.md); official examples run offline; a real-network host bridge is opt-in)
+- [ ] MicroPython on the ESP32-C3 (design: [`design/micropython.md`](design/micropython.md)): unmodified official image, UART REPL, one official example; not part of the #60 Arduino/ESP-IDF MVP. Needs I2
 - [ ] Sleep modes and a power profiler (current over time, battery life estimate)
 - [ ] Energy parts: Li-ion/LiPo with state of charge and internal resistance, coin cell, USB 5 V source
 - [ ] Editor plugins (design: [`design/editor-integration.md`](design/editor-integration.md); need P3 items I1 to I4)
@@ -255,15 +259,35 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 ## P6 1.0 (weeks 70 to 84)
 
 - [ ] Stable component API and WASM SDK for third-party parts (`of-component-api`, `of-plugin-wasm`); the in-tree API comes from phase E2, #46 ([`design/engine-components.md`](design/engine-components.md))
-- [ ] ESP32-S3 and ESP32-C6 support
+- [ ] ESP32-S3 and ESP32-C6 support, including MicroPython for those chips when official images exist ([`design/micropython.md`](design/micropython.md))
 - [ ] Editor rich views (I7, [`design/editor-integration.md`](design/editor-integration.md)): live schematic and instruments in a VS Code webview (the `of-web` build), readings in the debugger, and an optional Arduino IDE 2 extension (a trimmed VS Code extension)
-- [ ] Complete documentation (mdBook user guide, part-authoring guide, API docs)
-- [ ] BLE (stretch goal)
+- [ ] Complete documentation (mdBook user guide, part-authoring guide, API docs), including the wireless fidelity page ([`design/wireless.md`](design/wireless.md)) and the example, sharing and checks guides
+- [ ] BLE (stretch goal), with its own fidelity page or a written decision to defer it past 1.0 ([`design/wireless.md`](design/wireless.md))
 - [ ] Release 1.0
 
 ## Future ideas (parked)
 
 These are untracked ideas, not scheduled phases. They need design discussion first and are not on the P0 to P6 plan.
+
+### In-app firmware editor
+
+P2 to P6 keep Ohmforge a simulator: firmware is written and built in the user's editor and toolchain, then loaded or uploaded into the model ([`design/editor-integration.md`](design/editor-integration.md)). An in-app sketch editor, compiler or bundled core is not a silent extension of that work.
+
+- [ ] Whether an in-app sketch editor is ever wanted, and if so for whom, after the VS Code and Arduino IDE 2 integrations exist
+
+### Classroom and translations
+
+Official examples and the illustrated guides are the education path on the roadmap. A teacher dashboard, an LMS integration, or a multilingual UI would be a separate product decision.
+
+- [ ] Classroom or LMS features
+- [ ] Translations of the app and the user guide
+
+### 3D bench and enclosure CAD
+
+The P3 breadboard is a 2D, true-pitch view of the same circuit ([`design/breadboard.md`](design/breadboard.md)). A 3D bench, enclosure CAD, or a competition-field physics view is not required for 0.2 to 1.0.
+
+- [ ] 3D real-size bench and enclosure export
+- [ ] A physics or competition-field view for robots
 
 ### Cloud accounts
 

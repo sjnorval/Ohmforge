@@ -1,6 +1,10 @@
 # Your first schematic (preview of the planned workflow)
 
-> **Coming soon. Nothing in steps 1 to 10 works yet.** This page previews how you will create a new schematic from scratch once the planned pieces land: circuit files (engine phase E4) and parts and BOM from components (E6) in [`engine-components.md`](../design/engine-components.md), the schematic editor's place-and-wire work ([`wire-routing.md`](../design/wire-routing.md)), automatic layout ([`schematic-layout.md`](../design/schematic-layout.md)), themes ([`schematic-themes.md`](../design/schematic-themes.md)), stress states ([`component-stress-states.md`](../design/component-stress-states.md)), wires and traces ([`interconnects.md`](../design/interconnects.md)), parts availability ([`parts-availability.md`](../design/parts-availability.md)), firmware upload from your editor ([`editor-integration.md`](../design/editor-integration.md)), and sweeps and design review ([`ai-and-scenario-sweeps.md`](../design/ai-and-scenario-sweeps.md)). The phase each step needs is named in the step; the [roadmap](../roadmap.md) tracks them, and an illustrated version of this guide is a P3 roadmap item. Details marked *planned* are not decided yet. For what you can do **today**, see [What works today](#what-works-today) at the end.
+> **Coming soon. Nothing in steps 1 to 10 works yet.** This page previews how you will create a new schematic from scratch once the planned pieces land: circuit files (engine phase E4) and parts and BOM from components (E6) in [`engine-components.md`](../design/engine-components.md), the schematic editor's place-and-wire work ([`wire-routing.md`](../design/wire-routing.md)), automatic layout ([`schematic-layout.md`](../design/schematic-layout.md)), themes ([`schematic-themes.md`](../design/schematic-themes.md)), stress states ([`component-stress-states.md`](../design/component-stress-states.md)), wires and traces ([`interconnects.md`](../design/interconnects.md)), parts availability ([`parts-availability.md`](../design/parts-availability.md)), firmware upload from your editor ([`editor-integration.md`](../design/editor-integration.md)), and sweeps and design review ([`ai-and-scenario-sweeps.md`](../design/ai-and-scenario-sweeps.md)). The phase each step needs is named in the step; the [roadmap](../roadmap.md) tracks them, and an illustrated version of this guide is a P3 roadmap item. Details marked *planned* are not decided yet. If you would rather start from a finished circuit, the official example gallery
+(P3; [Official examples and sharing](examples-and-sharing.md)) copies a project
+into a folder you own. This guide is the from-scratch path.
+
+For what you can do **today**, see [What works today](#what-works-today) at the end.
 
 <!-- screenshot: an empty schematic canvas in a new project -->
 
@@ -87,21 +91,21 @@ Build your firmware the way you already do, then load it in one of these ways:
 
 *Needs E6 and A1; live supplier data needs A2 and A3.*
 
-1. Save the project; the circuit file stores parts, positions, values and wires.
+1. Save the project; the circuit file stores parts, positions, values and wires. You can also export a **project pack** to send the folder as a single file, with no account ([Official examples and sharing](examples-and-sharing.md)).
 2. Open the **BOM** view, or run `ohmforge bom check <your circuit file>`: every part with its variant, quantity and offers, with the age of each price.
 3. Type in prices and suppliers you got yourself; they go in `bom.toml` and no refresh overwrites them.
 
 ## 10. Next steps
 
 - **Scenario sweeps** (S1, P3): vary supply, temperature, tolerances and more, and see where the circuit stops working (`ohmforge sweep run`).
-- **Design review** (AI4, P4): `ohmforge review` checks for missing pull-ups, overvoltage on GPIOs, LEDs without resistors and exceeded ratings.
+- **Compatibility checks** (P3 first slice, then AI4 in P4): the Checks panel and `ohmforge review` use cited ratings on each part; see [Compatibility and wiring checks](compatibility-checks.md).
 - **Themes** (T1, T2, P3): choose another schematic theme; today's colours stay the default.
 
 ## What works today
 
 | Works today | Not yet |
 |---|---|
-| Run the five built-in demos in the desktop app (LED blink, potentiometer dimmer, LED fade, push button poll and irq) and change the bench supply, pot and button | Creating or saving a schematic in the app |
+| Run the five built-in demos in the desktop app (LED blink, potentiometer dimmer, LED fade, push button poll and irq) and change the bench supply, pot and button | Creating or saving a schematic, or opening an official example pack, in the app |
 | Simulate your own **analog** circuit as a SPICE netlist with `ohmforge run` | An ESP32-C3 or firmware in a netlist |
 | Add a part under `parts/` and check it with `ohmforge validate-parts parts/` | Using a new part in the app |
 | Export a demo board's BOM with `ohmforge bom <blink\|dimmer\|fade\|button>` | A BOM for your own circuit |

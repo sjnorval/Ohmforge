@@ -1,8 +1,20 @@
 # Common components checklist
 
-A living list of the parts a hobbyist or maker ESP32 project most often needs in Ohmforge. It is a planning aid for the parts library, not a schedule. The roadmap still targets "about 50 parts" in phase P3, each with a `part.toml`, behaviour and tests ([`docs/ROADMAP.md`](ROADMAP.md)).
+A living list of the parts a hobbyist or maker ESP32 project most often needs in Ohmforge. It is a planning aid for the parts library, not a schedule. Growth targets and the quality bar are below; the detailed checklist follows.
 
 Every Ohmforge part is a real, orderable part: data lives in `parts/<category>/…/part.toml` (CC-BY-SA-4.0), and behaviour is a Rust, WASM or SPICE model (AGPL-3.0-or-later). Request a part with the [New part or model](https://github.com/sjnorval/Ohmforge/issues/new?template=new_part.yml) issue form, or add one by following [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-part).
+
+## Library growth targets
+
+These are release aims, not a promise that every checklist row below will be done in P3.
+
+| Release | Target | Quality bar |
+|---|---|---|
+| 0.1 (end of P2) | The official demo set, complete and tested (the parts already used by blink, button, dimmer, fade and the MVP analog board) | Each part has a `part.toml`, tests, and a behaviour model that matches what the demos claim |
+| 0.2 (end of P3) | About 50 parts, taken in priority order from this checklist | Each has a `part.toml`, behaviour and tests; any rating used by a compatibility check has a citation ([`design/compatibility-checks.md`](design/compatibility-checks.md)) |
+| 1.0 (P6) | In-tree library plus a stable WASM SDK for third-party parts | Community parts run in the sandbox already planned in [`DESIGN_AND_PLAN.md`](DESIGN_AND_PLAN.md) §13.4; they do not lower the citation or test bar for official parts |
+
+The WASM SDK stays in P6. Official parts are the path to 50 in P3. Prefer a smaller set of well-cited, tested, orderable parts over a large set of unsourced symbols.
 
 Status: 20 November 2026 (Africa/Johannesburg), checked against `main` after the ADC, LEDC and potentiometer (#24); statuses updated 23 November 2026 for UART0 RX (#25, #30), the engine plan (#43), green and blue 0603 LEDs (#52) and the PSU return and averaging fix (#54). Checkboxes and "already in the library" notes were taken from the tree, not from plans.
 

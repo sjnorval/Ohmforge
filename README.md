@@ -13,8 +13,8 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 ## Goals
 
-- Run unmodified ESP32 firmware (ESP-IDF, Arduino-ESP32, esp-hal, MicroPython) against a SPICE-grade analog circuit, in one deterministic simulation.
-- Native desktop app and a WASM web app from one codebase.
+- Run unmodified ESP32 firmware (ESP-IDF, Arduino-ESP32, esp-hal, MicroPython) against a SPICE-grade analog circuit, in one deterministic simulation. MicroPython on the ESP32-C3 is scheduled in P4 ([`docs/design/micropython.md`](docs/design/micropython.md)).
+- Native desktop app and a WASM web app from one codebase. Firmware is written in your editor, not inside Ohmforge ([`docs/design/editor-integration.md`](docs/design/editor-integration.md)).
 - Every part is a real, orderable part, so the BOM, cost (ZAR) and build checklist come straight from the design.
 
 ## Planned changes: base engine and plug-in components
@@ -38,6 +38,12 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 **Planned: schematic themes and auto-layout.** Today's colours stay the default; optional themes (Cyberpunk / Hacker, Wasteland Terminal, Blueprint, Paper and more), IEC symbols by default (ANSI selectable), and automatic placement that cuts wire crossings while following schematic best practice (P3 and P4). The plans are in [`docs/design/schematic-themes.md`](docs/design/schematic-themes.md) and [`docs/design/schematic-layout.md`](docs/design/schematic-layout.md).
 
 **Planned: signal flow and memory.** See where a signal goes inside the ESP32 (a live block diagram of pads, the GPIO matrix and peripherals, lit from the simulated register state) and where it moves on the schematic (logic levels, current dots, and a summary when a signal is too fast to watch), and open a memory map and hex view of SRAM, flash and the ROM once you have fetched it (P3 to P5). The plan is in [`docs/design/signal-flow-visualisation.md`](docs/design/signal-flow-visualisation.md).
+
+**Planned: official examples and file-based sharing.** A gallery of complete, documented projects you can open and edit, and a project pack you can send as a file, with no account (P3; the web app opens the same packs in P4). The plan is in [`docs/design/examples-and-sharing.md`](docs/design/examples-and-sharing.md).
+
+**Planned: compatibility checks and breadboard view.** Cited ratings on each part and a visible Checks panel for wiring and interface mistakes (P3 first slice; full review in P4), and a true 2.54 mm breadboard of the same circuit (P3). The plans are in [`docs/design/compatibility-checks.md`](docs/design/compatibility-checks.md) and [`docs/design/breadboard.md`](docs/design/breadboard.md).
+
+**Planned: KiCad export and wireless fidelity docs.** Schematic, netlist and XLSX BOM export in P3 ([`docs/design/kicad-export.md`](docs/design/kicad-export.md)). The P4 virtual Wi-Fi radio ships with a page that states what it can and cannot do ([`docs/design/wireless.md`](docs/design/wireless.md)).
 
 ## Workspace layout
 
@@ -117,8 +123,8 @@ The planned path from the work already on `main` through to 1.0 is below.
 | RISC-V core (phase one) | ✅ Done | RV32IMC, 75 of 77 riscv-tests | n/a |
 | P1 Analog core | ✅ Done | DC, AC and transient analyses within 1 % of ngspice | n/a |
 | P2 ESP32-C3 MVP | 🚧 In progress | Boot, GPIO, ADC, PWM, UART, live demo, BOM | 0.1 |
-| P3 Breadth | 📋 Planned | Classic ESP32, I2C/SPI, breadboard view, engine E4–E6 | 0.2 |
-| P4 Own Xtensa core and web | 📋 Planned | Own Xtensa core, web app, Wi-Fi | 0.3 |
+| P3 Breadth | 📋 Planned | Classic ESP32, I2C/SPI, breadboard, examples and sharing, engine E4–E6 | 0.2 |
+| P4 Own Xtensa core and web | 📋 Planned | Own Xtensa core, web app, Wi-Fi, MicroPython on the C3 | 0.3 |
 | P5 Realism | 📋 Planned | Monte Carlo, thermal model, fault injection | 0.4 |
 | P6 1.0 | 📋 Planned | Stable API, ESP32-S3 and ESP32-C6 | 1.0 |
 
