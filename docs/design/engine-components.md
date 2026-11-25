@@ -1,6 +1,6 @@
 # Base engine and plug-in components
 
-Status: E1 (this document) merged in #43. The PSU return and current-averaging fix (#45) landed in #54. E2 (#46, #62) and E3 (#47, #63: `Esp32c3Component`, pad helpers, engine blinky parity) are on `main`. E4 to E6 are planned in P3 / 0.2 (#48, #49, #50); E4a, the circuit file format, landed in #73; E4b-1 (model registry, `Session` runtime, trace parity goldens) landed in #77; E4b-2 (the demo circuit files, `of_circuit::build`, `ohmforge run`) is in review. Section 1 still describes the pre-E2 demo glue; demos move onto circuit files in E4.
+Status: E1 (this document) merged in #43. The PSU return and current-averaging fix (#45) landed in #54. E2 (#46, #62) and E3 (#47, #63: `Esp32c3Component`, pad helpers, engine blinky parity) are on `main`. E4 to E6 are planned in P3 / 0.2 (#48, #49, #50); E4a, the circuit file format, landed in #73; E4b-1 (model registry, `Session` runtime, trace parity goldens) landed in #77; E4b-2 (the demo circuit files, `of_circuit::build`, `ohmforge run`) landed in #78; E4c (the schematic from the file, the desktop demos on `Session` behind `--circuit-files`) is in review. Section 1 still describes the pre-E2 demo glue; demos move onto circuit files in E4.
 Date: 2026-11-22 (status updated 2026-11-23).
 Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §5 (mixed-signal co-simulation), §6 (system architecture), §7 (component model and library), §11 (BOM); [`wire-routing.md`](wire-routing.md) (the shared schematic router); [`COMPONENTS.md`](../COMPONENTS.md) (the parts the library should grow to); roadmap P2 item “Base engine and plug-in components”.
 
@@ -390,5 +390,5 @@ Internal dependencies still point downwards; simulation crates stay free of UI a
 6. **Sub-circuits:** support hierarchical circuit files (a dev board as a reusable block) in E4, or later?
 7. **0.1 scope:** resolved on 23 November 2026: 0.1 does not wait; E1 to E3 stay in P2 and E4 to E6 move to P3 / 0.2.
 8. **Order with the PSU fix:** resolved on 23 November 2026: `p2-psu-return` landed first (#45, closed by #54).
-9. **Chip supply current:** a fixed quiescent load from the datasheet in E3, or wait for activity-dependent current with the P4 power profiler?
+9. **Chip supply current:** a fixed quiescent load from the datasheet in E3, or wait for activity-dependent current with the P4 power profiler? E4c: fixed, from the datasheet (ESP32-C3 v2.5 Table 5-8 at 160 MHz: 23 mA running, 16 mA in `wfi`, set per demo); activity-dependent current stays with the P4 power profiler.
 10. **RFCs:** `CONTRIBUTING.md` asks for an RFC in `rfcs/` for component API and file format changes. Does this document count as that RFC for E2 (component API) and E4 (circuit file), or should each phase open a short RFC first? Proposal: this document is the umbrella design; E2 and E4 each get a short RFC once the RFC template exists.
