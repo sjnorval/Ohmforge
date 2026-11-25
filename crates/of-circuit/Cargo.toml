@@ -24,7 +24,7 @@ of-engine = { workspace = true, optional = true }
 [dev-dependencies]
 # The integration tests need every feature; `cargo test --workspace` alone
 # would only enable the features other members ask for.
-of-circuit = { path = ".", features = ["fs"] }
+of-circuit = { path = ".", features = ["fs", "demos"] }
 of-components.workspace = true
 of-soc-esp32c3.workspace = true
 
@@ -36,3 +36,5 @@ engine = ["dep:of-parts", "dep:of-firmware", "dep:of-core", "dep:of-component-ap
 # Host file system: `FsResolver`, file loading, the parts-directory loader and
 # the fetched-ROM lookup. Not for wasm32.
 fs = ["engine"]
+# The shipped `circuits/demos` files and the firmware they name, embedded.
+demos = ["engine"]

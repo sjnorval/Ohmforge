@@ -12,6 +12,8 @@
 //!   registry; [`embedded`] resolves firmware from memory.
 //! - Feature `fs`: [`fs`] reads files, the parts directory and the fetched
 //!   mask ROM from disk.
+//! - Feature `demos`: [`demos`] embeds the shipped `circuits/demos` files and
+//!   the firmware they name.
 //!
 //! The default build has no host I/O and builds for `wasm32-unknown-unknown`.
 //! The files themselves are data, licensed CC-BY-SA-4.0 (`circuits/LICENSE.md`).
@@ -24,6 +26,8 @@ mod validate;
 
 #[cfg(feature = "engine")]
 pub mod build;
+#[cfg(feature = "demos")]
+pub mod demos;
 #[cfg(feature = "engine")]
 pub mod embedded;
 #[cfg(feature = "fs")]
