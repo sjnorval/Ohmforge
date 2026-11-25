@@ -29,7 +29,8 @@ jobs:
         with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
       # Simulation core crates must build for the web target.
-      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3
+      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-circuit -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3
+      - run: cargo check --target wasm32-unknown-unknown -p of-circuit --features engine
   gui:
     runs-on: ubuntu-latest
     steps:

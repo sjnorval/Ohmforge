@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 of-analog.workspace = true
 of-bom.workspace = true
+of-circuit = { workspace = true, features = ["fs"] }
 of-netlist.workspace = true
 of-parts.workspace = true
 

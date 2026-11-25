@@ -158,6 +158,10 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 
 - [ ] Base engine phases E4 to E6 (moved from P2 on 23 November 2026; design: [`design/engine-components.md`](design/engine-components.md); E1 to E3 are in P2). The schematic editor's waypoint and re-edit work and the component-based BOM build on these.
   - [ ] E4 (#48) Circuit files (serde, round-trip): blink, dimmer, fade and button drive both the simulation and the shared router, with output parity (firmware traces and wiring goldens match or have reviewed updates). Needs E3
+    - [ ] E4a Format ([RFC 0003](../rfcs/0003-circuit-file.md)): `of-circuit` parses `*.circuit.toml` with line and column errors, validates refs, nets, ground, pins against the parts library and firmware SHA-256, and saves a canonical form that round-trips byte for byte; `ohmforge circuit check` and `circuit fmt [--check] [--update-hashes]`; `circuits/LICENSE.md` (CC-BY-SA-4.0). Branch `p3-engine-e4`, in review
+    - [ ] E4b Engine session and demo files: model registry and runtime in `of-engine`, `bench.psu` part, `blink`, `dimmer`, `fade`, `button` and `button-irq` in `circuits/demos/` with trace parity against the legacy demos, `ohmforge run <file.circuit.toml>`
+    - [ ] E4c Schematic from circuit files (wiring goldens byte-identical), desktop demos behind a flag
+    - [ ] E4d Switch-over: the files become the only path, the flag and the hand-wired boards go
   - [ ] E5 (#49) Instruments as components: measurement service in `of-instruments` (trace store, period-aligned averages, duty/frequency), voltmeter, ammeter, scope, logger and UART console on any circuit. Needs E2 (E4 for the desktop panels)
   - [ ] E6 (#50) Parts library and BOM from components: `[symbol]`, pin kinds and `bom` in `part.toml`; the BOM comes from the circuit's components. Needs E4
 - [ ] Classic ESP32 (Xtensa LX6) through a QEMU sidecar process (`of-cpu-qemu-ipc`), kept out of process for licence and stability reasons

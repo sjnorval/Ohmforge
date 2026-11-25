@@ -12,7 +12,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 
 **Schematic wire routing** (under the P2 schematic editor; keep the existing look): [`docs/design/wire-routing.md`](docs/design/wire-routing.md).
 
-**Base engine and plug-in components** (E1 done in #43; PSU return fix #45 done, closed by #54; E2 done in #46/#62; E3 in progress #47; E4 to E6 in P3 / 0.2, #48 to #50): [`docs/design/engine-components.md`](docs/design/engine-components.md). The engine owns nets, solvers, time, events and measurement; every real part, the ESP32-C3 and the bench PSU are components on one API. New parts follow the engine API (no per-demo glue in `of-ui`, no hidden connections to ground); demos become circuit files in E4.
+**Base engine and plug-in components** (E1 done in #43; PSU return fix #45 done, closed by #54; E2 done in #46/#62; E3 in progress #47; E4 to E6 in P3 / 0.2, #48 to #50, with E4a, the circuit file format, in RFC 0003): [`docs/design/engine-components.md`](docs/design/engine-components.md). The engine owns nets, solvers, time, events and measurement; every real part, the ESP32-C3 and the bench PSU are components on one API. New parts follow the engine API (no per-demo glue in `of-ui`, no hidden connections to ground); demos become circuit files in E4.
 
 **Arduino-ESP32 and ESP-IDF MVP demos** (#60, design first): [`docs/design/arduino-idf-mvp-demos.md`](docs/design/arduino-idf-mvp-demos.md). Pin-parity with the esp-hal demos; real-ROM boot; committed images and CI toolchains; not the P4 Arduino IDE board package (I6).
 
@@ -24,7 +24,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 - CPU cores execute firmware in instruction quanta and stop early on any I/O register access; the analog solver advances to that exact instant first.
 - Nets with only digital endpoints are solved by the event-driven logic kernel (`of-digital`); any net touching an analog part is promoted to the MNA solver (`of-analog`).
 - ESP32-C3 (RISC-V) runs on our own core first. Classic ESP32/S3 (Xtensa) uses Espressif's QEMU as a **separate GPL process** through `of-cpu-qemu-ipc` until our own Xtensa core exists.
-- Parts are data (`parts/**/part.toml`, parsed by `of-parts`) plus behaviour (Rust in `of-components`, or sandboxed WASM via `of-plugin-wasm`) implementing the `Component` trait in `of-component-api`. The base engine (`of-engine`) elaborates components into the solvers ([`docs/design/engine-components.md`](docs/design/engine-components.md), RFC 0001); today the demos still assemble their circuits in `of-ui` until E3/E4.
+- Parts are data (`parts/**/part.toml`, parsed by `of-parts`) plus behaviour (Rust in `of-components`, or sandboxed WASM via `of-plugin-wasm`) implementing the `Component` trait in `of-component-api`. The base engine (`of-engine`) elaborates components into the solvers ([`docs/design/engine-components.md`](docs/design/engine-components.md), RFC 0001); today the demos still assemble their circuits in `of-ui` until E3/E4. Circuit files (`*.circuit.toml`, `format = 1`, [RFC 0003](rfcs/0003-circuit-file.md)) are parsed, validated and saved in canonical form by `of-circuit`; they live in `circuits/` (CC-BY-SA-4.0), reference firmware by path and SHA-256 only, and are kept canonical with `ohmforge circuit fmt`.
 
 ## 3. Crate map
 
@@ -37,6 +37,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-component-api` | `Component` trait (`elaborate`, `terminal_currents`, …), `ElabCtx` / `EventCtx`, `Health`, `FaultKind` ([`docs/design/engine-components.md`](docs/design/engine-components.md), RFC 0001) | E2 API in progress (#46); stable from P6 |
 | `of-components` | Built-in part models; `analog`: parts-to-devices bridge (`Library`, `Board`, `build`, `to_spice`) | Bridge implemented + tests |
 | `of-parts` | `part.toml` schema (pins, `[analog]`, tolerances/corners) and loader | Implemented + tests |
+| `of-circuit` | Circuit files (`*.circuit.toml`, RFC 0003): parse with line and column errors, structural validation, canonical `save` with byte-identical round trip; feature `engine`: parts-library and firmware SHA-256 checks through a `Resolver`; feature `fs`: `FsResolver`, file and parts loading (host only) | E4a (#48): format crate + tests; the engine `Session` builder follows in E4b |
 | `of-cpu-riscv` | RV32IMC(+A) core, Zicsr, M-mode traps/interrupts, cycle timing, debugger API | Implemented: 63 unit tests, 75/77 riscv-tests |
 | `of-cpu-xtensa` | Xtensa LX6/LX7 core (phase 4) | Empty |
 | `of-cpu-qemu-ipc` | Client for the out-of-process QEMU sidecar (talks over IPC; never links QEMU) | Empty |
@@ -52,7 +53,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-ui` | egui views and instrument panels; egui only with `--features gui` | Live demo picker: blink, pot dimmer, LED fade and push-button (schematic, averaged LED, window-tied current-scope ring with time/div zoom, pot slider, clickable SW1 with seeded bounce, two-terminal bench PSU (+ to VDD, − routed to GND) whose Vset is tracked by GPIO V_IH/V_IL and whose current is period-averaged with the LED, virtual V/A meters, serial monitor for UART0 with hex view and find). Load-screen splash (packed EILIi frames, skip, persistent Show startup animation setting, and `--no-splash` / `OF_NO_SPLASH`) |
 | `of-app` | Desktop binary; eframe (wgpu) and `of-ui/gui` only with `--features gui` | Runs the of-ui demo picker, with the EILIi load screen |
 | `of-web` | WASM entry point | Empty |
-| `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD); `ohmforge validate-parts parts/`; `ohmforge bom <demo>` |
+| `of-cli` | `ohmforge` headless runner | `ohmforge run netlist.cir` (CSV/VCD); `ohmforge validate-parts parts/`; `ohmforge bom <demo>`; `ohmforge circuit check` and `circuit fmt [--check] [--update-hashes]` |
 
 Internal dependencies point downwards only: `of-core` depends on nothing internal; UI crates may depend on engines, never the reverse. Simulation crates must stay free of UI and OS dependencies and must build for `wasm32-unknown-unknown`.
 
@@ -111,7 +112,7 @@ Internal dependencies point downwards only: `of-core` depends on nothing interna
 
 ## 5. Licensing rules (hard constraints)
 
-- Code is **AGPL-3.0-or-later** (`LICENSE`; the workspace `license` field, inherited by every crate). Parts data, artwork and docs are **CC-BY-SA-4.0**; every `part.toml` needs a `[license]` block with `data = "CC-BY-SA-4.0"` and `artwork = "CC-BY-SA-4.0"`, and model files under `parts/` carry the same licence line. The copyright holder may offer a separate commercial licence (see `NOTICE`).
+- Code is **AGPL-3.0-or-later** (`LICENSE`; the workspace `license` field, inherited by every crate). Parts data, artwork, circuit files (`circuits/`, see `circuits/LICENSE.md`) and docs are **CC-BY-SA-4.0**; every `part.toml` needs a `[license]` block with `data = "CC-BY-SA-4.0"` and `artwork = "CC-BY-SA-4.0"`, and model files under `parts/` carry the same licence line. The copyright holder may offer a separate commercial licence (see `NOTICE`).
 - **Dependencies must be AGPL-compatible:** permissive licences on the `deny.toml` allow list. Never add GPL-2.0-only, LGPL or other copyleft dependencies, and never widen the allow list to GPL without Stefan's approval. Run `cargo deny check` if cargo-deny is installed (CI always runs it).
 - Never copy or translate code from QEMU, Falstad CircuitJS, SimulIDE (GPL) or Wokwi (proprietary). Ideas and published algorithms only.
 - QEMU only ever runs as a separate process; never link or `dlopen` it.
@@ -126,7 +127,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo check -p of-app --features gui
-cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3
+cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-circuit -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3
+cargo check --target wasm32-unknown-unknown -p of-circuit --features engine
 .\scripts\build-riscv-tests.ps1                  # optional: fetch and build riscv-tests (needs zig or a RISC-V gcc)
 cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture
 .\scripts\fetch-esp-rom-elfs.ps1                 # optional: fetch the pinned ESP32-C3 ROM ELF (never committed)
@@ -136,6 +138,7 @@ bash firmware/esp32c3-timer-irq/build.sh
 bash firmware/esp32c3-xip-blinky/build.sh
 cargo run -p of-cli -- --version
 cargo run -p of-cli -- validate-parts parts/
+cargo run -p of-cli -- circuit check circuits     # circuit files: file:line:column errors; also `circuit fmt --check circuits`
 cargo run -p of-cli -- bom dimmer --checklist dimmer.md
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv

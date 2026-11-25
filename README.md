@@ -48,6 +48,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-component-api` | Component trait (draft; grows into the engine's component API in phase E2, #46, stable from 1.0) |
 | `of-components` | Built-in part models |
 | `of-parts` | `part.toml` schema and loader |
+| `of-circuit` | Circuit files (`*.circuit.toml`, RFC 0003): parse with line and column errors, validate, canonical save (phase E4, #48) |
 | `of-cpu-riscv`, `of-cpu-xtensa` | CPU cores (ESP32-C3 first, Xtensa later) |
 | `of-cpu-qemu-ipc` | Client for the out-of-process QEMU sidecar (no GPL linking) |
 | `of-soc-esp32c3`, `of-soc-esp32` | SoC memory maps and peripherals (ESP32-C3 first) |
