@@ -115,7 +115,7 @@ Grammar rules:
   | button | 20 | 8 | −27.01 mA (last digits) | U1 on 5 pairs |
   | button-irq | 20 | 8 | −20.02 mA (last digits) | U1 on 5 pairs |
 
-  "Offered only now" pairs were "no single branch" before; Stefan accepted them as a behaviour change (2026-11-25), so the check compares only pairs the old meter resolved.
+  "Offered only now" pairs were "no single branch" before; Stefan accepted them as a behaviour change (2026-11-25), so the check compares only pairs the old meter resolved. With the old readout deleted, `the_meters_read_the_recorded_values_on_all_demos` pins all 122 recorded readings (displayed text and value, same tolerance).
 - Rings are `TraceBuf`: bounded by `MAX_TRACE_SAMPLES`, with retention tied to the window.
 - Statistics are pure functions over `(t, value)` slices:
   - `average_window` and `average_periods`, the period-aligned mean from #45;
