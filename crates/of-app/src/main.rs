@@ -5,12 +5,18 @@
 //! Pass `--no-splash` or set `OF_NO_SPLASH=1` to skip the load screen for this run.
 //! A persistent "Show startup animation" setting also controls the load screen;
 //! the flags override it without changing the saved preference.
+//! Pass `--circuit-files` (or set `OF_CIRCUIT_FILES=1`, or `circuit_files =
+//! true` in the config file) to build the demos from their circuit files in
+//! `circuits/demos` instead of the hand-wired boards (engine E4c preview).
 
 #[cfg(feature = "gui")]
 fn main() -> eframe::Result<()> {
     let cli_no_splash = std::env::args().any(|arg| arg == "--no-splash");
+    let cli_circuit_files = std::env::args().any(|arg| arg == "--circuit-files");
     let prefs = of_ui::prefs::load();
     let no_splash = !of_ui::prefs::should_play_splash(cli_no_splash, prefs.show_startup_animation);
+    let circuit_files = of_ui::prefs::use_circuit_files(cli_circuit_files, prefs.circuit_files);
+    // The window title stays "Ohmforge" on both paths (Stefan, E4c).
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_inner_size([980.0, 720.0])
         .with_min_inner_size([560.0, 620.0])
@@ -38,7 +44,7 @@ fn main() -> eframe::Result<()> {
                     ..Visuals::dark()
                 },
             );
-            Ok(Box::new(App::new(no_splash)))
+            Ok(Box::new(App::new(no_splash, circuit_files)))
         }),
     )
 }
@@ -47,27 +53,32 @@ fn main() -> eframe::Result<()> {
 struct App {
     splash: Option<of_ui::splash::SplashView>,
     demo: Option<of_ui::OhmforgeDemo>,
+    circuit_files: bool,
 }
 
 #[cfg(feature = "gui")]
 impl App {
-    fn new(no_splash: bool) -> Self {
+    fn new(no_splash: bool, circuit_files: bool) -> Self {
+        let demo = || of_ui::OhmforgeDemo::with_circuit_files(circuit_files);
         if no_splash {
             return Self {
                 splash: None,
-                demo: Some(of_ui::OhmforgeDemo::new()),
+                demo: Some(demo()),
+                circuit_files,
             };
         }
         match of_ui::splash::SplashView::load() {
             Ok(splash) => Self {
                 splash: Some(splash),
                 demo: None,
+                circuit_files,
             },
             Err(err) => {
                 eprintln!("Ohmforge splash: {err}");
                 Self {
                     splash: None,
-                    demo: Some(of_ui::OhmforgeDemo::new()),
+                    demo: Some(demo()),
+                    circuit_files,
                 }
             }
         }
@@ -79,13 +90,13 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
         let start_demo = self.demo.is_none() && self.splash.as_ref().is_some_and(|splash| splash.has_painted());
         if start_demo {
-            self.demo = Some(of_ui::OhmforgeDemo::new());
+            self.demo = Some(of_ui::OhmforgeDemo::with_circuit_files(self.circuit_files));
         }
 
         let show_demo = self.splash.as_ref().is_none_or(|splash| !splash.is_covering());
         if show_demo {
             if self.demo.is_none() {
-                self.demo = Some(of_ui::OhmforgeDemo::new());
+                self.demo = Some(of_ui::OhmforgeDemo::with_circuit_files(self.circuit_files));
             }
             let frame = eframe::egui::Frame::central_panel(ui.style()).inner_margin(eframe::egui::Margin::same(20));
             eframe::egui::CentralPanel::default().frame(frame).show(ui, |ui| {

@@ -6,8 +6,7 @@
 mod blink;
 mod button;
 mod dimmer;
-#[cfg(test)]
-mod files;
+mod from_circuit;
 mod golden;
 mod hops;
 mod invariants;
@@ -22,6 +21,8 @@ pub use model::{
 pub use blink::{board as blink_board, r1_zigzag};
 pub use button::board as button_board;
 pub use dimmer::{board as dimmer_board, board_at as dimmer_board_at, fade_board};
+#[cfg_attr(not(feature = "gui"), allow(unused_imports))]
+pub use from_circuit::from_circuit;
 pub use golden::serialize;
 pub use hops::poly_with_hops;
 pub use invariants::check;

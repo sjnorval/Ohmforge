@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use of_circuit::demos::{DEMOS, FIRMWARE, demo, resolver};
+use of_circuit::demos::{DEMOS, FIRMWARE, PARTS, demo, parts, resolver};
 use of_circuit::fs::{FsResolver, load_parts};
 use of_circuit::library::{check_firmware, check_parts, normalize};
 use of_circuit::{BootKind, parse, save};
@@ -60,7 +60,13 @@ fn shipped_demos_keep_the_idle_draw_and_name_their_boot() {
         let u1 = f.components.iter().find(|c| c.reference() == "U1").unwrap();
         assert_eq!(
             u1.params.get("quiescent_a"),
-            Some(&of_circuit::ParamValue::Number(0.005)),
+            // ESP32-C3 datasheet v2.5, Table 5-8, 160 MHz: 23 mA with the CPU
+            // running, 16 mA for button-irq, which sleeps in `wfi`.
+            Some(&of_circuit::ParamValue::Number(if d.name == "button-irq" {
+                0.016
+            } else {
+                0.023
+            })),
             "{}",
             d.path
         );
@@ -79,5 +85,20 @@ fn shipped_demos_keep_the_idle_draw_and_name_their_boot() {
             );
             assert!(fw.partitions_sha256.is_some(), "{}", d.path);
         }
+    }
+}
+
+#[test]
+fn embedded_parts_are_the_library_files_and_cover_every_demo() {
+    for (dir, text) in PARTS {
+        let on_disk = std::fs::read_to_string(repo().join("parts").join(dir).join("part.toml")).unwrap();
+        assert_eq!(on_disk.replace("\r\n", "\n"), text.replace("\r\n", "\n"), "{dir}");
+    }
+    let lib = parts().unwrap();
+    assert_eq!(lib.len(), PARTS.len());
+    for d in DEMOS {
+        let f = parse(d.text).unwrap();
+        let problems = check_parts(d.text, &f, &lib);
+        assert!(problems.is_empty(), "{}: {problems:?}", d.path);
     }
 }

@@ -260,16 +260,35 @@ specific parts"). `project.toml` (P0) can live in `of-circuit` later.
   `wasm32-unknown-unknown`; host I/O is only behind `fs`.
 - Parity with today's hand-wired demos (E4b): exact on GPIO edges, UART text,
   ADC codes and LEDC duty, within 1 ns on edge times, and within
-  `max(1 nA, 1 ppm)` on analog samples. Parity runs set the ESP32 quiescent load
-  to 0; the shipped demo files keep the true-to-life 5 mA, recorded as a separate
-  reviewed golden (`blink.idle-draw.trace.txt`: identical edges, UART and LED
-  current; PSU current higher by the idle draw, about 5 mA).
-- Accepted exceptions (Stefan, 25 November 2026, E4b-1), everything else keeps
+  `max(1 nA, 1 ppm)` on analog samples. Parity runs set the ESP32-C3's supply
+  current (`quiescent_a`) to 0 on both paths; the shipped demo files and the
+  hand-wired desktop boards both keep it, and the blink file as shipped is a
+  separate, reviewed golden (`blink.idle-draw.trace.txt`: identical edges and
+  UART; PSU current higher by just under 23 mA, the LED a few µA lower from the
+  2.3 mV rail drop).
+- Physical values (E4c; Stefan: "the readings should match and resolve as close
+  to real world as possible"), the same on both paths:
+  - **ESP32-C3 supply current** (`quiescent_a`, a resistor from `3V3` to `GND`
+    that draws it at 3.3 V): ESP32-C3 Series Datasheet v2.5, Table 5-8
+    (Modem-sleep, Wi-Fi clock gated, 3.3 V, 25 °C, typical), CPU at 160 MHz,
+    as every demo runs (`CpuClock::max()` in the esp-hal apps; the bare-metal
+    blink starts in the 160 MHz state). **23 mA** with the CPU running
+    (blink, dimmer, fade, button), **16 mA** with the CPU idle in `wfi`
+    (button-irq), both the "all peripheral clocks disabled" column; with every
+    peripheral clocked the table gives 28 and 21 mA. The firmware clocks only
+    the peripherals it uses, so the lower column is the nearer one. The current
+    is constant: it does not follow the CPU between running and `wfi`, or the
+    clock during boot (activity-dependent current is the P4 power profiler).
+    E4b used 5 mA, which is below every Modem-sleep figure in the table.
+  - **Idle GPIO pad, including the dimmer's ADC pin GPIO2:** 1 GΩ to ground
+    (3.3 nA at 3.3 V), inside the datasheet's input-current limit
+    (I_IH / I_IL at most 50 nA, Table 5-4, which gives no typical value). The
+    hand-wired dimmer now has this pad too, so the E4b-1 exception (dimmer PSU
+    3.5 nA) is gone: all three paths match at `max(1 nA, 1 ppm)`. The dimmer
+    golden was re-recorded for it (PSU 0.13 to 2.67 nA higher; LED, edges and
+    UART unchanged).
+- Accepted exception (Stefan, 25 November 2026, E4b-1), everything else keeps
   the tolerances above:
-  - **Dimmer PSU current: 3.5 nA** instead of 1 nA. The engine's ESP32-C3
-    puts a GPIO pad on the ADC pin GPIO2 (1 GΩ to ground while idle), which
-    the hand-wired dimmer leaves out, so the wiper leaks up to 3.3 nA into the
-    supply. Digital outputs stay exact.
   - **Against the committed goldens: 1 % relative on samples off the 50 µs
     scope grid** (the samples taken on LEDC edges, so far only in the fade
     demo). The goldens are recorded on Linux x86-64 (CI); Windows MSVC's libm
@@ -309,5 +328,15 @@ until E6.
 Settled in E4b-2: the ROM-booted demos use the app's banner line as
 `ready_text` (for example `"ohmforge esp-hal pot dimmer\n"`), and the pre-boot
 cache is asked by part, app SHA-256 and ready text (`Resolver::booted`).
+
+Settled in E4c: the schematic is drawn from each instance's `[schematic]`
+geometry (`wiring::from_circuit`), and equals the hand-written board, so the
+routes and the wiring goldens stay byte for byte; the pot wiper is drawn at the
+live `position`. The desktop builds the files with the parts embedded by
+`of_circuit::demos::parts`. The flag is `--circuit-files` (also the
+`OF_CIRCUIT_FILES` environment variable and the `circuit_files` preference;
+the window title stays "Ohmforge"). The hand-wired boards draw the same
+ESP32-C3 supply current and have the same GPIO2 pad (see Determinism), so both
+paths show the same readings.
 
 Still open: whether `bench.psu` gets a `bom = false` marker before E6.

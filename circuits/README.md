@@ -8,8 +8,12 @@ probes. The format is [RFC 0003](../rfcs/0003-circuit-file.md) (`format = 1`).
 The desktop demos live in `demos/` (engine phase E4b,
 [#48](https://github.com/sjnorval/Ohmforge/issues/48)): `blink`, `dimmer`,
 `fade`, `button` and `button-irq`. They name the firmware under `firmware/` by
-path and SHA-256 and keep the ESP32-C3's 5 mA idle draw. `of-circuit` embeds
-them (feature `demos`); the desktop app loads them from E4c.
+path and SHA-256 and give the ESP32-C3 its datasheet supply current
+(`quiescent_a`: 23 mA with the CPU running at 160 MHz, 16 mA for
+`button-irq`, which sleeps in `wfi`; datasheet v2.5 Table 5-8). `of-circuit` embeds
+them (feature `demos`), and the desktop app draws and runs them with
+`--circuit-files` (or `OF_CIRCUIT_FILES=1`; engine phase E4c). The
+hand-wired boards stay the default until E4d.
 
 Run one headless (the ROM-booted demos need `scripts/fetch-esp-rom-elfs.sh`):
 

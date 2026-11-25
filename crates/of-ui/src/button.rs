@@ -16,7 +16,7 @@ use of_soc_esp32c3::{
 };
 
 use crate::meters::{self, CircuitReadout};
-use crate::pins::{add_pin_drivers, hook_pin};
+use crate::pins::{IDLE_DRAW_RUNNING_A, IDLE_DRAW_WFI_A, add_idle_draw, add_pin_drivers, hook_pin};
 use crate::rom;
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
 use crate::trace::{self, SampleClock, TraceBuf};
@@ -55,6 +55,15 @@ pub(crate) enum ButtonKind {
 }
 
 impl ButtonKind {
+    /// The ESP32-C3's supply current as shipped: the poll app keeps the CPU
+    /// running, the interrupt app sleeps in `wfi` (datasheet v2.5 Table 5-8).
+    pub(crate) fn idle_draw_a(self) -> f64 {
+        match self {
+            Self::Poll => IDLE_DRAW_RUNNING_A,
+            Self::Irq => IDLE_DRAW_WFI_A,
+        }
+    }
+
     fn banner(self) -> &'static str {
         match self {
             Self::Poll => POLL_BANNER,
@@ -116,15 +125,17 @@ pub(crate) struct ButtonSim {
 impl ButtonSim {
     #[allow(dead_code)]
     pub(crate) fn new(kind: ButtonKind) -> Result<Self, Box<dyn Error>> {
-        Self::with_supply(kind, SupplySettings::default())
+        Self::with_supply(kind, SupplySettings::default(), kind.idle_draw_a())
     }
 
-    pub(super) fn with_supply(kind: ButtonKind, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+    /// Build with `supply` and the ESP32-C3 drawing `idle_a` from VDD
+    /// ([`ButtonKind::idle_draw_a`] as shipped, 0 for parity runs).
+    pub(crate) fn with_supply(kind: ButtonKind, supply: SupplySettings, idle_a: f64) -> Result<Self, Box<dyn Error>> {
         let soc = booted(kind)?;
-        Self::from_soc(kind, soc, supply)
+        Self::from_soc(kind, soc, supply, idle_a)
     }
 
-    fn from_soc(kind: ButtonKind, soc: Esp32c3, supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+    fn from_soc(kind: ButtonKind, soc: Esp32c3, supply: SupplySettings, idle_a: f64) -> Result<Self, Box<dyn Error>> {
         let supply = supply.sanitized();
         let mut lib = Library::new();
         lib.add(parse_part(RESISTOR)?, None)?;
@@ -148,6 +159,7 @@ impl ButtonSim {
             let node = board.circuit.node(&format!("gpio{pin}"));
             add_pin_drivers(&mut board.circuit, pin, node, vdd, soc.pin(usize::from(pin)))?;
         }
+        add_idle_draw(&mut board.circuit, vdd, idle_a)?;
 
         let circuit = std::mem::replace(&mut board.circuit, of_analog::Circuit::new());
         let mut analog = AnalogEngine::new(

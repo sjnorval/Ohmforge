@@ -225,6 +225,16 @@ fn pot_position_moves_the_wiper() {
     // 1 MΩ load on the wiper moves the ratio by well under 1 %.
     assert!((w2 - 0.2).abs() < 0.01, "{w2}");
     assert!((w9 - 0.9).abs() < 0.01, "{w9}");
+
+    // Terminal currents in pin order (1, W, 3): KCL holds, and the 10 kΩ
+    // track carries about VDD / 10 kΩ from pin 3 down to pin 1.
+    let i = s.terminal_currents("RV1").expect("RV1");
+    assert_eq!(i.len(), 3);
+    assert!(i.iter().sum::<f64>().abs() < 1e-12, "{i:?}");
+    let track = s.value("v(vdd)").unwrap() / 10e3;
+    assert!((i[2] - track).abs() < 0.02 * track, "{i:?} vs {track}");
+    assert!((i[0] + track).abs() < 0.02 * track, "{i:?} vs {track}");
+    assert!(s.terminal_currents("RV9").is_none());
 }
 
 #[test]
@@ -273,11 +283,33 @@ fn switch_bounces_on_timers_then_settles() {
     }
     assert_eq!(seen, [true, false, true, false, true]);
 
+    // A bounce seed from the host jitters the script (same edge count).
+    let offsets = |s: &Session, at: u64| -> Vec<u64> {
+        s.pending_timers()
+            .map(|(t, _, _)| t.0 - SimTime::from_us(at).0)
+            .collect()
+    };
+    s.run_until(SimTime::from_us(400)).unwrap();
+    s.set_param("SW1", "bounce_seed", 7.0).unwrap();
+    s.set_param("SW1", "closed", 0.0).unwrap();
+    let jittered = offsets(&s, 400);
+    s.run_until(SimTime::from_us(800)).unwrap();
+    s.set_param("SW1", "closed", 1.0).unwrap();
+    s.run_until(SimTime::from_us(1200)).unwrap();
+    s.set_param("SW1", "bounce_seed", 0.0).unwrap();
+    s.set_param("SW1", "closed", 0.0).unwrap();
+    let plain = offsets(&s, 1200);
+    assert_eq!(jittered.len(), plain.len(), "{jittered:?} vs {plain:?}");
+    assert_ne!(jittered, plain, "seed 7 must move the bounce edges");
+    s.run_until(SimTime::from_us(1600)).unwrap();
+    s.set_param("SW1", "closed", 1.0).unwrap();
+    s.run_until(SimTime::from_us(2000)).unwrap();
+
     // With bounce off a release is one clean edge.
     s.set_param("SW1", "bounce", 0.0).unwrap();
     s.set_param("SW1", "closed", 0.0).unwrap();
     assert_eq!(s.pending_timers().count(), 0);
-    s.run_until(SimTime::from_us(210)).unwrap();
+    s.run_until(SimTime::from_us(2010)).unwrap();
     assert!(s.value("v(out)").unwrap() < 1e-3);
 }
 

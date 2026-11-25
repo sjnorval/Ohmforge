@@ -8,7 +8,7 @@ use of_parts::parse_part;
 use of_soc_esp32c3::{Esp32c3, Esp32c3Engine, PinLink, UartByte};
 
 use crate::meters::{self, CircuitReadout};
-use crate::pins::{add_pin_drivers, hook_pin};
+use crate::pins::{IDLE_DRAW_RUNNING_A, add_idle_draw, add_pin_drivers, hook_pin};
 use crate::supply::{self, SupplyMode, SupplySettings, SupplyStatus};
 use crate::trace::{self, SampleClock, TraceBuf};
 
@@ -42,10 +42,12 @@ pub(crate) struct Blink {
 impl Blink {
     #[allow(dead_code)]
     pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
-        Self::with_supply(SupplySettings::default())
+        Self::with_supply(SupplySettings::default(), IDLE_DRAW_RUNNING_A)
     }
 
-    pub(crate) fn with_supply(supply: SupplySettings) -> Result<Self, Box<dyn Error>> {
+    /// Build with `supply` and the ESP32-C3 drawing `idle_a` from VDD
+    /// (`IDLE_DRAW_RUNNING_A` as shipped, 0 for parity runs).
+    pub(crate) fn with_supply(supply: SupplySettings, idle_a: f64) -> Result<Self, Box<dyn Error>> {
         let supply = supply.sanitized();
         let mut lib = Library::new();
         lib.add(parse_part(RESISTOR)?, None)?;
@@ -65,6 +67,7 @@ impl Blink {
         let mut soc = Esp32c3::new();
         soc.load_elf(&ElfImage::parse(FIRMWARE)?)?;
         add_pin_drivers(&mut circuit, GPIO, pin, vdd, soc.pin(usize::from(GPIO)))?;
+        add_idle_draw(&mut circuit, vdd, idle_a)?;
 
         let mut analog = AnalogEngine::new(
             "analog",
@@ -407,7 +410,7 @@ mod tests {
             current_limit: 0.5e-3,
             ..SupplySettings::default()
         };
-        let mut sim = Blink::with_supply(settings).unwrap();
+        let mut sim = Blink::with_supply(settings, crate::pins::IDLE_DRAW_RUNNING_A).unwrap();
         sim.advance(125e-6).unwrap();
         let status = sim.supply_status();
         let ma = sim.current_ma().unwrap();

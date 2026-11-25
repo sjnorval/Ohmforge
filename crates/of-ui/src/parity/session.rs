@@ -2,6 +2,7 @@
 //! [`of_engine::Session`], with the same sampling loops as the hand-wired
 //! simulations. This is the engine half of trace parity (E4b): circuit files
 //! (E4b-2, `parity::file`) build the same circuits and run here through [`run`].
+//! Both run on the desktop's [`SessionSim`] (E4c).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -9,14 +10,13 @@ use std::sync::Arc;
 use of_component_api::ParamValue;
 use of_components::analog::{Env, Library};
 use of_components::{Corner, register_builtin};
-use of_core::{SimTime, Stop};
+use of_core::SimTime;
 use of_engine::{ComponentSpec, EngineBuilder, Firmware, Registry, Session, SessionConfig};
-use of_soc_esp32c3::Esp32c3Engine;
 
 use super::{Demo, DemoRun, Raw, Step};
 use crate::adc_pwm::{self, PwmKind};
 use crate::button::{self, ButtonKind};
-use crate::trace::{self, SampleClock, TraceBuf};
+use crate::session_sim::SessionSim;
 
 const BLINKY: &[u8] = include_bytes!("../../../../firmware/esp32c3-blinky/blinky.elf");
 const R_SERIES: f64 = 330.0;
@@ -148,32 +148,17 @@ fn chip(firmware: Firmware, gpios: &[&'static str], inputs: &[&str]) -> Place {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Loop {
-    Blink,
-    Pwm,
-    Button,
-}
-
-/// A demo on [`Session`] with the legacy sampling loop.
-pub(crate) struct SessionDemo {
-    s: Session,
-    style: Loop,
-    samples: TraceBuf,
-    psu_samples: TraceBuf,
-    clock: SampleClock,
-    /// Button loop: next grid sample (relative).
-    next_sample: SimTime,
-    closed: bool,
-}
+/// A demo on [`Session`] with the legacy sampling loop: the desktop's own
+/// [`SessionSim`], so parity checks the code `--circuit-files` runs.
+pub(crate) struct SessionDemo(SessionSim);
 
 /// Build `demo` on a `Session` (parity runs: U1 `quiescent_a = 0`).
 pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
-    let (places, max_step, style) = match demo {
+    let (places, max_step) = match demo {
         Demo::Blink => {
             let mut p = led_and_psu("R1");
             p.push(chip(Firmware::Elf(BLINKY.to_vec()), &["GPIO8"], &[]));
-            (p, 5e-6, Loop::Blink)
+            (p, 5e-6)
         }
         Demo::Dimmer | Demo::Fade => {
             let kind = if demo == Demo::Dimmer {
@@ -196,7 +181,7 @@ pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
             }
             p.extend(led_and_psu("R2"));
             p.push(chip(Firmware::Booted(Box::new(soc)), &gpios, &[]));
-            (p, 20e-6, Loop::Pwm)
+            (p, 20e-6)
         }
         Demo::Button | Demo::ButtonIrq => {
             let kind = if demo == Demo::Button {
@@ -214,216 +199,34 @@ pub(crate) fn start(demo: Demo) -> Result<Box<dyn DemoRun>, String> {
             )];
             p.extend(led_and_psu("R2"));
             p.push(chip(Firmware::Booted(Box::new(soc)), &["GPIO8", "GPIO9"], &["GPIO9"]));
-            (p, 5e-6, Loop::Button)
+            (p, 5e-6)
         }
     };
     let s = session(places, max_step)?;
-    wrap(s, style)
-}
-
-/// The legacy sampling loop of `demo`.
-fn style(demo: Demo) -> Loop {
-    match demo {
-        Demo::Blink => Loop::Blink,
-        Demo::Dimmer | Demo::Fade => Loop::Pwm,
-        Demo::Button | Demo::ButtonIrq => Loop::Button,
-    }
+    run(s, demo)
 }
 
 /// Run an already built `Session` of `demo` (for example one built from its
 /// circuit file) with the legacy sampling loop.
 pub(crate) fn run(s: Session, demo: Demo) -> Result<Box<dyn DemoRun>, String> {
-    wrap(s, style(demo))
-}
-
-fn wrap(s: Session, style: Loop) -> Result<Box<dyn DemoRun>, String> {
-    let mut d = SessionDemo {
-        s,
-        style,
-        samples: TraceBuf::default_scope(),
-        psu_samples: TraceBuf::default_scope(),
-        clock: SampleClock::new(0.0, trace::SAMPLE_STEP),
-        next_sample: SimTime::ZERO,
-        closed: false,
-    };
-    d.cpu().start_edge_log();
-    d.record_sample()?;
-    if style == Loop::Button {
-        d.clock.take(d.time());
-        d.next_sample = SimTime::from_secs_f64(d.clock.next().max(0.0));
-    }
-    Ok(Box::new(d))
-}
-
-fn reached(stop: Stop, at: f64) -> Result<(), String> {
-    match stop {
-        Stop::Reached(_) => Ok(()),
-        other => Err(format!("ESP32-C3 stopped at {:.3} ms ({other:?})", at * 1e3)),
-    }
-}
-
-impl SessionDemo {
-    fn cpu(&mut self) -> &mut Esp32c3Engine {
-        self.s.engine_as::<Esp32c3Engine>("U1").expect("U1 engine")
-    }
-
-    fn time(&self) -> f64 {
-        self.s.now().as_secs_f64()
-    }
-
-    fn run_to(&mut self, t: SimTime) -> Result<(), String> {
-        let stop = self.s.run_until(t).map_err(|e| e.to_string())?;
-        reached(stop, self.time())
-    }
-
-    fn record_sample(&mut self) -> Result<(), String> {
-        let t = self.time();
-        let gpio = self.s.value("v(gpio8)").ok_or("no v(gpio8)")?;
-        let anode = self.s.value("v(led_a)").ok_or("no v(led_a)")?;
-        self.samples.push(t, (gpio - anode) * 1e3 / R_SERIES);
-        self.cpu().recycle_consumed_edges();
-        self.s.commit().map_err(|e| e.to_string())?;
-        let amps = self
-            .s
-            .readings("PSU")
-            .into_iter()
-            .find(|(k, _)| k == "regulated_amps")
-            .map(|(_, v)| v)
-            .ok_or("no PSU reading")?;
-        self.psu_samples.push(t, amps * 1e3);
-        Ok(())
-    }
-
-    fn advance(&mut self, seconds: f64) -> Result<(), String> {
-        match self.style {
-            Loop::Blink => self.advance_blink(seconds),
-            Loop::Pwm => self.advance_pwm(seconds),
-            Loop::Button => self.advance_button(seconds),
-        }
-    }
-
-    /// `Blink::advance`.
-    fn advance_blink(&mut self, seconds: f64) -> Result<(), String> {
-        let until = SimTime::from_secs_f64(seconds.max(0.0));
-        while self.s.now() < until {
-            let grid = SimTime::from_secs_f64(self.clock.next().max(0.0));
-            let next = grid.min(until);
-            if next > self.s.now() {
-                self.run_to(next)?;
-            } else if self.s.now() < until {
-                self.run_to(until)?;
-            }
-            if self.clock.take(self.time()) {
-                self.record_sample()?;
-            }
-        }
-        Ok(())
-    }
-
-    /// `PwmSim::advance`: samples on the grid and at LEDC events.
-    fn advance_pwm(&mut self, seconds: f64) -> Result<(), String> {
-        let until = SimTime::from_secs_f64(seconds.max(0.0));
-        let origin = self.s.origin();
-        while self.s.now() < until {
-            let now = self.s.now();
-            let grid = SimTime::from_secs_f64(self.clock.next().max(0.0));
-            let pwm = self
-                .cpu()
-                .soc
-                .bus
-                .ledc
-                .next_event()
-                .map(|t| SimTime(t.0.saturating_sub(origin.0)));
-            if grid <= now {
-                if self.clock.take(self.time()) {
-                    self.record_sample()?;
-                } else if now < until {
-                    let nudge = now.saturating_add(SimTime::from_ns(1)).min(until);
-                    self.run_to(nudge)?;
-                }
-                continue;
-            }
-            let mut next = grid.min(until);
-            if let Some(p) = pwm
-                && p > now
-                && p < next
-            {
-                next = p;
-            }
-            if next > self.s.now() {
-                self.run_to(next)?;
-            } else if self.s.now() < until {
-                self.run_to(until)?;
-            }
-            let hit_grid = self.clock.take(self.time());
-            let hit_pwm = pwm.is_some_and(|p| p <= self.s.now());
-            if hit_grid || hit_pwm {
-                self.record_sample()?;
-            }
-        }
-        Ok(())
-    }
-
-    /// `ButtonSim::advance` (bounce timers are the switch's, inside `Session`).
-    fn advance_button(&mut self, seconds: f64) -> Result<(), String> {
-        let until = SimTime::from_secs_f64(seconds.max(0.0));
-        while self.s.now() < until {
-            let next = self.next_sample.min(until);
-            if next > self.s.now() {
-                self.run_to(next)?;
-            }
-            if self.s.now() >= self.next_sample {
-                if self.clock.take(self.time()) {
-                    self.record_sample()?;
-                }
-                self.next_sample = SimTime::from_secs_f64(self.clock.next().max(0.0));
-                if self.next_sample <= self.s.now() {
-                    self.next_sample = self.s.now().saturating_add(SimTime::from_ns(1));
-                }
-            }
-        }
-        Ok(())
-    }
+    Ok(Box::new(SessionDemo(SessionSim::run_logged(demo.kind(), s)?)))
 }
 
 impl DemoRun for SessionDemo {
     fn step(&mut self, step: Step) -> Result<(), String> {
+        let sim = &mut self.0;
         match step {
-            Step::RunTo(t) => self.advance(t),
-            Step::Position(p) => {
-                self.s.set_param("RV1", "position", p).map_err(|e| e.to_string())?;
-                // As PwmSim::set_position: one short step so the wiper updates.
-                self.advance(self.time() + 1e-6)
-            }
-            Step::Press(closed) => {
-                let idle = self.s.pending_timers().next().is_none();
-                if self.closed == closed && idle {
-                    return Ok(());
-                }
-                self.closed = closed;
-                self.s
-                    .set_param("SW1", "closed", if closed { 1.0 } else { 0.0 })
-                    .map_err(|e| e.to_string())?;
-                self.advance(self.time() + 1e-6)
-            }
-            Step::Bounce(on) => self
-                .s
+            Step::RunTo(t) => sim.advance(t),
+            Step::Position(p) => sim.set_position(p),
+            Step::Press(closed) => sim.set_closed(closed),
+            Step::Bounce(on) => sim
+                .session()
                 .set_param("SW1", "bounce", if on { 1.0 } else { 0.0 })
                 .map_err(|e| e.to_string()),
         }
     }
 
     fn raw(&mut self) -> Raw {
-        let origin = self.s.origin();
-        let led = self.samples.to_vec();
-        let psu = self.psu_samples.to_vec();
-        let cpu = self.cpu();
-        Raw {
-            edges: cpu.logged_edges(),
-            origin,
-            uart: cpu.soc.uart_text(),
-            led,
-            psu,
-        }
+        self.0.parity_raw()
     }
 }

@@ -23,8 +23,17 @@ pub fn register(reg: &mut Registry) {
     );
 }
 
-/// Quiescent current estimate drawn from 3V3 (A); datasheet modem-sleep order.
-pub const QUIESCENT_A: f64 = 5e-3;
+/// Supply current drawn from 3V3 (A) with the CPU running at 160 MHz:
+/// ESP32-C3 Series Datasheet v2.5, Table 5-8 (Modem-sleep, Wi-Fi clock gated,
+/// typical at 3.3 V and 25 °C), 23 mA with the peripheral clocks disabled and
+/// 28 mA with all of them enabled. Firmware clocks only the peripherals it
+/// uses, so the default is the 23 mA figure.
+pub const QUIESCENT_A: f64 = 23e-3;
+
+/// Supply current with the CPU idle (`wfi`) at 160 MHz: datasheet v2.5,
+/// Table 5-8, 16 mA (peripheral clocks disabled; 21 mA with all enabled).
+/// For firmware that sleeps in `wfi` between interrupts.
+pub const QUIESCENT_WFI_A: f64 = 16e-3;
 
 /// Port name for UART0 (TX/RX) that a UART console instrument can attach to.
 pub const UART0_PORT: &str = "uart0";

@@ -224,6 +224,8 @@ impl Component for LibraryComponent {
                     }
                     "closed" if self.switch.is_some() => self.host_closed(*value != 0.0, cx),
                     "bounce" => self.bounce.enabled = *value != 0.0,
+                    // The desktop's bounce seed control; the placement seed is the default.
+                    "bounce_seed" => self.bounce.seed = value.max(0.0) as u64,
                     _ => {
                         self.params.insert(key, *value);
                     }
