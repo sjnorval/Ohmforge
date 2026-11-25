@@ -24,7 +24,7 @@ use of_core::{SimTime, Stop};
 use of_engine::{Firmware, Registry, Session};
 use of_instruments::{
     Averaging, ChannelId, MeasurementService, MeterMode, Multimeter, PartPins, Probeable, PsuReadout, Reading,
-    SamplePlan, Signal,
+    SamplePlan, Scope, ScopeTrace, Signal,
 };
 use of_soc_esp32c3::{Esp32c3Engine, UartByte};
 
@@ -32,7 +32,7 @@ use crate::adc_pwm::{self, PwmKind};
 use crate::button::{self, ButtonKind};
 use crate::kind::DemoKind;
 use crate::supply::{SupplySettings, SupplyStatus};
-use crate::trace::{self, TraceBuf};
+use crate::trace;
 
 /// Display-average window of the PWM demos (as `PwmSim`).
 const PWM_AVG_WINDOW: f64 = 2e-3;
@@ -220,6 +220,8 @@ pub(crate) struct SessionSim {
     /// The measurement service; samples the file's `LED current` probe (A).
     meas: MeasurementService,
     led: ChannelId,
+    /// The scope on the LED channel (mA; PWM demos: whole-period moving average).
+    scope: Scope,
     /// The placed meters' channels (E5c), with the LED probe again as the
     /// averaging reference ([`Self::meter_ref`]).
     meters: MeasurementService,
@@ -268,6 +270,19 @@ impl SessionSim {
         let style = Loop::of(kind);
         let mut meas = MeasurementService::new(SamplePlan::default());
         let led = meas.watch_default(led_probe(kind)?);
+        let scope = Scope {
+            channel: led,
+            scale: 1e3,
+            mode: if style == Loop::Pwm {
+                ScopeTrace::PeriodAverage {
+                    high: trace::PWM_EDGE_HIGH,
+                    periods: trace::PWM_AVG_PERIODS,
+                    fallback: PWM_AVG_WINDOW,
+                }
+            } else {
+                ScopeTrace::Raw
+            },
+        };
         let mut meters = MeasurementService::new(SamplePlan::default());
         let meter_ref = meters.watch_default(led_probe(kind)?);
         let mut settled = MeasurementService::new(SamplePlan::default());
@@ -278,6 +293,7 @@ impl SessionSim {
             style,
             meas,
             led,
+            scope,
             meters,
             meter_ref,
             settled,
@@ -330,13 +346,14 @@ impl SessionSim {
     }
 
     /// The LED probe's ring (A).
-    fn led_ring(&self) -> &TraceBuf {
+    #[cfg(test)]
+    fn led_ring(&self) -> &trace::TraceBuf {
         &self.meas.channel(self.led).expect("LED channel").ring
     }
 
     /// The LED probe's samples in mA, as the scope, averages and goldens use them.
     fn led_ma(&self) -> Vec<(f64, f64)> {
-        self.led_ring().iter().map(|(t, a)| (t, a * 1e3)).collect()
+        self.scope.samples(&self.meas)
     }
 
     fn record_sample(&mut self) -> Result<(), String> {
@@ -470,25 +487,7 @@ impl SessionSim {
 
     /// The scope trace: raw samples, or the PWM demos' moving average.
     pub(crate) fn trace(&self) -> Vec<(f64, f64)> {
-        if self.style != Loop::Pwm {
-            return self.led_ma();
-        }
-        let pts = self.led_ma();
-        pts.iter()
-            .map(|&(t, _)| {
-                (
-                    t,
-                    trace::average_periods(
-                        &pts,
-                        &pts,
-                        t,
-                        trace::PWM_EDGE_HIGH,
-                        trace::PWM_AVG_PERIODS,
-                        PWM_AVG_WINDOW,
-                    ),
-                )
-            })
-            .collect()
+        self.scope.trace(&self.meas)
     }
 
     pub(crate) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
