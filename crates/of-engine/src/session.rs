@@ -368,6 +368,21 @@ impl Session {
         out
     }
 
+    /// Current into each pin of component `refdes` (A, pin order of its
+    /// `info()`), from the latest solution; `None` for an unknown ref. The
+    /// desktop meters read two-terminal branches through this until E5.
+    pub fn terminal_currents(&mut self, refdes: &str) -> Option<Vec<f64>> {
+        let i = self.index(refdes).ok()?;
+        let analog = self
+            .kernel
+            .engine_as::<AnalogEngine>(self.analog)
+            .expect("analog engine is registered");
+        let c = &self.components[i].component;
+        let mut out = vec![0.0; c.info().pins.len()];
+        c.terminal_currents(&View(analog), &mut out);
+        Some(out)
+    }
+
     /// Kernel id of component `refdes`'s own engine.
     pub fn engine_id(&self, refdes: &str) -> Option<EngineId> {
         self.index(refdes).ok().and_then(|i| self.engines[i])
