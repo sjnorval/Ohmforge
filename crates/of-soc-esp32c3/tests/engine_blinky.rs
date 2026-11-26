@@ -57,6 +57,7 @@ fn engine_blinky_matches_blinky_led() {
             // Near-ideal rail so LED current matches the Thevenin blinky_led fixture.
             series_r: 1e-4,
             current_limit: 0.5,
+            rated: None,
         },
     );
 

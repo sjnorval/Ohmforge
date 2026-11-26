@@ -240,8 +240,9 @@ impl Stepper {
             bp: horizon,
             horizon,
             stats: TranStats::default(),
-            // The operating point is a DC solution.
-            quiescent: true,
+            // The operating point is a DC solution; `uic` initial
+            // conditions usually are not, so the first steps must run.
+            quiescent: !req.uic,
         };
         st.bp = st.next_bp(ckt);
         Ok(st)
@@ -313,6 +314,8 @@ impl Stepper {
         let h_min = self.h_min;
         let mut clip: Option<f64> = None;
         let mut redo = 0;
+        let mut sw_redo = 0;
+        let h0 = self.h;
         loop {
             let mut h = self.h.min(self.max_step);
             let h_free = h;
@@ -353,6 +356,16 @@ impl Stepper {
             match newton(ckt, &mut self.x_new, &mut self.states, &integ, opts, p) {
                 NrOutcome::Converged(k) => self.stats.newton_iterations += k,
                 NrOutcome::Singular(v) => return Err(singular_error(ckt, Some(v))),
+                NrOutcome::NoConvergence if sw_redo > 0 && sw_redo < 60 => {
+                    // Chasing a switch crossing made Newton fail: take the
+                    // step without the chase (the old end-of-step flip).
+                    self.stats.newton_iterations += opts.itl4;
+                    self.stats.rejected_newton += 1;
+                    sw_redo = 60;
+                    clip = None;
+                    self.h = h0;
+                    continue;
+                }
                 NrOutcome::NoConvergence => {
                     self.stats.newton_iterations += opts.itl4;
                     self.stats.rejected_newton += 1;
@@ -404,6 +417,29 @@ impl Stepper {
                     fired.get_or_insert(k);
                 }
             }
+            // Switch events: a switch that flipped inside the step acted
+            // over all of it, so redo the step to end within `sw_res` after
+            // the control crossed its threshold (independent of max_step).
+            let mut flipped = false;
+            if fired != Some(usize::MAX) {
+                let sw_res = (1e-4 * self.max_step).max(10.0 * h_min);
+                for d in ckt.devices() {
+                    let Some((s0, s1)) = d.state_crossing(&self.x, &self.x_new, &self.states) else {
+                        continue;
+                    };
+                    flipped = true;
+                    if s0 * s1 < 0.0 && t_new - t > sw_res && sw_redo < 60 {
+                        let tc = t + (t_new - t) * s0 / (s0 - s1);
+                        if t_new - tc > sw_res {
+                            let c = clip.map_or(tc, |c: f64| c.min(tc));
+                            clip = Some(c.max(t + 0.5 * sw_res.min(t_new - t)));
+                            fired = Some(usize::MAX);
+                            sw_redo += 1;
+                            break;
+                        }
+                    }
+                }
+            }
             if fired == Some(usize::MAX) {
                 redo += 1;
                 self.h = h;
@@ -441,6 +477,12 @@ impl Stepper {
             } else {
                 StepEnd::Free
             };
+            if flipped && !hit {
+                // A switch flipped: the circuit is discontinuous here, so
+                // restart the history and the step size like at a corner.
+                self.hist.clear();
+                h_next = (0.1 * h).max(10.0 * h_min);
+            }
             self.hist.push_back(Point {
                 t: self.t,
                 x: self.x.clone(),

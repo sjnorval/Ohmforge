@@ -77,6 +77,13 @@ fn write_sim(w: &mut String, sim: &SimSettings) {
     if sim.seed != d.seed {
         lines.push(format!("seed = {}", sim.seed));
     }
+    if sim.uic {
+        lines.push("uic = true".to_owned());
+    }
+    if !sim.ic.is_empty() {
+        let items: Vec<String> = sim.ic.iter().map(|(k, v)| format!("{k} = {}", number(*v))).collect();
+        lines.push(format!("ic = {{ {} }}", items.join(", ")));
+    }
     if !lines.is_empty() {
         w.push_str("\n[sim]\n");
         for l in lines {

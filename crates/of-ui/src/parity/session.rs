@@ -89,6 +89,7 @@ fn session(places: Vec<Place>, max_step: f64) -> Result<Session, String> {
         .into_session(SessionConfig {
             quantum: SimTime::from_us(50),
             max_step,
+            ..SessionConfig::default()
         })
         .map_err(|e| e.to_string())
 }
@@ -113,7 +114,9 @@ fn led_and_psu(r_ref: &'static str) -> Vec<Place> {
             "PSU",
             "bench.psu",
             "rust:bench-psu",
-            vec![],
+            // The ESP32-C3's vdd rating, as the circuit builder derives it
+            // from the parts on the + rail.
+            vec![("rated_min", 3.0.into()), ("rated_max", 3.6.into())],
             vec![("+", "vdd"), ("-", "gnd")],
         ),
     ]

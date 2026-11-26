@@ -1,6 +1,6 @@
 //! Bench PSU as a [`Component`] (RFC 0001 / design §3d).
 
-use of_analog::devices::{CurrentSource, PinDriver, SourceValue};
+use of_analog::devices::BenchSupply;
 use of_component_api::{
     Component, ComponentEvent, ComponentInfo, DeviceRef, ElabCtx, ElabError, EventCtx, Health, PinKind, PinSpec,
     SolutionView,
@@ -13,10 +13,9 @@ pub const DEFAULT_VOLTS: f64 = 3.3;
 pub const DEFAULT_SERIES_R: f64 = 0.1;
 /// Default current limit (A).
 pub const DEFAULT_LIMIT_A: f64 = 0.5;
-/// ESP32-C3 recommended minimum (V).
-pub const RATED_MIN_V: f64 = 3.0;
-/// ESP32-C3 recommended maximum (V).
-pub const RATED_MAX_V: f64 = 3.6;
+/// Highest set point (V): a Rigol DP832's 30 V channels (CH1/CH2), the
+/// bench supply profile in `parts/instruments/rigol.dp832`.
+pub const MAX_VOLTS: f64 = 30.0;
 
 /// User-settable bench supply.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,6 +28,10 @@ pub struct SupplySettings {
     pub series_r: f64,
     /// Current limit (A).
     pub current_limit: f64,
+    /// Supply range of the parts on the + rail, `(min, max)` V, from their
+    /// `[electrical]` `vdd`/`vcc` (the circuit builder passes it as the
+    /// `rated_min`/`rated_max` params); `None` means no rating warning.
+    pub rated: Option<(f64, f64)>,
 }
 
 impl Default for SupplySettings {
@@ -38,6 +41,7 @@ impl Default for SupplySettings {
             volts: DEFAULT_VOLTS,
             series_r: DEFAULT_SERIES_R,
             current_limit: DEFAULT_LIMIT_A,
+            rated: None,
         }
     }
 }
@@ -47,15 +51,16 @@ impl SupplySettings {
     pub fn sanitized(self) -> Self {
         Self {
             on: self.on,
-            volts: self.volts.clamp(0.0, 5.0),
+            volts: self.volts.clamp(0.0, MAX_VOLTS),
             series_r: self.series_r.clamp(1e-4, 1e3),
             current_limit: self.current_limit.clamp(1e-6, 2.0),
+            rated: self.rated,
         }
     }
 
-    /// True when the set voltage is outside the ESP32-C3 recommended range.
+    /// True when the set voltage is outside the load's rated range.
     pub fn set_outside_rated(self) -> bool {
-        self.on && !(RATED_MIN_V..=RATED_MAX_V).contains(&self.volts)
+        self.on && self.rated.is_some_and(|(lo, hi)| !(lo..=hi).contains(&self.volts))
     }
 }
 
@@ -96,6 +101,12 @@ pub enum SupplyMode {
     Cc,
 }
 
+/// Warning for a rail whose parts share no supply range (`lo` is the
+/// highest minimum, `hi` the lowest maximum).
+pub fn no_common_range(lo: f64, hi: f64) -> String {
+    format!("parts on this rail have no common supply range (one needs at least {lo} V, another at most {hi} V)")
+}
+
 /// Bench PSU component with explicit `+` and `−` terminals.
 pub struct BenchPsu {
     info: ComponentInfo,
@@ -105,8 +116,9 @@ pub struct BenchPsu {
     device: String,
     plus_net: Option<String>,
     minus_net: Option<String>,
-    /// Thevenin source and current-limit source handles.
-    refs: Option<(DeviceRef, DeviceRef)>,
+    /// The output device ([`BenchSupply`]: CV behind `series_r`, CC at the
+    /// limit, never above the set point).
+    refs: Option<DeviceRef>,
     /// Current reported at the last commit (A): the limit in CC, else the
     /// CV current `(volts - v) / series_r` floored at 0.
     amps: f64,
@@ -154,31 +166,23 @@ impl BenchPsu {
         self.mode
     }
 
-    /// Put the sources in `mode` (no solve), as the desktop `supply::apply`.
+    /// Load the settings into the output device (no solve). The device
+    /// regulates by itself (CV or CC, whichever gives less current); `mode`
+    /// is what the face shows, and off when the output is off.
     fn apply(&self, mode: SupplyMode, cx: &mut dyn EventCtx) -> SupplyMode {
-        let Some((th, cc)) = self.refs else {
+        let Some(dev) = self.refs else {
             return mode;
         };
         let s = self.settings;
-        let (v, r, i, applied) = if !s.on {
-            (0.0, PinDriver::HI_Z, 0.0, SupplyMode::Off)
-        } else if mode == SupplyMode::Cc {
-            (0.0, PinDriver::HI_Z, s.current_limit, SupplyMode::Cc)
-        } else {
-            (s.volts, s.series_r, 0.0, SupplyMode::Cv)
-        };
-        let _ = cx.set(th, "v", v);
-        let _ = cx.set(th, "r", r);
-        let _ = cx.set(cc, "dc", i);
-        applied
+        let _ = cx.set(dev, "v", s.volts);
+        let _ = cx.set(dev, "r", s.series_r);
+        let _ = cx.set(dev, "limit", s.current_limit);
+        let _ = cx.set(dev, "on", if s.on { 1.0 } else { 0.0 });
+        if s.on { mode } else { SupplyMode::Off }
     }
 
-    fn thevenin_name(&self) -> String {
+    fn device_name(&self) -> String {
         self.device.clone()
-    }
-
-    fn cc_name(&self) -> String {
-        format!("{}_cc", self.device)
     }
 }
 
@@ -205,23 +209,30 @@ impl Component for BenchPsu {
         if let Some(on) = cx.param("on") {
             self.settings.on = on != 0.0;
         }
+        if let (Some(lo), Some(hi)) = (cx.param("rated_min"), cx.param("rated_max")) {
+            self.settings.rated = Some((lo, hi));
+        }
+        // A cold start (`cold_start`, from `[sim] uic`) begins with every net
+        // at 0 V, not a solved rail: like a fresh set point, regulate only
+        // after the first step, or a commit at t = 0 would read a short and
+        // force the current limit into the load.
+        if cx.param("cold_start").is_some_and(|v| v != 0.0) {
+            self.set_at = Some(SimTime::ZERO);
+        }
         self.settings = self.settings.sanitized();
 
         let s = self.settings;
-        let (v, r) = if s.on {
-            (s.volts, s.series_r)
-        } else {
-            (0.0, PinDriver::HI_Z)
-        };
-        let name = self.thevenin_name();
-        let th = cx.add_device(Box::new(PinDriver::new(&name, plus, minus, v, r)))?;
-        let cc = cx.add_device(Box::new(CurrentSource::new(
-            &self.cc_name(),
-            minus,
+        let name = self.device_name();
+        let dev = cx.add_device(Box::new(BenchSupply::new(
+            &name,
             plus,
-            SourceValue::dc(0.0),
+            minus,
+            s.volts,
+            s.series_r,
+            s.current_limit,
+            s.on,
         )))?;
-        self.refs = Some((th, cc));
+        self.refs = Some(dev);
         self.mode = if s.on { SupplyMode::Cv } else { SupplyMode::Off };
         Ok(())
     }
@@ -250,14 +261,14 @@ impl Component for BenchPsu {
 
     /// Regulate exactly like the desktop `supply::regulate`: read the rail,
     /// switch CV/CC if needed (one sample of lag) and record the current.
-    fn commit_with(&mut self, view: &dyn SolutionView, t: SimTime, cx: &mut dyn EventCtx) -> Health {
+    fn commit_with(&mut self, view: &dyn SolutionView, t: SimTime, _cx: &mut dyn EventCtx) -> Health {
         let Some(plus) = &self.plus_net else {
             return Health::Ok;
         };
         let v = view.value(&format!("v({plus})")).unwrap_or(0.0);
         let s = self.settings;
         if !s.on {
-            self.mode = self.apply(SupplyMode::Off, cx);
+            self.mode = SupplyMode::Off;
             self.amps = 0.0;
             return Health::Ok;
         }
@@ -280,13 +291,16 @@ impl Component for BenchPsu {
                 }
             }
             SupplyMode::Cc => {
-                // Compliance: if the rail would rise above the set point, go back to CV.
-                if v > s.volts { SupplyMode::Cv } else { SupplyMode::Cc }
+                // The device holds the rail at or below the set point in CC;
+                // back to CV once the CV current would be within the limit.
+                if i_cv > s.current_limit {
+                    SupplyMode::Cc
+                } else {
+                    SupplyMode::Cv
+                }
             }
         };
-        if next != self.mode {
-            self.mode = self.apply(next, cx);
-        }
+        self.mode = next;
         self.amps = match self.mode {
             SupplyMode::Cc => s.current_limit,
             SupplyMode::Cv => i_cv.max(0.0),
@@ -304,10 +318,12 @@ impl Component for BenchPsu {
         if !self.settings.on {
             return Health::Ok;
         }
-        if !(RATED_MIN_V..=RATED_MAX_V).contains(&v) && v > 0.05 {
-            Health::Warning(format!("rail {v:.3} V outside {RATED_MIN_V}–{RATED_MAX_V} V"))
-        } else {
-            Health::Ok
+        match self.settings.rated {
+            Some((lo, hi)) if lo > hi => Health::Warning(no_common_range(lo, hi)),
+            Some((lo, hi)) if !(lo..=hi).contains(&v) && v > 0.05 => {
+                Health::Warning(format!("rail {v:.3} V outside {lo}–{hi} V"))
+            }
+            _ => Health::Ok,
         }
     }
 
@@ -316,14 +332,9 @@ impl Component for BenchPsu {
         if out.len() < 2 {
             return;
         }
-        // Current out of + equals −i(thevenin) in SPICE sign (into + terminal of source).
-        // PinDriver branch current i(name) flows into the + terminal of the Thevenin source.
-        let name = self.thevenin_name();
-        // PinDriver probe `i(name)` is current delivered *out of* the + terminal.
-        let i_out = view.value(&format!("i({name})")).unwrap_or(0.0);
-        let i_cc = view.value(&format!("i({})", self.cc_name())).unwrap_or(0.0);
-        // Current *into* + is the opposite of current out (CC source adds into +).
-        let into_plus = -i_out + i_cc;
+        // The device probe `i(name)` is the current delivered out of +.
+        let i_out = view.value(&format!("i({})", self.device_name())).unwrap_or(0.0);
+        let into_plus = -i_out;
         out[0] = into_plus;
         out[1] = -into_plus;
     }
@@ -346,6 +357,10 @@ impl Component for BenchPsu {
                 SupplyMode::Cc => 2.0,
             },
         ));
+        if let Some((lo, hi)) = self.settings.rated {
+            out.push(("rated_min".into(), lo));
+            out.push(("rated_max".into(), hi));
+        }
     }
 }
 
@@ -369,7 +384,17 @@ mod settings_tests {
 
     #[test]
     fn warning_when_outside_rated_range() {
-        let mut s = SupplySettings::default();
+        let mut s = SupplySettings {
+            volts: 2.5,
+            ..SupplySettings::default()
+        };
+        assert!(!s.set_outside_rated(), "no load rating, no warning");
+        assert_eq!(
+            no_common_range(4.5, 3.6),
+            "parts on this rail have no common supply range (one needs at least 4.5 V, another at most 3.6 V)"
+        );
+        s.volts = 3.3;
+        s.rated = Some((3.0, 3.6));
         assert!(!s.set_outside_rated());
         s.volts = 2.5;
         assert!(s.set_outside_rated());

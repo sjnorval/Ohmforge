@@ -67,6 +67,7 @@ jobs:
           bash firmware/esp32c3-blinky/build.sh
           bash firmware/esp32c3-timer-irq/build.sh
           bash firmware/esp32c3-xip-blinky/build.sh
+          bash firmware/esp32c3-clock-counter/build.sh
           git diff --exit-code -- firmware/
       # The esp-hal blinky, button and ADC/PWM apps: Rust 1.95.0 for
       # riscv32imc (its rust-toolchain.toml) and the pinned espflash release

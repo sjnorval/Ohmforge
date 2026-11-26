@@ -453,3 +453,23 @@ fn param_expressions_reach_the_circuit() {
     let p = op("t\n.param r1=2k r2={r1/2} v={3*2}\nV1 a 0 {v}\nR1 a b {r1}\nR2 b 0 {r2}\n.op\n");
     assert!((p.get("v(b)").unwrap() - 2.0).abs() < 1e-9);
 }
+
+/// A cold `uic` start puts the whole supply step on forward-biased
+/// junctions at t = 0 (as a bench supply switched on into a diode-steered
+/// RC and an LED). Newton from all-zero must still converge.
+#[test]
+fn cold_uic_supply_step_into_forward_diodes_converges() {
+    let w = tran(
+        "cold\nV1 vcc 0 5\nR1 vcc a 1k\nD1 a cap dsig\nC1 cap 0 100n\nR2 vcc l 220\nD2 l 0 dled\n\
+         .model dsig d(is=4n n=1.9 rs=0.5 cjo=4p tt=3n)\n.model dled d(is=1e-18 n=2 rs=4 cjo=20p)\n\
+         .tran 1u 2m uic\n",
+    );
+    let cap = w.signal("v(cap)").unwrap();
+    let led = w.signal("v(l)").unwrap();
+    // C1 charges through R1 and D1 towards 5 V less the diode drop.
+    let end = *cap.last().unwrap();
+    assert!((4.3..4.7).contains(&end), "v(cap) at 2 ms = {end}");
+    // The LED sits at its forward voltage from the first steps.
+    let v_led = *led.last().unwrap();
+    assert!((1.6..2.2).contains(&v_led), "v(l) = {v_led}");
+}

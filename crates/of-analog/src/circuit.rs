@@ -254,6 +254,15 @@ pub trait Device: std::fmt::Debug + Send {
         None
     }
 
+    /// A state change inside the step from `x` to `x_new` (a switch that
+    /// flipped): the control's signed distance from the threshold it
+    /// crossed at the start and the end of the step, so the transient can
+    /// shorten the step to the crossing. `states` holds the step's new
+    /// (`now`) and last accepted (`prev`) device states.
+    fn state_crossing(&self, _x: &[f64], _x_new: &[f64], _states: &crate::integrate::States) -> Option<(f64, f64)> {
+        None
+    }
+
     /// Override the DC value of an independent source (DC sweeps).
     /// Returns `false` for devices that are not independent sources.
     fn set_dc(&mut self, _value: f64) -> bool {

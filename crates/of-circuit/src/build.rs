@@ -43,6 +43,8 @@ pub fn session_config(file: &CircuitFile) -> SessionConfig {
     SessionConfig {
         quantum: SimTime::from_us(file.sim.quantum_us),
         max_step: file.sim.max_step,
+        uic: file.sim.uic,
+        ic: file.sim.ic.clone(),
     }
 }
 
@@ -156,7 +158,24 @@ fn add_component(
         Some(fw) => Some(resolve_firmware(src, c, fw, res)?),
         None => None,
     };
-    let params: BTreeMap<String, ApiParam> = c.params.iter().map(|(k, v)| (k.clone(), api_param(v))).collect();
+    let mut params: BTreeMap<String, ApiParam> = c.params.iter().map(|(k, v)| (k.clone(), api_param(v))).collect();
+    if model == "rust:bench-psu" {
+        // A cold start has no solved rail at t = 0 for the supply to
+        // regulate against (see `BenchPsu`).
+        if file.sim.uic {
+            params.insert("cold_start".into(), api_param(&ParamValue::Number(1.0)));
+        }
+        // A supply warns outside the range every part on its + rail is
+        // rated for (their `[electrical]` `vdd`/`vcc` min and max).
+        if let Some((lo, hi)) = rail_rating(file, c, pins, parts) {
+            params
+                .entry("rated_min".into())
+                .or_insert_with(|| api_param(&ParamValue::Number(lo)));
+            params
+                .entry("rated_max".into())
+                .or_insert_with(|| api_param(&ParamValue::Number(hi)));
+        }
+    }
     let pin_names: Vec<String> = pins.iter().map(|(p, _)| p.clone()).collect();
     let seed = c.seed.unwrap_or(file.sim.seed);
     let spec = ComponentSpec {
@@ -225,5 +244,80 @@ fn resolve_firmware(
                 ready_text: fw.ready_text.clone(),
             })
         }
+    }
+}
+
+/// The supply range shared by every part on `psu`'s + net: the highest
+/// `vdd`/`vcc` minimum and the lowest maximum; `None` when no part there
+/// states one.
+fn rail_rating(
+    file: &CircuitFile,
+    psu: &ComponentEntry,
+    pins: &[(String, String)],
+    parts: &PartsIndex,
+) -> Option<(f64, f64)> {
+    let plus = pins.iter().find(|(p, _)| p == "+").map(|(_, n)| n.as_str())?;
+    crate::library::rail_parts(file, plus, psu.reference(), parts)
+        .iter()
+        .fold(None, |range, p| {
+            Some(match range {
+                Some((a, b)) => (p.min.max(a), p.max.min(b)),
+                None => (p.min, p.max),
+            })
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rail_rating;
+    use crate::library::PartsIndex;
+
+    /// A PSU on `vcc` with `extra` (`[[component]]` blocks and their pins on
+    /// `vcc`); returns the rating the builder would give the PSU.
+    fn rating(extra: &str, rail_pins: &str) -> Option<(f64, f64)> {
+        let src = format!(
+            "format = 1\n\n[circuit]\nname = \"r\"\nground = \"gnd\"\n\n[[component]]\nref = \"PSU\"\npart = \"bench.psu\"\n\n{extra}\n[[net]]\nname = \"vcc\"\npins = [\"PSU.+\"{rail_pins}]\n\n[[net]]\nname = \"gnd\"\nkind = \"ground\"\npins = [\"PSU.-\"]\n"
+        );
+        let file = crate::parse(&src).unwrap();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parts");
+        let parts = PartsIndex::new(of_parts::load_dir(&dir).unwrap().into_iter().map(|(_, p)| p));
+        let psu = file.components.iter().find(|c| c.reference() == "PSU").unwrap();
+        rail_rating(
+            &file,
+            psu,
+            &[("+".into(), "vcc".into()), ("-".into(), "gnd".into())],
+            &parts,
+        )
+    }
+
+    #[test]
+    fn supply_rating_comes_from_the_parts_on_its_rail() {
+        let c3 = "[[component]]\nref = \"U1\"\npart = \"espressif.esp32-c3\"\n";
+        let ne555 = "[[component]]\nref = \"U2\"\npart = \"ti.ne555\"\n";
+        let r = "[[component]]\nref = \"R1\"\npart = \"generic.resistor\"\n";
+        // ESP32-C3 vdd, NE555 vcc (SLFS022K 5.3).
+        assert_eq!(rating(c3, ", \"U1.3V3\""), Some((3.0, 3.6)));
+        assert_eq!(rating(ne555, ", \"U2.VCC\""), Some((4.5, 16.0)));
+        // A resistor states no supply range: no rating, so no warning.
+        assert_eq!(rating(r, ", \"R1.1\""), None);
+        assert_eq!(rating(r, ""), None);
+        // Both on one rail: the range they share (none here, so lo > hi and
+        // every set point warns).
+        let both = format!("{c3}\n{ne555}");
+        assert_eq!(rating(&both, ", \"U1.3V3\", \"U2.VCC\""), Some((4.5, 3.6)));
+        // ... which `circuit check` names.
+        let src = format!(
+            "format = 1\n\n[circuit]\nname = \"r\"\nground = \"gnd\"\n\n[[component]]\nref = \"PSU\"\npart = \"bench.psu\"\n\n{both}\n[[net]]\nname = \"vcc\"\npins = [\"PSU.+\", \"U1.3V3\", \"U2.VCC\"]\n\n[[net]]\nname = \"gnd\"\nkind = \"ground\"\npins = [\"PSU.-\"]\n"
+        );
+        let file = crate::parse(&src).unwrap();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parts");
+        let parts = PartsIndex::new(of_parts::load_dir(&dir).unwrap().into_iter().map(|(_, p)| p));
+        assert_eq!(
+            crate::library::rail_warnings(&file, &parts),
+            vec![
+                "PSU: parts on this rail have no common supply range (U1 espressif.esp32-c3 3.0–3.6 V, U2 ti.ne555 4.5–16.0 V)"
+                    .to_owned()
+            ]
+        );
     }
 }

@@ -1,0 +1,228 @@
+format = 1
+
+[circuit]
+name = "555 monostable button one-shot"
+ground = "gnd"
+description = "An NE555 monostable (TI SLFS022K 6.3.1): pressing SW1 pulls TRIG below VCC/3 and the LED lights for tw = 1.1 RA C1 = 110 ms (RA 10 kohm, C1 10 uF), however long or bouncy the press. TRIG has a 10 kohm pull-up; 10 nF on CONT; 5 V bench supply. Scope on TRIG, the timing capacitor and the output; meter on the LED current."
+
+[sim]
+max_step = 1e-4
+
+[[component]]
+ref = "U1"
+part = "ti.ne555"
+at = [312, 56]
+
+[component.schematic]
+body = [0, 0, 104, 160]
+pins = [
+  { pin = "VCC", at = [24, 0], dir = "N" },
+  { pin = "RESET", at = [72, 0], dir = "N" },
+  { pin = "DISCH", at = [0, 40], dir = "W" },
+  { pin = "THRES", at = [0, 96], dir = "W" },
+  { pin = "TRIG", at = [0, 124], dir = "W" },
+  { pin = "OUT", at = [104, 48], dir = "E" },
+  { pin = "GND", at = [24, 160], dir = "S" },
+  { pin = "CONT", at = [72, 160], dir = "S" },
+]
+
+[[component]]
+ref = "RA"
+part = "generic.resistor"
+at = [156, 24]
+params = { resistance = 10000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "C1"
+part = "generic.capacitor-mlcc"
+at = [156, 120]
+params = { capacitance = 1e-5 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "C2"
+part = "generic.capacitor-mlcc"
+at = [372, 224]
+params = { capacitance = 1e-8 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+at = [216, 24]
+params = { resistance = 10000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "SW1"
+part = "generic.pushbutton"
+at = [216, 200]
+params = { bounce = true, closed = false }
+
+[component.schematic]
+body = [0, 0, 24, 40]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 40], dir = "S" },
+]
+
+[[component]]
+ref = "R3"
+part = "generic.resistor"
+at = [456, 92]
+params = { resistance = 220 }
+
+[component.schematic]
+body = [0, 0, 48, 24]
+pins = [
+  { pin = "1", at = [0, 12], dir = "W" },
+  { pin = "2", at = [48, 12], dir = "E" },
+]
+
+[[component]]
+ref = "D1"
+part = "generic.led-red-0603"
+at = [540, 136]
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "A", at = [12, 0], dir = "N" },
+  { pin = "K", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+at = [8, 8]
+params = { current_limit = 0.1, on = true, series_r = 0.1, volts = 5 }
+
+[component.schematic]
+body = [0, 0, 78, 52]
+pins = [
+  { pin = "+", id = "plus", at = [78, 14], dir = "E" },
+  { pin = "-", id = "minus", name = "−", at = [78, 42], dir = "E" },
+]
+
+[[symbol]]
+ref = "GND"
+kind = "ground"
+id = "gnd_sym"
+at = [289, 280]
+body = [0, 0, 22, 10]
+pins = [
+  { pin = "1", id = "pin", at = [11, 0], dir = "N" },
+]
+
+[[net]]
+name = "vcc"
+label = "VCC"
+kind = "power"
+pins = ["PSU.+", "U1.VCC", "U1.RESET", "RA.1", "R1.1"]
+
+[[net]]
+name = "gnd"
+label = "GND"
+kind = "ground"
+pins = ["PSU.-", "U1.GND", "C1.2", "C2.2", "D1.K", "SW1.2", "GND.1"]
+
+[[net]]
+name = "trig"
+label = "TRIG"
+kind = "signal"
+pins = ["R1.2", "SW1.1", "U1.TRIG"]
+
+[[net]]
+name = "cap"
+label = "C1"
+kind = "signal"
+pins = ["RA.2", "C1.1", "U1.THRES", "U1.DISCH"]
+
+[[net]]
+name = "cont"
+label = "CONT"
+kind = "signal"
+pins = ["U1.CONT", "C2.1"]
+
+[[net]]
+name = "out"
+label = "OUT"
+kind = "signal"
+pins = ["U1.OUT", "R3.1"]
+
+[[net]]
+name = "led_a"
+label = "LED anode"
+kind = "signal"
+pins = ["R3.2", "D1.A"]
+
+[schematic]
+keepouts = [
+  { rect = [133, 34, 150, 46], note = "RA" },
+  { rect = [110, 50, 150, 62], note = "10 kΩ" },
+  { rect = [133, 118, 150, 130], note = "C1" },
+  { rect = [110, 134, 150, 146], note = "10 µF" },
+  { rect = [402, 222, 419, 234], note = "C2" },
+  { rect = [402, 238, 442, 250], note = "10 nF" },
+  { rect = [246, 34, 263, 46], note = "R1" },
+  { rect = [246, 50, 286, 62], note = "10 kΩ" },
+  { rect = [246, 206, 271, 218], note = "SW1" },
+  { rect = [246, 222, 293, 234], note = "Button" },
+  { rect = [471, 62, 488, 74], note = "R3" },
+  { rect = [460, 76, 500, 88], note = "220 Ω" },
+  { rect = [570, 134, 587, 146], note = "D1" },
+  { rect = [570, 150, 625, 162], note = "Red LED" },
+  { rect = [289, 300, 311, 312], note = "GND" },
+]
+
+[[probe]]
+name = "Trigger"
+signal = "v(trig)"
+
+[[probe]]
+name = "Timing capacitor"
+signal = "v(cap)"
+
+[[probe]]
+name = "Output"
+signal = "v(out)"
+
+[[probe]]
+name = "LED current"
+signal = "i(R3)"
+
+[[instrument]]
+ref = "XSC1"
+kind = "scope"
+probes = ["Trigger", "Timing capacitor", "Output"]
+
+[[instrument]]
+ref = "XMM1"
+kind = "multimeter"
+mode = "dc_a"
+probes = ["LED current"]

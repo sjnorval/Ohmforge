@@ -17,7 +17,9 @@
 * - Latch (node q, 0 or 1 V): TRIG below CONT / 2 sets it, THRES above CONT
 *   resets it, TRIG wins when both are active and RESET below 0.7 V (5.5
 *   typ, 0.3 to 1 V) wins over both (Table 6-1). Hold switches keep the
-*   state; 10 pF on q gives the 100 ns output edge of 5.6 (10 kOhm hold).
+*   state. q has no capacitor: a fast RC there rings under trapezoidal
+*   integration at long steps and could flip the latch early, so the
+*   output edges are instant (5.6: 100 ns typ, far below demo time scales).
 * - Output: high = VCC - 0.9 V - 8 Ohm x I, low = 8 Ohm x I. The 8 Ohm and
 *   0.9 V fit the 5.5 VOH table exactly (13.3 V at -100 mA, 12.5 V at
 *   -200 mA, VCC = 15 V; 3.3 V at -100 mA, VCC = 5 V); 8 Ohm low gives
@@ -51,7 +53,6 @@ Sthr q gnd thres cont nesthr
 Srst q gnd rstref reset nesrst
 Shi q qh q half nehold
 Slo q gnd half q nehold on
-Cq q gnd 10p
 * qn = 1 - q.
 Eqn qn gnd qh q 1
 * Output stage (5.5 VOH/VOL fit).

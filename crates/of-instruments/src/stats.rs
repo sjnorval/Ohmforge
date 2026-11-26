@@ -159,6 +159,133 @@ pub fn pwm_duty_freq(samples: &[(f64, f64)], now: f64, high: f64) -> (Option<f64
     (duty, freq)
 }
 
+/// PWM duty (%) and frequency (Hz) over the whole periods in the last
+/// `window` seconds before `now`, for a trace sampled coarser than its edges.
+///
+/// The threshold is the window's mid level; each crossing is interpolated
+/// between its two samples, so rises and falls carry the same bias and a
+/// high time keeps its length. Duty is the high time between the first and
+/// last rise over their span, and frequency the rises between them over it.
+/// `(None, None)` without two rises.
+pub fn pwm_duty_freq_periods(samples: &[(f64, f64)], now: f64, window: f64) -> (Option<f64>, Option<f64>) {
+    let w: Vec<(f64, f64)> = samples
+        .iter()
+        .copied()
+        .filter(|(t, _)| *t >= now - window && *t <= now + 1e-15)
+        .collect();
+    let Some((lo, hi)) = w.iter().fold(None, |acc: Option<(f64, f64)>, &(_, v)| {
+        Some(acc.map_or((v, v), |(a, b)| (a.min(v), b.max(v))))
+    }) else {
+        return (None, None);
+    };
+    if hi - lo <= 0.0 {
+        return (None, None);
+    }
+    let mid = 0.5 * (lo + hi);
+    // Interpolated crossings: (t, rising).
+    let mut edges = Vec::new();
+    for p in w.windows(2) {
+        let ((t0, v0), (t1, v1)) = (p[0], p[1]);
+        let rising = v0 <= mid && v1 > mid;
+        if rising || (v0 > mid && v1 <= mid) {
+            edges.push((t0 + (mid - v0) / (v1 - v0) * (t1 - t0), rising));
+        }
+    }
+    let rises: Vec<usize> = (0..edges.len()).filter(|&i| edges[i].1).collect();
+    let (Some(&first), Some(&last)) = (rises.first(), rises.last()) else {
+        return (None, None);
+    };
+    if first == last {
+        return (None, None);
+    }
+    let span = edges[last].0 - edges[first].0;
+    let mut high = 0.0;
+    let mut i = first;
+    while i < last {
+        // A rise at `i` and the fall after it.
+        if edges[i].1 && !edges[i + 1].1 {
+            high += edges[i + 1].0 - edges[i].0;
+        }
+        i += 1;
+    }
+    let periods = (rises.len() - 1) as f64;
+    (Some((high / span * 100.0).clamp(0.0, 100.0)), Some(periods / span))
+}
+
+/// [`pwm_duty_freq_periods`] with each edge timed off a `ramp` sampled
+/// with `level` (a 555's timing capacitor): the output flips where the
+/// ramp turns, so an edge between samples k-1 and k sits where the line
+/// through ramp samples k-2, k-1 meets the line through k, k+1 (clamped
+/// to the sample interval). Edges without both lines, or a `ramp` not
+/// sampled with `level`, fall back to the interpolated crossing.
+pub fn pwm_duty_freq_ramp(
+    level: &[(f64, f64)],
+    ramp: &[(f64, f64)],
+    now: f64,
+    window: f64,
+) -> (Option<f64>, Option<f64>) {
+    let inside = |pts: &[(f64, f64)]| -> Vec<(f64, f64)> {
+        pts.iter()
+            .copied()
+            .filter(|(t, _)| *t >= now - window && *t <= now + 1e-15)
+            .collect()
+    };
+    let (w, r) = (inside(level), inside(ramp));
+    let paired = w.len() == r.len() && w.iter().zip(&r).all(|(a, b)| (a.0 - b.0).abs() <= 1e-12);
+    let Some(mid) = mid_level(&w) else {
+        return (None, None);
+    };
+    let mut edges = Vec::new();
+    for k in 1..w.len() {
+        let ((t0, v0), (t1, v1)) = (w[k - 1], w[k]);
+        let rising = v0 <= mid && v1 > mid;
+        if !(rising || (v0 > mid && v1 <= mid)) {
+            continue;
+        }
+        let mut t = t0 + (mid - v0) / (v1 - v0) * (t1 - t0);
+        if paired && k >= 2 && k + 1 < r.len() {
+            let sa = (r[k - 1].1 - r[k - 2].1) / (r[k - 1].0 - r[k - 2].0);
+            let sb = (r[k + 1].1 - r[k].1) / (r[k + 1].0 - r[k].0);
+            if (sa - sb).abs() > 1e-12 {
+                // r[k-1] + sa (x - t0) = r[k] + sb (x - t1)
+                let x = (r[k].1 - r[k - 1].1 + sa * t0 - sb * t1) / (sa - sb);
+                if x.is_finite() {
+                    t = x.clamp(t0, t1);
+                }
+            }
+        }
+        edges.push((t, rising));
+    }
+    duty_freq_from_edges(&edges)
+}
+
+/// The mid level of `w` (None for a flat or empty trace).
+fn mid_level(w: &[(f64, f64)]) -> Option<f64> {
+    let (lo, hi) = w.iter().fold(None, |acc: Option<(f64, f64)>, &(_, v)| {
+        Some(acc.map_or((v, v), |(a, b)| (a.min(v), b.max(v))))
+    })?;
+    (hi - lo > 0.0).then_some(0.5 * (lo + hi))
+}
+
+/// Duty (%) and frequency (Hz) between the first and last rise of `edges`
+/// (`(t, rising)`, in time order).
+fn duty_freq_from_edges(edges: &[(f64, bool)]) -> (Option<f64>, Option<f64>) {
+    let rises: Vec<usize> = (0..edges.len()).filter(|&i| edges[i].1).collect();
+    let (Some(&first), Some(&last)) = (rises.first(), rises.last()) else {
+        return (None, None);
+    };
+    if first == last {
+        return (None, None);
+    }
+    let span = edges[last].0 - edges[first].0;
+    let high: f64 = (first..last)
+        .filter(|&i| edges[i].1 && !edges[i + 1].1)
+        .map(|i| edges[i + 1].0 - edges[i].0)
+        .sum();
+    let periods = (rises.len() - 1) as f64;
+    (Some((high / span * 100.0).clamp(0.0, 100.0)), Some(periods / span))
+}
+
 /// Smallest and largest value of the samples at or after `from`.
 pub fn min_max(samples: &[(f64, f64)], from: f64) -> Option<(f64, f64)> {
     samples
@@ -197,6 +324,56 @@ pub fn rms(samples: &[(f64, f64)], from: f64, now: f64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    /// An 18 % PWM of period 1.0458 ms (the 555 dimmer at pot 0.1) on the
+    /// 50 us grid, with its timing ramp: the ramp-timed edges read within
+    /// 0.05 points and 0.1 %.
+    #[test]
+    fn ramp_timed_edges_read_a_short_pulse_on_a_coarse_grid() {
+        let (period, duty) = (1.0458e-3, 0.18);
+        let (lo, hi) = (5.0 / 3.0, 10.0 / 3.0);
+        let pts: Vec<(f64, f64, f64)> = (0..=400)
+            .map(|k| {
+                let t = f64::from(k) * 50e-6;
+                let ph = (t / period).fract();
+                let (on, cap) = if ph < duty {
+                    (9.47, lo + (hi - lo) * ph / duty)
+                } else {
+                    (0.0, hi - (hi - lo) * (ph - duty) / (1.0 - duty))
+                };
+                (t, on, cap)
+            })
+            .collect();
+        let level: Vec<(f64, f64)> = pts.iter().map(|&(t, v, _)| (t, v)).collect();
+        let ramp: Vec<(f64, f64)> = pts.iter().map(|&(t, _, c)| (t, c)).collect();
+        let (d, f) = pwm_duty_freq_ramp(&level, &ramp, 20e-3, 20e-3);
+        let (d, f) = (d.unwrap(), f.unwrap());
+        assert!((d - duty * 100.0).abs() < 0.05, "duty {d}");
+        assert!((f * period - 1.0).abs() < 1e-3, "freq {f}");
+        // The plain crossing reads it about a point off.
+        let (p, _) = pwm_duty_freq_periods(&level, 20e-3, 20e-3);
+        assert!((p.unwrap() - duty * 100.0).abs() > 0.3, "{p:?}");
+    }
+
+    /// A 52.99 % PWM of period 1.0328 ms (the 555 dimmer at mid pot) on the
+    /// 50 us grid reads within 0.5 points and 1 %.
+    #[test]
+    fn whole_periods_with_interpolated_edges_read_a_coarse_pwm() {
+        let (period, duty) = (1.0328e-3, 0.5299);
+        let pts: Vec<(f64, f64)> = (0..=400)
+            .map(|k| {
+                let t = f64::from(k) * 50e-6;
+                let on = (t / period).fract() < duty;
+                (t, if on { 9.47 } else { 0.0 })
+            })
+            .collect();
+        let (d, f) = pwm_duty_freq_periods(&pts, 20e-3, 20e-3);
+        let (d, f) = (d.unwrap(), f.unwrap());
+        assert!((d - duty * 100.0).abs() < 0.5, "duty {d}");
+        assert!((f * period - 1.0).abs() < 0.01, "freq {f}");
+        // A flat trace or one period has no reading.
+        assert_eq!(pwm_duty_freq_periods(&[(0.0, 1.0), (1.0, 1.0)], 1.0, 2.0), (None, None));
+    }
+
     use super::*;
 
     /// 1 kHz square wave, `high` for `duty` of each period, sampled at the edges.

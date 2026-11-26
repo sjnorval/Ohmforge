@@ -20,7 +20,7 @@ pub(crate) fn board(kind: DemoKind, position: Option<f64>) -> Schematic {
 pub(crate) fn file_board(kind: DemoKind, position: Option<f64>) -> Result<Schematic, String> {
     let file = session_sim::parsed(kind)?;
     let live = move |reference: &str, param: &str| {
-        (kind == DemoKind::Dimmer && reference.eq_ignore_ascii_case("RV1") && param == "position")
+        (kind.has_pot() && reference.eq_ignore_ascii_case("RV1") && param == "position")
             .then_some(position)
             .flatten()
     };
@@ -49,6 +49,9 @@ mod tests {
             DemoKind::Dimmer => include_str!("wiring/goldens/dimmer.routes.txt"),
             DemoKind::Fade => include_str!("wiring/goldens/fade.routes.txt"),
             DemoKind::ButtonPoll | DemoKind::ButtonIrq => include_str!("wiring/goldens/button.routes.txt"),
+            DemoKind::Ne555Astable | DemoKind::Ne555Monostable | DemoKind::Ne555Pwm | DemoKind::Clock555 => {
+                unreachable!("route goldens for the 555 demos come with their layouts")
+            }
         };
         for kind in KINDS {
             let mid = kind.has_pot().then_some(0.5);

@@ -33,12 +33,16 @@ macro_rules! demo {
 }
 
 /// Every shipped demo, in menu order.
-pub const DEMOS: [DemoFile; 5] = [
+pub const DEMOS: [DemoFile; 9] = [
     demo!("blink"),
     demo!("dimmer"),
     demo!("fade"),
     demo!("button"),
     demo!("button-irq"),
+    demo!("ne555-astable"),
+    demo!("ne555-monostable"),
+    demo!("ne555-pwm-dimmer"),
+    demo!("esp32c3-555-clock"),
 ];
 
 /// The demo with this stem.
@@ -55,6 +59,7 @@ macro_rules! firmware {
 /// Firmware the demo files name, keyed by the path as written in them.
 pub const FIRMWARE: &[(&str, &[u8])] = firmware![
     "esp32c3-blinky/blinky.elf",
+    "esp32c3-clock-counter/clock.elf",
     "esp32c3-esp-hal-adc-pwm/pot_dimmer.bin",
     "esp32c3-esp-hal-adc-pwm/led_fade.bin",
     "esp32c3-esp-hal-adc-pwm/partitions.bin",
@@ -77,15 +82,42 @@ macro_rules! parts {
 }
 
 /// The `part.toml` of every part the demos place, keyed by its directory
-/// under `parts/` (no SPICE models: the demo parts are built-in models).
+/// under `parts/`. Their SPICE libraries are in [`MODELS`].
 pub const PARTS: &[(&str, &str)] = parts![
     "bench/psu",
+    "discretes/1n4148",
     "leds/red-0603",
     "mcu/esp32-c3",
     "passives/bourns-ptv09a",
+    "passives/capacitor-mlcc",
+    "passives/capacitor-tantalum",
     "passives/resistor",
+    "regulators/ams1117",
     "switches/pushbutton-6mm",
+    "timers/ne555",
 ];
+
+/// The SPICE libraries the embedded parts name (`model = "spice:<file>"`),
+/// keyed by part directory and file name.
+pub const MODELS: &[(&str, &str, &str)] = &[
+    (
+        "regulators/ams1117",
+        "ams1117.lib",
+        include_str!("../../../parts/regulators/ams1117/ams1117.lib"),
+    ),
+    (
+        "timers/ne555",
+        "ne555.lib",
+        include_str!("../../../parts/timers/ne555/ne555.lib"),
+    ),
+];
+
+/// The embedded SPICE library text for a part's `model` (`spice:<file>`),
+/// or `None` for a built-in (`rust:`) model.
+pub fn spice_model(model: &str) -> Option<&'static str> {
+    let file = model.strip_prefix("spice:")?;
+    MODELS.iter().find(|(_, f, _)| *f == file).map(|(_, _, text)| *text)
+}
 
 /// The embedded demo parts, parsed.
 pub fn part_files() -> Result<Vec<of_parts::PartFile>, String> {

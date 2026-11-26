@@ -1,0 +1,82 @@
+# schematic routes
+# grid=4 clearance=4
+component c1 C1 156,200 180,224
+  pin 1 168,200 N cap
+  pin 2 168,224 S gnd
+component c2 C2 308,224 332,248
+  pin 1 320,224 N cont
+  pin 2 320,248 S gnd
+component d1 D1 476,136 500,160
+  pin A 488,136 N led_a
+  pin K 488,160 S gnd
+component gnd_sym GND 217,292 239,302
+  pin pin 228,292 N gnd
+component psu PSU 16,120 94,172
+  pin plus 94,134 E vcc
+  pin minus 94,162 E gnd
+component r1 R1 156,24 180,72
+  pin 1 168,24 N vcc
+  pin 2 168,72 S dis
+component r2 R2 156,104 180,152
+  pin 1 168,104 N dis
+  pin 2 168,152 S cap
+component r3 R3 392,92 440,116
+  pin 1 392,104 W out
+  pin 2 440,104 E led_a
+component u1 U1 248,56 352,216
+  pin VCC 272,56 N vcc
+  pin RESET 320,56 N vcc
+  pin DISCH 248,96 W dis
+  pin THRES 248,152 W cap
+  pin TRIG 248,180 W cap
+  pin OUT 352,104 E out
+  pin GND 272,216 S gnd
+  pin CONT 320,216 S cont
+net cap signal r2.2 c1.1 u1.THRES u1.TRIG
+  route 168,152 168,160
+  route 248,152 243,152 243,160
+  route 168,160 243,160
+  route 248,180 243,180 243,160
+  route 168,200 168,160
+net cont signal u1.CONT c2.1
+  route 320,224 320,216
+net dis signal r1.2 r2.1 u1.DISCH
+  route 168,72 168,96
+  route 248,96 168,96
+  route 168,104 168,96
+net gnd ground psu.minus u1.GND c1.2 c2.2 d1.K gnd_sym.pin
+  route 488,160 488,256 100,256 100,162 94,162
+  route 168,256 168,224
+  route 228,256 228,292
+  route 272,256 272,216
+  route 320,256 320,248
+net led_a signal r3.2 d1.A
+  route 488,136 488,104 440,104
+net out signal u1.OUT r3.1
+  route 392,104 352,104
+net vcc power psu.plus u1.VCC u1.RESET r1.1
+  route 168,16 168,24
+  route 272,16 272,56
+  route 94,134 108,134 108,16 320,16 320,56
+keepout 133,34 150,46
+keepout 118,50 150,62
+keepout 133,114 150,126
+keepout 110,130 150,142
+keepout 133,198 150,210
+keepout 110,214 150,226
+keepout 338,222 355,234
+keepout 338,238 378,250
+keepout 407,62 424,74
+keepout 396,76 436,88
+keepout 506,134 523,146
+keepout 506,150 561,162
+keepout 217,312 239,324
+junction vcc 168,16
+junction vcc 272,16
+junction dis 168,96
+junction cap 168,160
+junction cap 243,160
+junction gnd 168,256
+junction gnd 228,256
+junction gnd 272,256
+junction gnd 320,256

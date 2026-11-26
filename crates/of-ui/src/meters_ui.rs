@@ -8,12 +8,13 @@ use crate::bench::BenchProfiles;
 use crate::meters::{MeterKind, PlacedMeter, ProbeRef};
 use crate::theme::TEAL;
 
-/// A clickable node on the schematic, in schematic coordinates.
+/// A clickable node on the schematic, in schematic coordinates (the fixed
+/// demos use static strings; the 555 painter borrows its file's).
 #[derive(Clone, Copy)]
-pub struct ProbePoint {
-    pub id: &'static str,
-    pub node: &'static str,
-    pub label: &'static str,
+pub struct ProbePoint<'a> {
+    pub id: &'a str,
+    pub node: &'a str,
+    pub label: &'a str,
     pub xy: (f32, f32),
 }
 
@@ -56,7 +57,7 @@ pub fn meter_layer(
     ui: &Ui,
     point: impl Fn(f32, f32) -> Pos2,
     painter: &egui::Painter,
-    probes: &[ProbePoint],
+    probes: &[ProbePoint<'_>],
     view: &MeterView<'_>,
     muted: Color32,
 ) -> Option<ProbeRef> {

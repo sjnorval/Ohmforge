@@ -12,6 +12,10 @@ pub(crate) const DIMMER: &str = include_str!("../../../../circuits/demos/dimmer.
 pub(crate) const FADE: &str = include_str!("../../../../circuits/demos/fade.circuit.toml");
 pub(crate) const BUTTON: &str = include_str!("../../../../circuits/demos/button.circuit.toml");
 pub(crate) const BUTTON_IRQ: &str = include_str!("../../../../circuits/demos/button-irq.circuit.toml");
+pub(crate) const NE555_ASTABLE: &str = include_str!("../../../../circuits/demos/ne555-astable.circuit.toml");
+pub(crate) const NE555_MONOSTABLE: &str = include_str!("../../../../circuits/demos/ne555-monostable.circuit.toml");
+pub(crate) const NE555_PWM: &str = include_str!("../../../../circuits/demos/ne555-pwm-dimmer.circuit.toml");
+pub(crate) const ESP32C3_555_CLOCK: &str = include_str!("../../../../circuits/demos/esp32c3-555-clock.circuit.toml");
 
 fn routed(text: &str) -> Schematic {
     from_circuit(&parse(text).expect("shipped file"), &file_params).expect("schematic")

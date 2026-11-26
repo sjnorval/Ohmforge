@@ -1,0 +1,96 @@
+# schematic routes
+# grid=4 clearance=4
+component c1 C1 260,212 284,236
+  pin 1 272,212 N cap
+  pin 2 272,236 S gnd
+component c2 C2 372,224 396,248
+  pin 1 384,224 N cont
+  pin 2 384,248 S gnd
+component d1 D1 214,140 234,172
+  pin A 224,140 N charge
+  pin K 224,172 S cap
+component d2 D2 154,130 174,162
+  pin K 164,130 N discharge
+  pin A 164,162 S cap
+component d3 D3 540,136 564,160
+  pin A 552,136 N led_a
+  pin K 552,160 S gnd
+component gnd_sym GND 289,272 311,282
+  pin pin 300,272 N gnd
+component psu PSU 8,8 86,60
+  pin plus 86,22 E vcc
+  pin minus 86,50 E gnd
+component r1 R1 260,8 284,56
+  pin 1 272,8 N vcc
+  pin 2 272,56 S dis
+component r3 R3 456,92 504,116
+  pin 1 456,104 W out
+  pin 2 504,104 E led_a
+component rv1 RV1 214,66 234,126
+  pin 3 224,66 N discharge
+  pin 1 224,126 S charge
+  pin wiper 248,96 E dis
+component u1 U1 312,56 416,216
+  pin VCC 336,56 N vcc
+  pin RESET 384,56 N vcc
+  pin DISCH 312,96 W dis
+  pin THRES 312,152 W cap
+  pin TRIG 312,180 W cap
+  pin OUT 416,104 E out
+  pin GND 336,216 S gnd
+  pin CONT 384,216 S cont
+net cap signal d1.K d2.A c1.1 u1.THRES u1.TRIG
+  route 164,162 164,180 312,180
+  route 224,180 224,172
+  route 272,180 272,212
+  route 304,180 304,152 312,152
+net charge signal rv1.1 d1.A
+  route 224,140 224,126
+net cont signal u1.CONT c2.1
+  route 384,224 384,216
+net dis signal r1.2 rv1.wiper u1.DISCH
+  route 248,96 312,96
+  route 272,96 272,56
+net discharge signal rv1.3 d2.K
+  route 164,130 164,60 224,60 224,66
+net gnd ground psu.minus u1.GND c1.2 c2.2 d3.K gnd_sym.pin
+  route 552,160 552,256 92,256 92,50 86,50
+  route 272,256 272,236
+  route 300,256 300,272
+  route 336,256 336,216
+  route 384,256 384,248
+net led_a signal r3.2 d3.A
+  route 552,136 552,104 504,104
+net out signal u1.OUT r3.1
+  route 456,104 416,104
+net vcc power psu.plus u1.VCC u1.RESET r1.1
+  route 272,-8 272,8
+  route 86,22 101,22 101,-8 384,-8 384,56
+  route 384,50 336,50 336,56
+keepout 237,18 254,30
+keepout 222,34 254,46
+keepout 133,66 158,78
+keepout 118,82 158,94
+keepout 240,142 257,154
+keepout 240,158 287,170
+keepout 131,132 148,144
+keepout 101,148 148,160
+keepout 237,210 254,222
+keepout 207,226 254,238
+keepout 402,222 419,234
+keepout 402,238 442,250
+keepout 471,62 488,74
+keepout 460,76 500,88
+keepout 570,134 587,146
+keepout 570,150 625,162
+keepout 289,292 311,304
+junction vcc 272,-8
+junction vcc 384,50
+junction dis 272,96
+junction cap 224,180
+junction cap 272,180
+junction cap 304,180
+junction gnd 272,256
+junction gnd 300,256
+junction gnd 336,256
+junction gnd 384,256

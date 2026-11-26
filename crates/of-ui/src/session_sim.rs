@@ -60,6 +60,10 @@ pub(crate) fn file_stem(kind: DemoKind) -> &'static str {
         DemoKind::Fade => "fade",
         DemoKind::ButtonPoll => "button",
         DemoKind::ButtonIrq => "button-irq",
+        DemoKind::Ne555Astable => "ne555-astable",
+        DemoKind::Ne555Monostable => "ne555-monostable",
+        DemoKind::Ne555Pwm => "ne555-pwm-dimmer",
+        DemoKind::Clock555 => "esp32c3-555-clock",
     }
 }
 
@@ -68,17 +72,21 @@ pub(crate) fn demo_file(kind: DemoKind) -> &'static DemoFile {
     demos::demo(file_stem(kind)).expect("every desktop demo has an embedded circuit file")
 }
 
-const KINDS: [DemoKind; 5] = [
+const KINDS: [DemoKind; 9] = [
     DemoKind::Blink,
     DemoKind::Dimmer,
     DemoKind::Fade,
     DemoKind::ButtonPoll,
     DemoKind::ButtonIrq,
+    DemoKind::Ne555Astable,
+    DemoKind::Ne555Monostable,
+    DemoKind::Ne555Pwm,
+    DemoKind::Clock555,
 ];
 
 /// The parsed embedded file of `kind` (parsed once).
 pub(crate) fn parsed(kind: DemoKind) -> Result<&'static CircuitFile, String> {
-    static FILES: [OnceLock<Result<CircuitFile, String>>; 5] = [const { OnceLock::new() }; 5];
+    static FILES: [OnceLock<Result<CircuitFile, String>>; 9] = [const { OnceLock::new() }; 9];
     let i = KINDS.iter().position(|k| *k == kind).expect("known kind");
     FILES[i]
         .get_or_init(|| {
@@ -97,7 +105,8 @@ fn parts() -> Result<&'static (PartsIndex, Arc<Library>), String> {
             let files = demos::part_files()?;
             let mut lib = Library::new();
             for p in &files {
-                lib.add(p.clone(), None).map_err(|e| e.to_string())?;
+                let spice = demos::spice_model(&p.part.model).map(str::to_owned);
+                lib.add(p.clone(), spice).map_err(|e| e.to_string())?;
             }
             Ok((PartsIndex::new(files), Arc::new(lib)))
         })
@@ -122,11 +131,12 @@ fn registry(file: &CircuitFile, lib: Arc<Library>) -> Registry {
 /// `None` for the direct-boot blink. The error is the missing-ROM message.
 pub(crate) fn booted(kind: DemoKind) -> Result<Option<Firmware>, String> {
     let soc = match kind {
-        DemoKind::Blink => return Ok(None),
+        DemoKind::Blink | DemoKind::Clock555 => return Ok(None),
         DemoKind::Dimmer => adc_pwm::booted(PwmKind::Dimmer)?,
         DemoKind::Fade => adc_pwm::booted(PwmKind::Fade)?,
         DemoKind::ButtonPoll => button::booted(ButtonKind::Poll)?,
         DemoKind::ButtonIrq => button::booted(ButtonKind::Irq)?,
+        DemoKind::Ne555Astable | DemoKind::Ne555Monostable | DemoKind::Ne555Pwm => return Ok(None),
     };
     Ok(Some(Firmware::Booted(Box::new(soc))))
 }
@@ -153,6 +163,37 @@ impl Default for StartOptions {
     }
 }
 
+/// The bench supply as `kind`'s file sets it (`PSU` params over the
+/// defaults): the 555 demos run at 5 V (NE555 4.5 to 16 V), not the
+/// ESP32-C3's 3.3 V.
+pub(crate) fn file_supply(kind: DemoKind) -> SupplySettings {
+    let mut s = SupplySettings::default();
+    let Ok(file) = parsed(kind) else {
+        return s;
+    };
+    let Some(psu) = file.components.iter().find(|c| c.reference() == "PSU") else {
+        return s;
+    };
+    let num = |k: &str| match psu.params.get(k) {
+        Some(ParamValue::Number(x)) => Some(*x),
+        Some(ParamValue::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
+        _ => None,
+    };
+    if let Some(v) = num("volts") {
+        s.volts = v;
+    }
+    if let Some(r) = num("series_r") {
+        s.series_r = r;
+    }
+    if let Some(i) = num("current_limit") {
+        s.current_limit = i;
+    }
+    if let Some(on) = num("on") {
+        s.on = on != 0.0;
+    }
+    s.sanitized()
+}
+
 fn set_param(file: &mut CircuitFile, reference: &str, name: &str, value: ParamValue) {
     if let Some(c) = file.components.iter_mut().find(|c| c.reference() == reference) {
         c.params.insert(name.into(), value);
@@ -168,7 +209,7 @@ pub(crate) fn build_session(kind: DemoKind, opts: StartOptions) -> Result<Sessio
     set_param(&mut file, "PSU", "series_r", ParamValue::Number(s.series_r));
     set_param(&mut file, "PSU", "current_limit", ParamValue::Number(s.current_limit));
     set_param(&mut file, "PSU", "on", ParamValue::Bool(s.on));
-    if kind == DemoKind::Dimmer {
+    if kind.has_pot() {
         set_param(
             &mut file,
             "RV1",
@@ -176,7 +217,7 @@ pub(crate) fn build_session(kind: DemoKind, opts: StartOptions) -> Result<Sessio
             ParamValue::Number(opts.position.clamp(0.0, 1.0)),
         );
     }
-    if !opts.idle_draw {
+    if !opts.idle_draw && kind.has_mcu() {
         set_param(&mut file, "U1", "quiescent_a", ParamValue::Number(0.0));
     }
     let (index, lib) = parts()?;
@@ -200,14 +241,17 @@ pub(crate) enum Loop {
     Pwm,
     /// `ButtonSim::advance`: the grid, with bounce timers inside `Session`.
     Button,
+    /// The 555 demos: the scope grid alone (no chip, as `Blink` without it).
+    Analog,
 }
 
 impl Loop {
     pub(crate) fn of(kind: DemoKind) -> Self {
         match kind {
-            DemoKind::Blink => Self::Blink,
+            DemoKind::Blink | DemoKind::Clock555 => Self::Blink,
             DemoKind::Dimmer | DemoKind::Fade => Self::Pwm,
             DemoKind::ButtonPoll | DemoKind::ButtonIrq => Self::Button,
+            DemoKind::Ne555Astable | DemoKind::Ne555Monostable | DemoKind::Ne555Pwm => Self::Analog,
         }
     }
 }
@@ -239,6 +283,78 @@ pub(crate) struct SessionSim {
     /// The file's UART consoles and logic analysers (E5g); empty on the
     /// shipped demos, so their runs are unchanged.
     digital: of_instruments::digital::DigitalBench,
+    /// The file's scope and multimeter channels (the 555 demos).
+    bench: MeasurementService,
+    file_scopes: Vec<FileScope>,
+    file_meters: Vec<FileMeter>,
+}
+
+/// The 555 demos' duty and frequency readout window (s): about 20 periods
+/// of the PWM dimmer.
+const ANALOG_PWM_WINDOW: f64 = 20e-3;
+
+/// Each file scope's (reference, [(probe, samples)]).
+pub(crate) type ScopeTraces = Vec<(String, Vec<(String, Vec<(f64, f64)>)>)>;
+
+/// A file `scope` instrument on the desktop (the 555 demos): its probes'
+/// channels on [`SessionSim::bench`], in the file's order.
+pub(crate) struct FileScope {
+    pub reference: String,
+    pub channels: Vec<(String, ChannelId)>,
+}
+
+/// A file `multimeter` instrument: its mode and probe channel.
+pub(crate) struct FileMeter {
+    pub reference: String,
+    pub mode: String,
+    pub probe: String,
+    pub channel: ChannelId,
+}
+
+/// The file's scope and multimeter instruments, watched on `bench`
+/// (ESP32-C3 demos keep their own scope and meters, so none there).
+fn file_instruments(
+    kind: DemoKind,
+    bench: &mut MeasurementService,
+) -> Result<(Vec<FileScope>, Vec<FileMeter>), String> {
+    let (mut scopes, mut meters) = (Vec::new(), Vec::new());
+    if !kind.file_bench() {
+        return Ok((scopes, meters));
+    }
+    let file = parsed(kind)?;
+    for i in &file.instruments {
+        let mut channels = Vec::new();
+        for p in &i.probes {
+            // A `[[probe]]` name, or an inline signal such as `v(vdd)`.
+            let (name, text) = file
+                .probe(p.get_ref())
+                .map_or((p.get_ref().as_str(), p.get_ref().as_str()), |q| (q.name(), q.signal()));
+            let signal: Signal = text.parse().map_err(|e| format!("{}: {e}", i.reference()))?;
+            channels.push((name.to_owned(), bench.watch_default(signal)));
+        }
+        match i.kind() {
+            "scope" => scopes.push(FileScope {
+                reference: i.reference().to_owned(),
+                channels,
+            }),
+            "multimeter" => {
+                let mode = i
+                    .mode
+                    .as_ref()
+                    .map_or_else(|| "dc_v".to_owned(), |m| m.get_ref().clone());
+                for (probe, channel) in channels {
+                    meters.push(FileMeter {
+                        reference: i.reference().to_owned(),
+                        mode: mode.clone(),
+                        probe,
+                        channel,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((scopes, meters))
 }
 
 /// Default console baud when a `uart` instrument sets none.
@@ -297,6 +413,16 @@ fn reached(stop: Stop, at: f64) -> Result<(), String> {
 impl SessionSim {
     /// Build `kind` from its circuit file and start it.
     pub(crate) fn start(kind: DemoKind, opts: StartOptions) -> Result<Self, String> {
+        // The 555 demos and the clock counter start on their file's supply
+        // unless one is given.
+        let opts = if kind.file_bench() && opts.supply == SupplySettings::default() {
+            StartOptions {
+                supply: file_supply(kind),
+                ..opts
+            }
+        } else {
+            opts
+        };
         let s = build_session(kind, opts)?;
         let mut sim = Self::run(kind, s)?;
         sim.position = opts.position.clamp(0.0, 1.0);
@@ -336,6 +462,8 @@ impl SessionSim {
         let meter_ref = meters.watch_default(led_probe(kind)?);
         let mut settled = MeasurementService::new(SamplePlan::default());
         let psu = PsuReadout::watch(&mut settled, "PSU");
+        let mut bench = MeasurementService::new(SamplePlan::default());
+        let (file_scopes, file_meters) = file_instruments(kind, &mut bench)?;
         let mut d = Self {
             kind,
             s,
@@ -354,11 +482,19 @@ impl SessionSim {
             supply: SupplySettings::default(),
             supply_status: SupplyStatus::default(),
             digital: digital_bench(parsed(kind)?)?,
+            bench,
+            file_scopes,
+            file_meters,
         };
-        if edge_log {
+        if edge_log && kind.has_mcu() {
             d.cpu().start_edge_log();
         }
         d.record_sample()?;
+        if matches!(style, Loop::Blink | Loop::Analog) {
+            // The start sample is the grid's t = 0: the grid-safe loop
+            // would otherwise take it again.
+            d.meas.take_due(d.time());
+        }
         if style == Loop::Button {
             d.meas.take_due(d.time());
             d.next_sample = SimTime::from_secs_f64(d.meas.next_due().max(0.0));
@@ -431,6 +567,68 @@ impl SessionSim {
         &self.meas.channel(self.led).expect("LED channel").ring
     }
 
+    /// The timing capacitor's samples (V) from the file's scope, sampled
+    /// with the LED; empty without one.
+    fn timing_ramp(&self) -> Vec<(f64, f64)> {
+        let signal: Signal = "v(cap)".parse().expect("signal");
+        self.bench
+            .channels()
+            .find(|(_, c)| c.signal == signal)
+            .map(|(_, c)| c.ring.iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// The file's scopes: (reference, [(probe, samples)]).
+    pub(crate) fn file_scope_traces(&self) -> ScopeTraces {
+        self.file_scopes
+            .iter()
+            .map(|sc| {
+                let chans = sc
+                    .channels
+                    .iter()
+                    .map(|(name, id)| {
+                        let pts = self
+                            .bench
+                            .channel(*id)
+                            .map(|c| c.ring.iter().collect())
+                            .unwrap_or_default();
+                        (name.clone(), pts)
+                    })
+                    .collect();
+                (sc.reference.clone(), chans)
+            })
+            .collect()
+    }
+
+    /// The file's multimeters: (reference, probe, display), each the
+    /// average over the LED window (the 555 one-shot) or whole LED periods.
+    pub(crate) fn file_meter_readings(&self) -> Vec<(String, String, String)> {
+        let led = self.led_ma();
+        self.file_meters
+            .iter()
+            .map(|m| {
+                let pts: Vec<(f64, f64)> = self
+                    .bench
+                    .channel(m.channel)
+                    .map(|c| c.ring.iter().collect())
+                    .unwrap_or_default();
+                let v = trace::average_periods(
+                    &pts,
+                    &led,
+                    self.time(),
+                    trace::PWM_EDGE_HIGH,
+                    trace::PWM_AVG_PERIODS,
+                    trace::LED_AVG_WINDOW,
+                );
+                let text = match m.mode.as_str() {
+                    "dc_a" => format!("{:.2} mA", v * 1e3),
+                    _ => format!("{v:.3} V"),
+                };
+                (m.reference.clone(), m.probe.clone(), text)
+            })
+            .collect()
+    }
+
     /// The LED probe's samples in mA, as the scope, averages and goldens use them.
     fn led_ma(&self) -> Vec<(f64, f64)> {
         self.scope.samples(&self.meas)
@@ -438,8 +636,13 @@ impl SessionSim {
 
     fn record_sample(&mut self) -> Result<(), String> {
         self.meas.record(&mut self.s).map_err(|e| e.to_string())?;
+        if self.kind.file_bench() {
+            self.bench.record(&mut self.s).map_err(|e| e.to_string())?;
+        }
         self.meters.record(&mut self.s).map_err(|e| e.to_string())?;
-        self.cpu().recycle_consumed_edges();
+        if self.kind.has_mcu() {
+            self.cpu().recycle_consumed_edges();
+        }
         self.s.commit().map_err(|e| e.to_string())?;
         self.settled.record(&mut self.s).map_err(|e| e.to_string())?;
         self.supply_status = self.psu.status(&mut self.s, self.supply);
@@ -448,22 +651,31 @@ impl SessionSim {
 
     pub(crate) fn advance(&mut self, seconds: f64) -> Result<(), String> {
         match self.style {
-            Loop::Blink => self.advance_blink(seconds),
+            Loop::Blink | Loop::Analog => self.advance_grid(seconds),
             Loop::Pwm => self.advance_pwm(seconds),
             Loop::Button => self.advance_button(seconds),
         }
     }
 
-    fn advance_blink(&mut self, seconds: f64) -> Result<(), String> {
+    /// Blink and the 555 demos: the engine on the sample grid. A grid instant
+    /// the clock does not take yet (the `SimTime` rounding of
+    /// [`MeasurementService::next_due`]) gets a 1 ns nudge instead of a
+    /// jump to `until`, so an off-grid stop (a frame, a pot or button
+    /// change) keeps every later grid instant.
+    fn advance_grid(&mut self, seconds: f64) -> Result<(), String> {
         let until = SimTime::from_secs_f64(seconds.max(0.0));
         while self.s.now() < until {
+            let now = self.s.now();
             let grid = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
-            let next = grid.min(until);
-            if next > self.s.now() {
-                self.run_to(next)?;
-            } else if self.s.now() < until {
-                self.run_to(until)?;
+            if grid <= now {
+                if self.meas.take_due(self.time()) {
+                    self.record_sample()?;
+                } else {
+                    self.run_to(now.saturating_add(SimTime::from_ns(1)).min(until))?;
+                }
+                continue;
             }
+            self.run_to(grid.min(until))?;
             if self.meas.take_due(self.time()) {
                 self.record_sample()?;
             }
@@ -537,6 +749,7 @@ impl SessionSim {
     pub(crate) fn set_scope_window(&mut self, visible: f64) {
         let now = self.time();
         self.meas.set_visible_window(visible, now);
+        self.bench.set_visible_window(visible, now);
         self.settled.set_visible_window(visible, now);
         if self.style == Loop::Button {
             self.next_sample = SimTime::from_secs_f64(self.meas.next_due().max(0.0));
@@ -562,6 +775,16 @@ impl SessionSim {
                 PWM_AVG_WINDOW,
             ),
             Loop::Button => trace::average_window(&pts, self.time(), BUTTON_AVG_WINDOW),
+            // Whole periods of a 555 output when there are any (the PWM
+            // dimmer, the astable), else the LED window (the one-shot).
+            Loop::Analog => trace::average_periods(
+                &pts,
+                &pts,
+                self.time(),
+                trace::PWM_EDGE_HIGH,
+                trace::PWM_AVG_PERIODS,
+                trace::LED_AVG_WINDOW,
+            ),
         }
     }
 
@@ -571,6 +794,14 @@ impl SessionSim {
     }
 
     pub(crate) fn pwm_duty_freq(&self) -> (Option<f64>, Option<f64>) {
+        if self.style == Loop::Analog {
+            // The 555 demos: whole periods, each output edge timed where the
+            // timing capacitor's ramps before and after it meet (the 555
+            // flips at the kink), so a 1 ms period on the 50 us grid reads
+            // to a fraction of a point.
+            let ramp = self.timing_ramp();
+            return of_instruments::stats::pwm_duty_freq_ramp(&self.led_ma(), &ramp, self.time(), ANALOG_PWM_WINDOW);
+        }
         trace::pwm_duty_freq(&self.led_ma(), self.time(), 0.5)
     }
 
@@ -578,7 +809,7 @@ impl SessionSim {
         let led = self.led_ma();
         let window = match self.style {
             Loop::Pwm => PWM_AVG_WINDOW,
-            Loop::Blink | Loop::Button => trace::LED_AVG_WINDOW,
+            Loop::Blink | Loop::Button | Loop::Analog => trace::LED_AVG_WINDOW,
         };
         let mut status = self.supply_status;
         status.amps_avg = Some(self.psu.average_amps(
@@ -679,15 +910,21 @@ impl SessionSim {
     // UART.
 
     pub(crate) fn uart_bytes(&mut self) -> &[UartByte] {
+        if !self.kind.has_mcu() {
+            return &[];
+        }
         self.cpu().soc.uart_bytes()
     }
 
     pub(crate) fn uart_baud(&mut self) -> Option<f64> {
+        if !self.kind.has_mcu() {
+            return None;
+        }
         self.cpu().soc.bus.uart0.baud(APB_HZ)
     }
 
     pub(crate) fn push_uart_rx(&mut self, bytes: &[u8]) {
-        if !bytes.is_empty() {
+        if !bytes.is_empty() && self.kind.has_mcu() {
             self.cpu().soc.push_uart_rx(bytes);
         }
     }
@@ -741,7 +978,7 @@ impl SessionSim {
             periods: trace::PWM_AVG_PERIODS,
             fallback: match self.style {
                 Loop::Pwm => PWM_AVG_WINDOW,
-                Loop::Blink | Loop::Button => trace::LED_AVG_WINDOW,
+                Loop::Blink | Loop::Button | Loop::Analog => trace::LED_AVG_WINDOW,
             },
         }
     }
@@ -1159,7 +1396,8 @@ mod tests {
         match kind {
             DemoKind::Dimmer => nodes.push("gpio2"),
             DemoKind::ButtonPoll | DemoKind::ButtonIrq => nodes.push("gpio9"),
-            DemoKind::Blink | DemoKind::Fade => {}
+            DemoKind::Blink | DemoKind::Fade | DemoKind::Clock555 => {}
+            DemoKind::Ne555Astable | DemoKind::Ne555Monostable | DemoKind::Ne555Pwm => {}
         }
         nodes
     }
@@ -1187,24 +1425,27 @@ mod tests {
     /// closed at 8 ms.
     #[rustfmt::skip]
     const RECORDED: &[(DemoKind, &str, &str, &str, &str, f64)] = &[
-        (DemoKind::Blink, "gpio8", "led_a", "", "-0.000 V", -3.0601937488523236e-10),
-        (DemoKind::Blink, "led_a", "gpio8", "", "0.000 V", 3.0601937488523236e-10),
-        (DemoKind::Blink, "gpio8", "vdd", "", "-3.298 V", -3.297701601786737e0),
-        (DemoKind::Blink, "vdd", "gpio8", "", "3.298 V", 3.297701601786737e0),
-        (DemoKind::Blink, "gpio8", "0", "", "0.000 V", 1.267509912249869e-10),
-        (DemoKind::Blink, "0", "gpio8", "", "-0.000 V", -1.267509912249869e-10),
-        (DemoKind::Blink, "led_a", "vdd", "", "-3.298 V", -3.2977016014807177e0),
-        (DemoKind::Blink, "vdd", "led_a", "", "3.298 V", 3.2977016014807177e0),
-        (DemoKind::Blink, "led_a", "0", "", "0.000 V", 4.3277036611021924e-10),
-        (DemoKind::Blink, "0", "led_a", "", "-0.000 V", -4.3277036611021924e-10),
-        (DemoKind::Blink, "vdd", "0", "", "3.298 V", 3.297701601913488e0),
-        (DemoKind::Blink, "0", "vdd", "", "-3.298 V", -3.297701601913488e0),
-        (DemoKind::Blink, "gpio8", "led_a", "R1", "-0.00 mA", -9.273314390461588e-13),
-        (DemoKind::Blink, "led_a", "gpio8", "R1", "0.00 mA", 9.273314390461588e-13),
-        (DemoKind::Blink, "led_a", "0", "D1", "-0.00 mA", -9.273314390461588e-13),
-        (DemoKind::Blink, "0", "led_a", "D1", "0.00 mA", 9.273314390461588e-13),
-        (DemoKind::Blink, "vdd", "0", "PSU", "-22.98 mA", -2.298398086511888e-2),
-        (DemoKind::Blink, "0", "vdd", "PSU", "22.98 mA", 2.298398086511888e-2),
+        // Blink re-recorded on the grid-safe loop (p3-demos-555): the old
+        // loop skipped the grid after its first missed instant and never
+        // sampled the LED lit at 0.95 ms.
+        (DemoKind::Blink, "gpio8", "led_a", "", "0.650 V", 6.504888994643397e-1),
+        (DemoKind::Blink, "led_a", "gpio8", "", "-0.650 V", -6.504888994643397e-1),
+        (DemoKind::Blink, "gpio8", "vdd", "", "-1.708 V", -1.7079861554517184e0),
+        (DemoKind::Blink, "vdd", "gpio8", "", "1.708 V", 1.7079861554517184e0),
+        (DemoKind::Blink, "gpio8", "0", "", "1.590 V", 1.5895184659028772e0),
+        (DemoKind::Blink, "0", "gpio8", "", "-1.590 V", -1.5895184659028772e0),
+        (DemoKind::Blink, "led_a", "vdd", "", "-2.358 V", -2.3584750549160582e0),
+        (DemoKind::Blink, "vdd", "led_a", "", "2.358 V", 2.3584750549160582e0),
+        (DemoKind::Blink, "led_a", "0", "", "0.939 V", 9.390295664385366e-1),
+        (DemoKind::Blink, "0", "led_a", "", "-0.939 V", -9.390295664385366e-1),
+        (DemoKind::Blink, "vdd", "0", "", "3.298 V", 3.297504621354595e0),
+        (DemoKind::Blink, "0", "vdd", "", "-3.298 V", -3.297504621354595e0),
+        (DemoKind::Blink, "gpio8", "led_a", "R1", "1.97 mA", 1.971178483225272e-3),
+        (DemoKind::Blink, "led_a", "gpio8", "R1", "-1.97 mA", -1.971178483225272e-3),
+        (DemoKind::Blink, "led_a", "0", "D1", "1.97 mA", 1.9711784832252585e-3),
+        (DemoKind::Blink, "0", "led_a", "D1", "-1.97 mA", -1.9711784832252585e-3),
+        (DemoKind::Blink, "vdd", "0", "PSU", "-24.95 mA", -2.495378645391588e-2),
+        (DemoKind::Blink, "0", "vdd", "PSU", "24.95 mA", 2.495378645391588e-2),
         (DemoKind::Dimmer, "gpio8", "led_a", "", "0.848 V", 8.481949985341278e-1),
         (DemoKind::Dimmer, "led_a", "gpio8", "", "-0.848 V", -8.481949985341278e-1),
         (DemoKind::Dimmer, "gpio8", "vdd", "", "-1.231 V", -1.2312926630970307e0),
@@ -1368,7 +1609,10 @@ mod tests {
     #[rustfmt::skip]
     #[allow(clippy::type_complexity)]
     const FACES: &[(DemoKind, Option<f64>, f64, f64, f64, f64, SupplyMode, bool, f64)] = &[
-        (DemoKind::Blink, None, 1.2e-2, 3.297701601913488e0, 2.298398086511888e-2, 2.298398086511888e-2, SupplyMode::Cv, false, 3.291305306999763e-12),
+        // Re-pinned on the grid-safe loop (p3-demos-555): the old loop had
+        // not sampled the LED lit at 0.95 ms by 12 ms (average 22.98 mA,
+        // LED 3.29e-12 mA).
+        (DemoKind::Blink, None, 1.2e-2, 3.297701601913488e0, 2.298398086511888e-2, 2.4953786285306433e-2, SupplyMode::Cv, false, 1.9711784422092875e0),
         (DemoKind::Blink, None, 1.6e-2, 3.297701601913488e0, 2.298398086511888e-2, 2.4953786453914883e-2, SupplyMode::Cv, false, 1.9711783577801563e0),
         (DemoKind::Dimmer, None, 1.2e-2, 3.297273011213674e0, 2.7269887863257125e-2, 2.5881843413710973e-2, SupplyMode::Cv, false, 2.5701402772434303e0),
         (DemoKind::Dimmer, None, 1.6e-2, 3.2972730014380813e0, 2.7269985619184922e-2, 2.588199090653242e-2, SupplyMode::Cv, false, 2.570287874345841e0),
@@ -1806,9 +2050,302 @@ mod digital_tests {
         // One channel: the Saleae's 100 MS/s.
         assert_eq!(bench.analysers[0].1.period, Some(1e-8));
         assert_eq!(bench.step(), Some(of_instruments::digital::MIN_LOGIC_STEP));
-        // The shipped demos list none, so their runs are unchanged.
+        // The other shipped demos list none, so their runs are unchanged; the
+        // clock counter reads its TX on a console and a logic analyser.
         for k in KINDS {
-            assert!(digital_bench(parsed(k).unwrap()).unwrap().is_empty(), "{k:?}");
+            let bench = digital_bench(parsed(k).unwrap()).unwrap();
+            if k == DemoKind::Clock555 {
+                assert_eq!(bench.consoles.len(), 1);
+                assert_eq!(bench.consoles[0].baud, 28818.0);
+                assert_eq!(bench.analysers.len(), 1);
+            } else {
+                assert!(bench.is_empty(), "{k:?}");
+            }
         }
+    }
+}
+
+/// The 555 demos (no microcontroller) on the desktop's session sim.
+#[cfg(test)]
+mod analog_tests {
+    use super::*;
+    use crate::supply::SupplyMode;
+
+    fn start555(kind: DemoKind) -> SessionSim {
+        SessionSim::start(kind, StartOptions::default()).unwrap_or_else(|e| panic!("{kind:?}: {e}"))
+    }
+
+    /// The face reads the file's 5 V supply in CV, inside the NE555's
+    /// 4.5 to 16 V.
+    fn check_supply(s: &SessionSim, kind: DemoKind) {
+        let st = s.supply_status();
+        println!(
+            "{kind:?}: supply {:.4} V, {:.3} mA, {:?}, outside {}",
+            st.volts,
+            st.amps * 1e3,
+            st.mode,
+            st.outside_rated
+        );
+        assert!((st.volts - 5.0).abs() < 0.01, "{kind:?}: {} V", st.volts);
+        assert_eq!((st.mode, st.outside_rated), (SupplyMode::Cv, false), "{kind:?}");
+    }
+
+    /// Samples on the LED channel after `from` (s).
+    fn samples_after(s: &SessionSim, from: f64) -> usize {
+        s.led_ma().iter().filter(|(t, _)| *t > from + 1e-9).count()
+    }
+
+    /// Blink's loop after a stop off the 50 us grid, as a pot change's 1 us
+    /// step makes, and at 60 Hz frame stops, keeps every grid instant (the
+    /// old loop jumped to `until` on a missed one: 458 of 599 and 668 of 999).
+    #[test]
+    fn blink_loop_keeps_the_grid_after_an_off_grid_stop() {
+        let mut s = SessionSim::start(DemoKind::Blink, StartOptions::default()).unwrap();
+        s.advance(30e-3).unwrap();
+        s.advance(30e-3 + 1e-6).unwrap();
+        s.advance(60e-3).unwrap();
+        let after_nudge = samples_after(&s, 30.001e-3);
+        let mut t = 60e-3;
+        for _ in 0..3 {
+            t += 1.0 / 60.0;
+            s.advance(t).unwrap();
+        }
+        let after_frames = samples_after(&s, 60e-3);
+        println!(
+            "blink: {after_nudge} samples in 30.001..60 ms (grid 599), {after_frames} in 60..{:.3} ms (grid {})",
+            t * 1e3,
+            ((t - 60e-3) / 50e-6).floor()
+        );
+        assert!(after_nudge >= 599, "{after_nudge} samples after the off-grid stop");
+        assert!(
+            after_frames as f64 >= ((t - 60e-3) / 50e-6).floor(),
+            "{after_frames} samples over the frames"
+        );
+    }
+
+    /// Sim seconds per wall second for each 555 demo (release builds are
+    /// the meaningful number; the PWM dimmer is on the 5 us grid).
+    #[test]
+    fn ne555_realtime_factor_report() {
+        const SPAN: f64 = 0.2;
+        for kind in [DemoKind::Ne555Astable, DemoKind::Ne555Monostable, DemoKind::Ne555Pwm] {
+            let mut s = start555(kind);
+            s.advance(0.02).unwrap();
+            let t0 = std::time::Instant::now();
+            s.advance(0.02 + SPAN).unwrap();
+            let wall = t0.elapsed().as_secs_f64().max(1e-9);
+            println!(
+                "{kind:?} realtime factor: {:.3}x ({SPAN} s sim in {wall:.3} s wall)",
+                SPAN / wall
+            );
+        }
+    }
+
+    #[test]
+    fn astable_flashes_at_about_6_7_hz() {
+        let kind = DemoKind::Ne555Astable;
+        assert!(!kind.has_mcu() && !kind.needs_rom() && !kind.has_pot() && !kind.has_button());
+        let mut s = start555(kind);
+        // The face's 20 ms PWM readout cannot see a 149 ms period, so read
+        // the LED current each millisecond and time the rises.
+        let (mut rises, mut lit, mut was) = (Vec::new(), 0usize, false);
+        for k in 1..=1000 {
+            let t = f64::from(k) * 1e-3;
+            s.advance(t).unwrap();
+            let on = s.current_ma().unwrap() > 0.5;
+            if on && !was {
+                rises.push(t);
+            }
+            if t > 0.3 && on {
+                lit += 1;
+            }
+            was = on;
+        }
+        let periods: Vec<f64> = rises.windows(2).skip(1).map(|w| w[1] - w[0]).collect();
+        let period = periods.iter().sum::<f64>() / periods.len() as f64;
+        let duty = lit as f64 / 700.0;
+        println!(
+            "{kind:?}: rises {rises:?}, period {:.1} ms ({:.2} Hz), duty {:.1} %, average {:.3} mA",
+            period * 1e3,
+            1.0 / period,
+            duty * 100.0,
+            s.average_ma()
+        );
+        // 0.693 (R1 + 2 R2) C plus the discharge drop: about 149 ms, 6.7 Hz.
+        assert!(periods.len() >= 4, "{rises:?}");
+        assert!((period - 0.149).abs() < 0.004, "period {period}");
+        assert!((0.48..0.58).contains(&duty), "duty {duty}");
+        check_supply(&s, kind);
+        assert!(s.uart_bytes().is_empty() && s.uart_baud().is_none());
+    }
+
+    #[test]
+    fn pwm_dimmer_follows_the_pot() {
+        let kind = DemoKind::Ne555Pwm;
+        assert!(kind.has_pot() && !kind.has_mcu());
+        let mut s = start555(kind);
+        let mut t = 0.0;
+        // The exact duty % and mean LED current (mA) of the of-circuit test.
+        // Exact period (ms) too. Edges are timed off the capacitor ramps.
+        let wall = std::time::Instant::now();
+        for (pos, want, mean, period_ms) in [
+            (0.5, 52.99, 5.005, 1.0328),
+            (0.9, 89.68, 8.484, 1.0027),
+            (0.1, 18.00, 1.695, 1.0458),
+            (0.3, 35.44, 3.347, 1.0413),
+            (0.7, 70.94, 6.708, 1.0204),
+        ] {
+            s.set_position(pos).unwrap();
+            t += 30e-3;
+            s.advance(t).unwrap();
+            let (duty, freq) = s.pwm_duty_freq();
+            println!(
+                "{kind:?} at {pos}: duty {duty:?}, freq {freq:?} Hz, average {:.3} mA",
+                s.average_ma()
+            );
+            // Whole periods with interpolated edges: within `tol` points and
+            // 1 % of the exact duty and frequency.
+            let d = duty.expect("a duty");
+            assert!((d - want).abs() < 0.5, "pot {pos}: duty {d} % vs {want} %");
+            let f_exact = 1.0 / period_ms * 1e3;
+            let f = freq.expect("a frequency");
+            assert!((f / f_exact - 1.0).abs() < 0.01, "pot {pos}: {f} Hz vs {f_exact} Hz");
+            let avg = s.average_ma();
+            // Whole periods on the 50 us grid: at most one sample of the
+            // 9.47 mA lit current per 1 ms period (0.47 mA) off.
+            assert!((avg - mean).abs() < 0.47, "pot {pos}: {avg} mA vs {mean} mA");
+            // The file's multimeter (XMM1, LED current) reads the same way.
+            let mm = s.file_meter_readings();
+            assert_eq!((mm[0].0.as_str(), mm[0].1.as_str()), ("XMM1", "LED current"));
+            println!("  XMM1 {}", mm[0].2);
+        }
+        println!(
+            "{kind:?}: 150 ms of sim on the 50 us grid in {:?} (debug build)",
+            wall.elapsed()
+        );
+        check_supply(&s, kind);
+    }
+
+    /// The desktop scope and meters come from each file's `[[instrument]]`
+    /// tables: the astable's XSC1 shows the capacitor between VCC/3 and
+    /// 2 VCC/3 and the output swinging, XMM1 the LED current.
+    #[test]
+    fn the_555_instruments_come_from_the_file() {
+        let mut s = start555(DemoKind::Ne555Astable);
+        s.advance(0.5).unwrap();
+        let scopes = s.file_scope_traces();
+        assert_eq!(scopes.len(), 1);
+        let (reference, chans) = &scopes[0];
+        let names: Vec<&str> = chans.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            (reference.as_str(), names),
+            ("XSC1", vec!["Timing capacitor", "Output"])
+        );
+        let span = |pts: &[(f64, f64)]| {
+            pts.iter()
+                .filter(|(t, _)| *t > 0.3)
+                .fold((f64::MAX, f64::MIN), |(a, b), &(_, v)| (a.min(v), b.max(v)))
+        };
+        let (cmin, cmax) = span(&chans[0].1);
+        let (omin, omax) = span(&chans[1].1);
+        println!("XSC1 Timing capacitor {cmin:.3}..{cmax:.3} V, Output {omin:.3}..{omax:.3} V");
+        assert!(
+            (cmin - 5.0 / 3.0).abs() < 0.1 && (cmax - 10.0 / 3.0).abs() < 0.1,
+            "{cmin} {cmax}"
+        );
+        assert!(omin < 0.3 && omax > 3.0, "{omin} {omax}");
+        let mm = s.file_meter_readings();
+        println!("XMM1 {mm:?}");
+        assert_eq!(mm.len(), 1);
+        // A DC meter's 20 ms window on a 6.7 Hz flasher follows the flash:
+        // at 0.5 s it sits inside the lit 76 ms that began at 0.491 s.
+        let ma: f64 = mm[0].2.trim_end_matches(" mA").parse().unwrap();
+        assert!((ma - 9.465).abs() < 0.1, "{ma} mA");
+        // The ESP32-C3 demos keep their own instruments.
+        let blink = SessionSim::start(DemoKind::Blink, StartOptions::default()).unwrap();
+        assert!(blink.file_scope_traces().is_empty() && blink.file_meter_readings().is_empty());
+    }
+
+    /// The clock counter: the frequency the firmware prints on UART0 is the
+    /// one the file's scope sees at GPIO4 (rising mid-rail crossings over
+    /// whole periods), and both sit near the NE555's 1/(ln 2 (R1 + 2 R2) C1).
+    #[test]
+    fn the_clock_counter_prints_the_frequency_the_scope_sees() {
+        let kind = DemoKind::Clock555;
+        assert!(kind.has_mcu() && !kind.needs_rom() && kind.file_bench());
+        let mut s = SessionSim::start(kind, StartOptions::default()).unwrap();
+        assert!((s.supply.volts - 5.0).abs() < 1e-12, "starts on the file's 5 V");
+        // The first 100 ms gate closes at about 117 ms (the first edge after
+        // the 2 ms settle is at 13.6 ms) and its line takes about 10 ms at
+        // 28818 baud; one gate keeps the debug run short.
+        s.advance(0.135).unwrap();
+        let consoles = s.consoles();
+        assert_eq!(consoles.len(), 1);
+        let text = &consoles[0].text;
+        println!("{}:\n{text}", consoles[0].title);
+        assert!(text.contains("ohmforge clock counter"), "{text:?}");
+        // Only whole lines: the last one may still be on the wire.
+        let printed: Vec<f64> = text
+            .split_inclusive('\n')
+            .filter(|l| l.ends_with('\n'))
+            .filter_map(|l| l.trim_end().strip_prefix("freq: "))
+            .map(|r| r.split(' ').next().unwrap().parse().unwrap())
+            .collect();
+        assert!(!printed.is_empty(), "{text:?}");
+        let scopes = s.file_scope_traces();
+        let clk = &scopes[0]
+            .1
+            .iter()
+            .find(|(n, _)| n == "Clock at GPIO4")
+            .expect("clock channel")
+            .1;
+        let mut edges = Vec::new();
+        for w in clk.windows(2) {
+            let ((t0, v0), (t1, v1)) = (w[0], w[1]);
+            if t0 > 0.05 && v0 < 1.6 && v1 >= 1.6 {
+                edges.push(t0 + (1.6 - v0) / (v1 - v0) * (t1 - t0));
+            }
+        }
+        assert!(edges.len() >= 3, "{} edges", edges.len());
+        let measured = (edges.len() - 1) as f64 / (edges[edges.len() - 1] - edges[0]);
+        let expected = 1.0 / (std::f64::consts::LN_2 * (1e3 + 2.0 * 6.8e3) * 1e-6);
+        println!(
+            "printed {printed:?} Hz, scope {measured:.3} Hz over {} periods, 1/(ln2 (R1 + 2 R2) C1) = {expected:.3} Hz",
+            edges.len() - 1
+        );
+        for f in &printed {
+            assert!(
+                (f - measured).abs() / measured < 2e-3,
+                "printed {f} vs scope {measured}"
+            );
+        }
+        assert!(
+            (measured - expected).abs() / expected < 0.03,
+            "{measured} vs {expected}"
+        );
+        let logic = s.logic();
+        assert_eq!(logic.len(), 1, "one logic analyser (clock and TX)");
+    }
+
+    #[test]
+    fn monostable_lights_for_1_1_rc_on_a_press() {
+        let kind = DemoKind::Ne555Monostable;
+        assert!(kind.has_button() && !kind.has_mcu());
+        let mut s = start555(kind);
+        s.advance(20e-3).unwrap();
+        let idle = s.current_ma().unwrap();
+        s.set_closed(true).unwrap();
+        s.advance(50e-3).unwrap();
+        s.set_closed(false).unwrap();
+        s.advance(100e-3).unwrap();
+        let lit = s.current_ma().unwrap();
+        s.advance(160e-3).unwrap();
+        let after = s.current_ma().unwrap();
+        println!("{kind:?}: LED {idle:.3} mA idle, {lit:.3} mA at 100 ms, {after:.3} mA at 160 ms");
+        // RC ln 3 = 109.9 ms from the press at 20 ms: lit at 100 ms, off at 160.
+        assert!(idle < 0.01, "idle {idle} mA");
+        assert!(lit > 5.0, "lit {lit} mA");
+        assert!(after < 0.01, "after {after} mA");
+        check_supply(&s, kind);
     }
 }
