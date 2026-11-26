@@ -40,7 +40,7 @@ Goals:
 
 Non-goals:
 
-- An editor, code completion, a compiler or a build system inside Ohmforge. The toolchains (ESP-IDF, Arduino-ESP32, PlatformIO, esp-hal with cargo) stay where they are. This is a firm decision for P2 to P6: Ohmforge is a simulator, not a firmware IDE. An in-app sketch editor would be a new future-ideas item, not a silent addition to I5–I7 (see [`ROADMAP.md`](../ROADMAP.md)).
+- An editor, code completion, a compiler or a build system inside Ohmforge. The toolchains (ESP-IDF, Arduino-ESP32, PlatformIO, esp-hal with cargo) stay where they are. This is a firm decision for P2 to P6: Ohmforge is a simulator, not a firmware IDE. An in-app sketch editor would be a new future-ideas item, not a silent addition to I5–I7 (see [`ROADMAP.md`](../ROADMAP.md)). The planned part creator ([`part-creator.md`](part-creator.md)) is a separate tool for authoring library parts (symbols, models, citations); it is not a firmware editor and not the circuit schematic editor.
 - Redistributing Espressif toolchains, cores or tools. The plugins find what the user has installed (section 5d).
 - Remote or multi-user access to a running simulator. The control API is a local developer tool; the web app (`of-web`, P4) has its own path.
 - A stable public protocol before P6. The control API is versioned from the start but may change until 1.0, like the component API.

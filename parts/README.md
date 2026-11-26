@@ -8,7 +8,7 @@ One folder per part: `parts/<category>/<manufacturer>-<part>/part.toml`, or
 [LICENSE.md](LICENSE.md) for licensing rules. Under the engine plan
 ([`docs/design/engine-components.md`](../docs/design/engine-components.md))
 each part becomes a component on the engine API, so list every pin,
-including supply and ground pins.
+including supply and ground pins. Instrument profiles (multimeter, scope, PSU, logic analyser) live under `parts/instruments/` as `instrument.toml`. A planned part creator for authoring packs is specified in [`docs/design/part-creator.md`](../docs/design/part-creator.md).
 
 Current parts:
 
@@ -26,3 +26,5 @@ Current parts:
 | `regulators/ams1117` | `ams.ams1117-3.3` | AMS1117-3.3 1 A LDO, with our own macromodel (`ams1117.lib`) |
 | `sensors/bosch-bme280` | `bosch.bme280` | BME280 temperature, humidity, pressure sensor (supply load model) |
 | `bench/psu` | `bench.psu` | Bench power supply (instrument: CV with a current limit, no variant) |
+| `mcu/esp32-c3` | `espressif.esp32-c3` | ESP32-C3 (Rust SoC model; pins including 3V3 and GND) |
+| `timers/ne555` | `ti.ne555` | NE555 precision timer macromodel (`ne555.lib`), checked against TI SLFS022K |

@@ -1,14 +1,16 @@
 # Base engine and plug-in components
 
-Status: E1 (this document) merged in #43. The PSU return and current-averaging fix (#45) landed in #54. E2 (#46, #62) and E3 (#47, #63: `Esp32c3Component`, pad helpers, engine blinky parity) are on `main`. E4 to E6 are planned in P3 / 0.2 (#48, #49, #50); E4a, the circuit file format, landed in #73; E4b-1 (model registry, `Session` runtime, trace parity goldens) landed in #77; E4b-2 (the demo circuit files, `of_circuit::build`, `ohmforge run`) landed in #78; E4c (the schematic from the file, the desktop demos on `Session`) landed in #79; E4d (the files as the desktop's only path, the hand-wired demos deleted) completes E4. Section 1 still describes the pre-E2 demo glue; demos move onto circuit files in E4.
-Date: 2026-11-22 (status updated 2026-11-23).
+Status: E1 (this document) merged in #43. The PSU return and current-averaging fix (#45) landed in #54. E2 (#46, #62) and E3 (#47, #63: `Esp32c3Component`, pad helpers, engine blinky parity) are on `main`. E4 is complete (#73, #77 to #80): circuit files, `ohmforge run`, and the desktop's only path are the embedded `circuits/demos/` files. E5a to E5g are on `main` (#49, through #98); listed follow-ups remain. E6 (#50), `[symbol]` and the component-based BOM, is still open. Section 1 still describes the pre-E2 demo glue, kept for history; demos have moved onto circuit files.
+Date: 2026-11-22 (status updated 2026-11-26).
 Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §5 (mixed-signal co-simulation), §6 (system architecture), §7 (component model and library), §11 (BOM); [`wire-routing.md`](wire-routing.md) (the shared schematic router); [`COMPONENTS.md`](../COMPONENTS.md) (the parts the library should grow to); roadmap P2 item “Base engine and plug-in components”.
 
 This note specifies how Ohmforge is split into a **base engine** that stands in for the real world (nets, physics, time, measurement) and **components** that plug into it. Every part with a real-world counterpart is a component that follows one engine API: resistors, LEDs, pots and buttons, the bench PSU, and the ESP32-C3 itself. Wiring, readings, logging and measuring are engine services, so instruments work the same way on every circuit. A demo stops being hand-written glue code and becomes a circuit file: a list of components plus the nets between them.
 
-## 1. Current state
+## 1. Current state (pre-E4, kept for history)
 
-Most of the pieces exist; what is missing is one API that joins them. Today each demo assembles its simulation by hand in `of-ui`.
+This section describes the tree before E2 to E4 landed. On `main` today the demos are circuit files run on `Session` (E4 complete), E5a to E5g are on `main`, and E6 is still open. The table remains a useful map of pieces onto the engine, but phrases such as “today each demo assembles its simulation by hand” are historical.
+
+Most of the pieces existed already; what was missing was one API that joins them. At the time this section was written, each demo assembled its simulation by hand in `of-ui`.
 
 | Piece | Where it lives today | Maps to |
 |---|---|---|

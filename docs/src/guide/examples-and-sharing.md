@@ -3,13 +3,14 @@
 This page previews the planned gallery and the file-based project pack. It does
 not work yet. The design is in
 [`docs/design/examples-and-sharing.md`](https://github.com/sjnorval/Ohmforge/blob/main/docs/design/examples-and-sharing.md).
-Circuit files (E4) and the parts library on the circuit (E6) have to land first.
-For what you can do **today**, use the bundled demos in the desktop app; see
+Circuit files (E4) are on `main`; the parts library on the circuit (E6) and the
+gallery itself still have to land. For what you can do **today**, use the bundled
+demos in the desktop app, or `ohmforge run` on a circuit file; see
 [Your first schematic](first-schematic.md#what-works-today).
 
 ## Open an official example
 
-*Needs E4, E6, and the P3 gallery.*
+*Needs E4 (done), E6, and the P3 gallery.*
 
 On the load screen, or under File → Examples, pick a project: title, chip, a
 short description, and a beginner or intermediate mark. Ohmforge copies it into
