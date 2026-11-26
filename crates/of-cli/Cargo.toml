@@ -19,6 +19,7 @@ of-circuit = { workspace = true, features = ["fs"] }
 of-components.workspace = true
 of-core.workspace = true
 of-engine.workspace = true
+of-instruments.workspace = true
 of-soc-esp32c3.workspace = true
 of-netlist.workspace = true
 of-parts.workspace = true

@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! ohmforge run <netlist.cir> [--out results.csv] [--vcd waves.vcd]
-//! ohmforge run <file.circuit.toml> [--until 10ms] [--step 10us] [--out FILE.csv] [--vcd FILE.vcd] [--uart] [--parts DIR]
+//! ohmforge run <file.circuit.toml> [--until 10ms] [--step 10us] [--out FILE.csv] [--vcd FILE.vcd] [--log FILE.csv|FILE.vcd] [--uart] [--parts DIR]
 //! ohmforge validate-parts <parts-dir>
 //! ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out bom.csv] [--checklist FILE.md]
 //! ohmforge circuit check [--parts DIR] <file|dir>...
@@ -31,7 +31,9 @@
 //!
 //! `circuit check` parses circuit files (`*.circuit.toml`, RFC 0003; a
 //! directory means every circuit file below it), and reports every structural,
-//! parts-library and firmware-hash problem as `file:line:column: message`.
+//! parts-library, firmware-hash and signal problem (`[[probe]]` and
+//! `[[instrument]]` signals must parse and resolve, RFC 0004) as
+//! `file:line:column: message`.
 //! `circuit fmt` rewrites files in canonical form (`--check` only reports
 //! files that would change; `--update-hashes` recomputes firmware hashes).
 
@@ -49,7 +51,7 @@ mod run_circuit;
 
 const USAGE: &str = "Usage:
   ohmforge run <netlist.cir> [--out FILE.csv] [--vcd FILE.vcd]
-  ohmforge run <FILE.circuit.toml> [--until 10ms] [--step 10us] [--out FILE.csv] [--vcd FILE.vcd] [--uart] [--parts DIR]
+  ohmforge run <FILE.circuit.toml> [--until 10ms] [--step 10us] [--out FILE.csv] [--vcd FILE.vcd] [--log FILE.csv|FILE.vcd] [--uart] [--parts DIR]
   ohmforge validate-parts <parts-dir>
   ohmforge bom <blink|dimmer|fade|button> [--parts DIR] [--out FILE.csv] [--checklist FILE.md]
   ohmforge circuit check [--parts DIR] <FILE.circuit.toml|DIR>...

@@ -20,6 +20,7 @@ of-firmware = { workspace = true, optional = true }
 of-core = { workspace = true, optional = true }
 of-component-api = { workspace = true, optional = true }
 of-engine = { workspace = true, optional = true }
+of-instruments = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The integration tests need every feature; `cargo test --workspace` alone
@@ -32,7 +33,8 @@ of-soc-esp32c3.workspace = true
 default = []
 # Checks against the parts library and firmware hashes through a `Resolver`,
 # the circuit-file -> `of_engine` builder and the in-memory resolver.
-engine = ["dep:of-parts", "dep:of-firmware", "dep:of-core", "dep:of-component-api", "dep:of-engine"]
+# Also resolves `[[probe]]` and `[[instrument]]` signals (`library::check_signals`).
+engine = ["dep:of-parts", "dep:of-firmware", "dep:of-core", "dep:of-component-api", "dep:of-engine", "dep:of-instruments"]
 # Host file system: `FsResolver`, file loading, the parts-directory loader and
 # the fetched-ROM lookup. Not for wasm32.
 fs = ["engine"]

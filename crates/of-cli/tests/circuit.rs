@@ -185,3 +185,30 @@ fn usage_errors_exit_with_2() {
     assert_eq!(code(&["circuit", "fmt", "--bogus", "x"]), Some(2));
     assert_eq!(code(&["circuit", "check", "--check", "x"]), Some(2));
 }
+
+#[test]
+fn check_reports_a_signal_that_does_not_resolve_with_its_line_and_column() {
+    // In `target/tmp`, so the demo's relative firmware path can reach `circuits/demos`.
+    let file = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("bad-signal-{}.circuit.toml", std::process::id()));
+    let demo =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../circuits/demos/blink.circuit.toml"))
+            .unwrap()
+            .replace("\r\n", "\n");
+    // Firmware paths are relative to the file: point them back at the demos.
+    let text = demo.replace("app = \"", "app = \"../../circuits/demos/");
+    let text = text.replace("signal = \"i(R1)\"", "signal = \"v(nowhere)\"");
+    std::fs::write(&file, &text).unwrap();
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_ohmforge"))
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .args(["circuit", "check", file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success(), "{err}");
+    let line = text.lines().position(|l| l.contains("v(nowhere)")).unwrap() + 1;
+    assert!(
+        err.contains(&format!(":{line}:10: probe 'LED current': no net 'nowhere'")),
+        "{err}"
+    );
+    std::fs::remove_file(&file).ok();
+}

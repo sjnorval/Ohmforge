@@ -38,6 +38,16 @@ pub struct CircuitFile {
     /// Optional measurement points (consumed by E5).
     #[serde(default, rename = "probe")]
     pub probes: Vec<ProbeEntry>,
+    /// Optional instruments on the probes (RFC 0004, E5e; additive, `format` stays 1).
+    #[serde(default, rename = "instrument")]
+    pub instruments: Vec<InstrumentEntry>,
+}
+
+impl CircuitFile {
+    /// The `[[probe]]` with this name (exact match).
+    pub fn probe(&self, name: &str) -> Option<&ProbeEntry> {
+        self.probes.iter().find(|p| p.name() == name)
+    }
 }
 
 /// `[circuit]`.
@@ -403,8 +413,82 @@ pub struct Keepout {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProbeEntry {
-    /// Display name.
-    pub name: String,
-    /// Signal, for example `i(R1)` or `v(led_a)`.
-    pub signal: String,
+    /// Display name; unique in the file.
+    pub name: Spanned<String>,
+    /// Signal, for example `i(R1)` or `v(led_a)` (RFC 0004 grammar).
+    pub signal: Spanned<String>,
+}
+
+impl ProbeEntry {
+    /// The name as a plain str.
+    pub fn name(&self) -> &str {
+        self.name.get_ref()
+    }
+
+    /// The signal as a plain str.
+    pub fn signal(&self) -> &str {
+        self.signal.get_ref()
+    }
+}
+
+/// Instrument kinds format 1 knows (RFC 0004).
+pub const INSTRUMENT_KINDS: &[&str] = &["multimeter", "scope", "logic", "logger", "uart"];
+
+/// Multimeter modes (DC only; AC and resistance come in a later addendum).
+pub const MULTIMETER_MODES: &[&str] = &["dc_v", "dc_a"];
+
+/// The profile that reads exactly what the solver has and never loads the circuit.
+pub const IDEAL_PROFILE: &str = "ideal";
+
+/// Scope `params` keys.
+pub const SCOPE_PARAMS: &[&str] = &["time_div", "trigger", "level"];
+
+/// Scope trigger edges.
+pub const SCOPE_TRIGGERS: &[&str] = &["rise", "fall"];
+
+/// One `[[instrument]]` (RFC 0004, "`[[instrument]]` table").
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstrumentEntry {
+    /// Ref, `X` prefix by convention; shares the ref namespace, never in the BOM.
+    #[serde(rename = "ref")]
+    pub reference: Spanned<String>,
+    /// One of [`INSTRUMENT_KINDS`].
+    pub kind: Spanned<String>,
+    /// [`IDEAL_PROFILE`] (the default) or a `parts/instruments/<vendor>.<model>` id.
+    #[serde(default)]
+    pub profile: Option<Spanned<String>>,
+    /// Multimeter only: one of [`MULTIMETER_MODES`].
+    #[serde(default)]
+    pub mode: Option<Spanned<String>>,
+    /// `[[probe]]` names, or inline signals such as `v(vdd)`.
+    pub probes: Vec<Spanned<String>>,
+    /// Schematic placement of the instrument symbol.
+    #[serde(default)]
+    pub at: Option<[f32; 2]>,
+    /// Kind-specific settings (scope: [`SCOPE_PARAMS`]).
+    #[serde(default)]
+    pub params: BTreeMap<String, ParamValue>,
+}
+
+impl InstrumentEntry {
+    /// The ref as a plain str.
+    pub fn reference(&self) -> &str {
+        self.reference.get_ref()
+    }
+
+    /// The kind as a plain str.
+    pub fn kind(&self) -> &str {
+        self.kind.get_ref()
+    }
+
+    /// The profile id, [`IDEAL_PROFILE`] when left out.
+    pub fn profile(&self) -> &str {
+        self.profile.as_ref().map_or(IDEAL_PROFILE, |p| p.get_ref().as_str())
+    }
+
+    /// The multimeter mode, if set.
+    pub fn mode(&self) -> Option<&str> {
+        self.mode.as_ref().map(|m| m.get_ref().as_str())
+    }
 }

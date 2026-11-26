@@ -90,3 +90,63 @@ fn bad_options_and_files_fail() {
     assert!(!o.status.success());
     assert!(stderr(&o).contains("missing.circuit.toml"), "{}", stderr(&o));
 }
+
+/// `(header, rows)` of a CSV file.
+fn csv(path: &Path) -> (String, Vec<Vec<f64>>) {
+    let data = std::fs::read_to_string(path).unwrap();
+    let mut lines = data.lines();
+    let header = lines.next().unwrap().to_owned();
+    let rows = lines
+        .map(|l| l.split(',').map(|v| v.parse().unwrap()).collect())
+        .collect();
+    (header, rows)
+}
+
+#[test]
+fn log_writes_the_probes_as_csv_and_vcd_equal_to_the_solver_trace() {
+    let dir = std::env::temp_dir().join(format!("ohmforge-run-log-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let all = dir.join("blink-all.csv");
+    let log = dir.join("blink-log.csv");
+    let vcd = dir.join("blink-log.vcd");
+    for target in [&log, &vcd] {
+        let o = run(&[
+            "circuits/demos/blink.circuit.toml",
+            "--until",
+            "1ms",
+            "--step",
+            "50us",
+            "--out",
+            all.to_str().unwrap(),
+            "--log",
+            target.to_str().unwrap(),
+        ]);
+        assert!(o.status.success(), "{}", stderr(&o));
+    }
+    let (header, rows) = csv(&log);
+    // The instruments (XMM1, XSC1) read the `LED current` probe, so it is the one column.
+    assert_eq!(header, "time,LED current");
+    let (all_header, all_rows) = csv(&all);
+    assert_eq!(all_header.split(',').next_back(), Some("i(R1)"));
+    assert_eq!(rows.len(), all_rows.len());
+    for (r, a) in rows.iter().zip(&all_rows) {
+        assert_eq!(r[0].to_bits(), a[0].to_bits(), "same sample times");
+        let (led, old) = (r[1], *a.last().unwrap());
+        // PARITY: max(1 nA, 1 ppm).
+        assert!((led - old).abs() <= 1e-9_f64.max(1e-6 * old.abs()), "{led} vs {old}");
+    }
+    assert!(
+        rows.iter().any(|r| r[1] > 1e-3),
+        "the LED is lit at some point: {rows:?}"
+    );
+    let v = std::fs::read_to_string(&vcd).unwrap();
+    assert!(v.contains("$var real 64") && v.contains("LED"), "{v}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn log_needs_a_csv_or_vcd_file() {
+    let o = run(&["circuits/demos/blink.circuit.toml", "--log", "out.txt"]);
+    assert!(!o.status.success());
+    assert!(stderr(&o).contains(".csv or .vcd"), "{}", stderr(&o));
+}

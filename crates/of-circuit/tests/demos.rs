@@ -5,7 +5,7 @@ use std::path::Path;
 
 use of_circuit::demos::{DEMOS, FIRMWARE, PARTS, demo, parts, resolver};
 use of_circuit::fs::{FsResolver, load_parts};
-use of_circuit::library::{check_firmware, check_parts, normalize};
+use of_circuit::library::{check_firmware, check_parts, check_signals, normalize};
 use of_circuit::{BootKind, parse, save};
 
 fn repo() -> &'static Path {
@@ -35,9 +35,34 @@ fn demos_are_canonical_and_match_the_parts_library() {
         let mut f = parse(d.text).unwrap_or_else(|e| panic!("{}: {e}", d.path));
         let problems = check_parts(d.text, &f, &lib);
         assert!(problems.is_empty(), "{}: {problems:?}", d.path);
+        let problems = check_signals(d.text, &f, &lib);
+        assert!(problems.is_empty(), "{}: {problems:?}", d.path);
         normalize(&mut f, Some(&lib));
         assert_eq!(save(&f), d.text.replace("\r\n", "\n"), "{} is not canonical", d.path);
         assert_eq!(f.circuit.ground.get_ref(), "gnd", "{}", d.path);
+    }
+}
+
+#[test]
+fn every_demo_has_an_ideal_ammeter_and_scope_on_the_led_current() {
+    for d in DEMOS {
+        let f = parse(d.text).unwrap();
+        let kinds: Vec<(&str, &str, Option<&str>)> = f
+            .instruments
+            .iter()
+            .map(|i| (i.reference(), i.kind(), i.mode()))
+            .collect();
+        assert_eq!(
+            kinds,
+            [("XMM1", "multimeter", Some("dc_a")), ("XSC1", "scope", None)],
+            "{}",
+            d.path
+        );
+        for i in &f.instruments {
+            assert_eq!(i.profile(), "ideal", "{}", d.path);
+            let probes: Vec<&str> = i.probes.iter().map(|p| p.get_ref().as_str()).collect();
+            assert_eq!(probes, ["LED current"], "{}", d.path);
+        }
     }
 }
 

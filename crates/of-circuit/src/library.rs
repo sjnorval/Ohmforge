@@ -5,11 +5,12 @@
 
 use std::collections::BTreeMap;
 
+use of_instruments::Signal;
 use of_parts::PartFile;
 use toml::Spanned;
 
-use crate::validate::{RefTarget, ref_table, split_pin};
-use crate::{CircuitError, CircuitFile};
+use crate::validate::{RefTarget, is_inline_signal, ref_table, split_pin};
+use crate::{CircuitError, CircuitFile, IDEAL_PROFILE};
 
 /// Library parts by id.
 #[derive(Debug, Clone, Default)]
@@ -162,6 +163,164 @@ pub fn check_parts(src: &str, file: &CircuitFile, lib: &PartsIndex) -> Vec<Circu
     }
     out.sort_by_key(|e| (e.line, e.column));
     out
+}
+
+/// Problems with the file's signals (RFC 0004), sorted by position: every
+/// `[[probe]] signal` and inline instrument signal must parse and resolve.
+///
+/// - `v(net)` and `v(a,b)` name declared nets (or `0` for ground);
+/// - `i(REF)` needs a two-pin part, `i(REF.PIN)`, `d(REF.PIN)` a pin of the part;
+/// - `r(REF.reading)` needs a component (reading names are the component's own and
+///   are only known once it runs);
+/// - names are case-sensitive, as the running session reads them;
+/// - a multimeter in `dc_v` reads a `v(..)`, in `dc_a` an `i(..)`; a scope reads
+///   analog signals, a logic analyser `d(..)`;
+/// - real-world profiles (`parts/instruments/`) arrive in E5f, so only
+///   `"ideal"` resolves today.
+///
+/// Parts missing from `lib` are reported by [`check_parts`], not here.
+pub fn check_signals(src: &str, file: &CircuitFile, lib: &PartsIndex) -> Vec<CircuitError> {
+    let mut out = Vec::new();
+    let mut err = |span: std::ops::Range<usize>, msg: String| out.push(CircuitError::at(src, span, msg));
+    let mut signals = BTreeMap::new();
+    for p in &file.probes {
+        match resolve(file, lib, p.signal()) {
+            Ok(sig) => {
+                signals.insert(p.name(), sig);
+            }
+            Err(e) => err(p.signal.span(), format!("probe '{}': {e}", p.name())),
+        }
+    }
+    for i in &file.instruments {
+        let r = i.reference();
+        if i.profile() != IDEAL_PROFILE
+            && let Some(p) = &i.profile
+        {
+            err(
+                p.span(),
+                format!(
+                    "{r}: unknown instrument profile '{}' (only \"{IDEAL_PROFILE}\" until the real-world profiles of E5f)",
+                    p.get_ref()
+                ),
+            );
+        }
+        for p in &i.probes {
+            let text = p.get_ref();
+            let sig = if is_inline_signal(text) {
+                match resolve(file, lib, text) {
+                    Ok(sig) => sig,
+                    Err(e) => {
+                        err(p.span(), format!("{r}: {e}"));
+                        continue;
+                    }
+                }
+            } else {
+                match signals.get(text.as_str()) {
+                    Some(sig) => sig.clone(),
+                    None => continue, // unknown names and bad probes are reported elsewhere
+                }
+            };
+            if let Some(problem) = kind_mismatch(i.kind(), i.mode(), &sig) {
+                err(p.span(), format!("{r}: {problem}"));
+            }
+        }
+    }
+    out.sort_by_key(|e| (e.line, e.column));
+    out
+}
+
+/// Why `sig` does not suit an instrument of `kind` (and `mode`), if it does not.
+fn kind_mismatch(kind: &str, mode: Option<&str>, sig: &Signal) -> Option<String> {
+    let volts = matches!(sig, Signal::NetVolts(_) | Signal::DiffVolts(..));
+    let amps = matches!(sig, Signal::PinCurrent { .. });
+    let digital = matches!(sig, Signal::Digital { .. });
+    match (kind, mode) {
+        ("multimeter", Some("dc_v")) if !volts => Some(format!("a dc_v multimeter reads v(..), not {sig}")),
+        ("multimeter", Some("dc_a")) if !amps => Some(format!("a dc_a multimeter reads i(..), not {sig}")),
+        ("scope", _) if digital => Some(format!("a scope channel is analog; {sig} belongs on a logic analyser")),
+        ("logic", _) if !digital => Some(format!("a logic analyser reads d(..), not {sig}")),
+        _ => None,
+    }
+}
+
+/// Parse `text` and check that every name in it exists in `file` (and `lib`).
+fn resolve(file: &CircuitFile, lib: &PartsIndex, text: &str) -> Result<Signal, String> {
+    let sig: Signal = text
+        .parse()
+        .map_err(|e: of_instruments::ParseSignalError| e.to_string())?;
+    match &sig {
+        Signal::NetVolts(n) => net(file, n)?,
+        Signal::DiffVolts(a, b) => {
+            net(file, a)?;
+            net(file, b)?;
+        }
+        Signal::PinCurrent { refdes, pin: None } => {
+            if let Some(part) = component_part(file, lib, refdes)?
+                && part.pins.len() != 2
+            {
+                return Err(format!(
+                    "i({refdes}) needs a two-pin part; '{}' has {} pins (name one: i({refdes}.PIN))",
+                    part.part.id,
+                    part.pins.len()
+                ));
+            }
+        }
+        Signal::PinCurrent { refdes, pin: Some(pin) } | Signal::Digital { refdes, pin } => {
+            if let Some(part) = component_part(file, lib, refdes)? {
+                match pin_named(part, pin) {
+                    Some(p) if p == pin => {}
+                    Some(p) => {
+                        return Err(format!(
+                            "pin '{pin}' of {refdes} is written '{p}' (names are case-sensitive)"
+                        ));
+                    }
+                    None => {
+                        return Err(format!(
+                            "part '{}' of {refdes} has no pin '{pin}' (pins: {})",
+                            part.part.id,
+                            pin_list(part)
+                        ));
+                    }
+                }
+            }
+        }
+        Signal::Reading { refdes, .. } => {
+            component_part(file, lib, refdes)?;
+        }
+    }
+    Ok(sig)
+}
+
+/// `Ok` when `name` is a declared net (or `0`, the solver's ground).
+fn net(file: &CircuitFile, name: &str) -> Result<(), String> {
+    if name == "0" || file.nets.iter().any(|n| n.name() == name) {
+        return Ok(());
+    }
+    match file.nets.iter().find(|n| n.name().eq_ignore_ascii_case(name)) {
+        Some(n) => Err(format!(
+            "net '{name}' is written '{}' (names are case-sensitive)",
+            n.name()
+        )),
+        None => Err(format!("no net '{name}'")),
+    }
+}
+
+/// The library part of component `refdes` (`None` when the part is not in `lib`).
+fn component_part<'a>(file: &CircuitFile, lib: &'a PartsIndex, refdes: &str) -> Result<Option<&'a PartFile>, String> {
+    if let Some(c) = file.components.iter().find(|c| c.reference() == refdes) {
+        return Ok(lib.get(c.part_id()));
+    }
+    if let Some(c) = file
+        .components
+        .iter()
+        .find(|c| c.reference().eq_ignore_ascii_case(refdes))
+    {
+        return Err(format!(
+            "component '{refdes}' is written '{}' (names are case-sensitive)",
+            c.reference()
+        ));
+    }
+    Err(format!("no component '{refdes}'"))
 }
 
 /// Write back the canonical case: refs in net pins as declared, pin names as

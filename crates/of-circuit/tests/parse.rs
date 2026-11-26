@@ -92,6 +92,6 @@ fn parses_firmware_schematic_symbols_keepouts_and_probes() {
     assert!(rv1.schematic.as_ref().unwrap().pins[2].stub);
     assert_eq!(f.symbols[0].kind.get_ref(), "ground");
     assert_eq!(f.schematic.keepouts[0].note.as_deref(), Some("U1 label"));
-    assert_eq!(f.probes[0].signal, "i(R1)");
+    assert_eq!(f.probes[0].signal(), "i(R1)");
     assert_eq!(f.nets[0].waypoints, vec![[40.0, 10.5]]);
 }
