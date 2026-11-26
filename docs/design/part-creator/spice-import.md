@@ -2,7 +2,7 @@
 
 Status: proposed (design only). Grounded in `crates/of-netlist/src/spice.rs`, `crates/of-netlist/src/expr.rs`, and `of_components::analog` (`to_spice` and `kind = "subckt"`).
 Date: 2026-11-26.
-Parent: [`../part-creator.md`](../part-creator.md). Related: [`../../model-and-waveform-interop.md`](../../model-and-waveform-interop.md) §3.2.
+Parent: [`../part-creator.md`](../part-creator.md). Related: [`../model-and-waveform-interop.md`](../model-and-waveform-interop.md) §3.2.
 
 The importer turns a public, unencrypted SPICE library into a `part.toml` binding (`kind = "subckt"`, `file`, `subckt`, `[analog].pins` in port order) plus a licence record. It uses the same parser the simulator uses. If Ohmforge cannot parse the file, it must say so and must not pretend the official solver will run it.
 
