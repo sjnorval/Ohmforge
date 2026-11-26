@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use of_circuit::fs::{FsResolver, find_circuit_files, load_parts, read_text};
-use of_circuit::library::{PartsIndex, check_firmware, check_parts, check_signals, normalize, update_hashes};
+use of_circuit::library::{
+    PartsIndex, check_firmware, check_parts, check_signals, normalize, rail_warnings, update_hashes,
+};
 use of_circuit::{CircuitError, diagnostics, parse_unchecked, save};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +123,10 @@ fn check_file(path: &Path, lib: &PartsIndex) -> bool {
     errors.sort_by_key(|e| (e.line, e.column));
     let ok = report(path, errors);
     if ok {
+        // Warnings do not fail the check.
+        for w in rail_warnings(&file, lib) {
+            eprintln!("warning: {}: {w}", path.display());
+        }
         println!("ok  {}", path.display());
     }
     ok

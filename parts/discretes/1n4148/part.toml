@@ -1,0 +1,48 @@
+# 1N4148 small-signal switching diode. Figures from onsemi "Small Signal
+# Diode 1N914/A/B, 1N916/A/B, 1N4148, 1N4448", publication 1N914/D,
+# Rev. 6 (September 2024): Absolute Maximum Ratings (VRRM 100 V, IO 200 mA,
+# IF 300 mA) and Electrical Characteristics (VF 1.0 V max at 10 mA, IR
+# 25 nA max at 20 V, CT 4.0 pF max at 0 V, trr 4.0 ns max). The diode
+# parameters are Ohmforge's own values, fitted to the typical forward
+# curve (Figure 4: about 0.61 V at 1 mA and 0.72 V at 10 mA), not a vendor
+# model.
+[part]
+id = "onsemi.1n4148"
+name = "1N4148 small-signal diode"
+category = "discrete/diode"
+datasheet = "https://www.onsemi.com/download/data-sheet/pdf/1n914-d.pdf"
+model = "rust:diode"
+verification = "datasheet"
+
+[[pin]]
+number = "1"
+name = "K"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "A"
+kind = "passive"
+
+[electrical]
+vrrm = { max = 100.0, unit = "V", note = "1N914/D, Absolute Maximum Ratings" }
+io = { max = 0.2, unit = "A", note = "average rectified forward current" }
+if_max = { max = 0.3, unit = "A", note = "DC forward current" }
+vf = { max = 1.0, unit = "V", note = "at IF = 10 mA" }
+ir = { max = 25e-9, unit = "A", note = "at VR = 20 V" }
+ct = { max = 4e-12, unit = "F", note = "at VR = 0 V, 1 MHz" }
+trr = { max = 4e-9, unit = "s", note = "IF = 10 mA, VR = 6 V, Irr = 1 mA, RL = 100 ohm" }
+
+[analog]
+kind = "diode"
+pins = ["A", "K"]
+params = { is = 4e-9, n = 1.9, rs = 0.5, cjo = 4e-12, m = 0.33, vj = 0.6, tt = 3e-9, bv = 100.0, ibv = 5e-6 }
+
+[[variant]]
+label = "DO-35"
+mpn = "1N4148"
+manufacturer = "onsemi"
+footprint = "Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal"
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

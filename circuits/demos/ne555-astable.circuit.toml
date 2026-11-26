@@ -1,0 +1,210 @@
+format = 1
+
+[circuit]
+name = "555 astable LED flasher"
+ground = "gnd"
+description = "An NE555 astable (TI SLFS022K 6.3.2) flashes a red LED at about 6.7 Hz: R1 1 kohm, R2 10 kohm, C1 10 uF, 10 nF on CONT, 5 V bench supply (NE555 range 4.5 to 16 V). The run starts cold ([sim] uic): every net at 0 V and the supply applied at t = 0, since an astable has no DC operating point. Scope on the timing capacitor (VCC/3 to 2VCC/3) and the output; meter on the LED current."
+
+[sim]
+max_step = 1e-4
+uic = true
+
+[[component]]
+ref = "U1"
+part = "ti.ne555"
+at = [248, 56]
+
+[component.schematic]
+body = [0, 0, 104, 160]
+pins = [
+  { pin = "VCC", at = [24, 0], dir = "N" },
+  { pin = "RESET", at = [72, 0], dir = "N" },
+  { pin = "DISCH", at = [0, 40], dir = "W" },
+  { pin = "THRES", at = [0, 96], dir = "W" },
+  { pin = "TRIG", at = [0, 124], dir = "W" },
+  { pin = "OUT", at = [104, 48], dir = "E" },
+  { pin = "GND", at = [24, 160], dir = "S" },
+  { pin = "CONT", at = [72, 160], dir = "S" },
+]
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+at = [156, 24]
+params = { resistance = 1000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "R2"
+part = "generic.resistor"
+at = [156, 104]
+params = { resistance = 10000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "C1"
+part = "generic.capacitor-mlcc"
+at = [156, 200]
+params = { capacitance = 1e-5 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "C2"
+part = "generic.capacitor-mlcc"
+at = [308, 224]
+params = { capacitance = 1e-8 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "R3"
+part = "generic.resistor"
+at = [392, 92]
+params = { resistance = 220 }
+
+[component.schematic]
+body = [0, 0, 48, 24]
+pins = [
+  { pin = "1", at = [0, 12], dir = "W" },
+  { pin = "2", at = [48, 12], dir = "E" },
+]
+
+[[component]]
+ref = "D1"
+part = "generic.led-red-0603"
+at = [476, 136]
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "A", at = [12, 0], dir = "N" },
+  { pin = "K", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+at = [16, 120]
+params = { current_limit = 0.1, on = true, series_r = 0.1, volts = 5 }
+
+[component.schematic]
+body = [0, 0, 78, 52]
+pins = [
+  { pin = "+", id = "plus", at = [78, 14], dir = "E" },
+  { pin = "-", id = "minus", name = "−", at = [78, 42], dir = "E" },
+]
+
+[[symbol]]
+ref = "GND"
+kind = "ground"
+id = "gnd_sym"
+at = [217, 292]
+body = [0, 0, 22, 10]
+pins = [
+  { pin = "1", id = "pin", at = [11, 0], dir = "N" },
+]
+
+[[net]]
+name = "vcc"
+label = "VCC"
+kind = "power"
+pins = ["PSU.+", "U1.VCC", "U1.RESET", "R1.1"]
+
+[[net]]
+name = "gnd"
+label = "GND"
+kind = "ground"
+pins = ["PSU.-", "U1.GND", "C1.2", "C2.2", "D1.K", "GND.1"]
+
+[[net]]
+name = "dis"
+label = "DISCH"
+kind = "signal"
+pins = ["R1.2", "R2.1", "U1.DISCH"]
+
+[[net]]
+name = "cap"
+label = "C1"
+kind = "signal"
+pins = ["R2.2", "C1.1", "U1.THRES", "U1.TRIG"]
+
+[[net]]
+name = "cont"
+label = "CONT"
+kind = "signal"
+pins = ["U1.CONT", "C2.1"]
+
+[[net]]
+name = "out"
+label = "OUT"
+kind = "signal"
+pins = ["U1.OUT", "R3.1"]
+
+[[net]]
+name = "led_a"
+label = "LED anode"
+kind = "signal"
+pins = ["R3.2", "D1.A"]
+
+[schematic]
+keepouts = [
+  { rect = [133, 34, 150, 46], note = "R1" },
+  { rect = [118, 50, 150, 62], note = "1 kΩ" },
+  { rect = [133, 114, 150, 126], note = "R2" },
+  { rect = [110, 130, 150, 142], note = "10 kΩ" },
+  { rect = [133, 198, 150, 210], note = "C1" },
+  { rect = [110, 214, 150, 226], note = "10 µF" },
+  { rect = [338, 222, 355, 234], note = "C2" },
+  { rect = [338, 238, 378, 250], note = "10 nF" },
+  { rect = [407, 62, 424, 74], note = "R3" },
+  { rect = [396, 76, 436, 88], note = "220 Ω" },
+  { rect = [506, 134, 523, 146], note = "D1" },
+  { rect = [506, 150, 561, 162], note = "Red LED" },
+  { rect = [217, 312, 239, 324], note = "GND" },
+]
+
+[[probe]]
+name = "Timing capacitor"
+signal = "v(cap)"
+
+[[probe]]
+name = "Output"
+signal = "v(out)"
+
+[[probe]]
+name = "LED current"
+signal = "i(R3)"
+
+[[instrument]]
+ref = "XSC1"
+kind = "scope"
+probes = ["Timing capacitor", "Output"]
+
+[[instrument]]
+ref = "XMM1"
+kind = "multimeter"
+mode = "dc_a"
+probes = ["LED current"]

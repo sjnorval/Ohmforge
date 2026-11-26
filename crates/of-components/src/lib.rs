@@ -20,15 +20,25 @@ pub const LIBRARY_MODELS: &[&str] = &[
     "rust:resistor",
     "rust:capacitor",
     "rust:led",
+    "rust:diode",
     "rust:bjt",
     "rust:potentiometer",
     "rust:switch",
 ];
 
-/// Register the built-in models: every [`LIBRARY_MODELS`] entry as a
-/// [`LibraryComponent`] from `lib`, and `rust:bench-psu` as a [`BenchPsu`].
+/// Register the built-in models: every [`LIBRARY_MODELS`] entry and every
+/// `spice:<file>` model a `subckt` part in `lib` names (the bridge flattens
+/// its SPICE library) as a [`LibraryComponent`] from `lib`, and
+/// `rust:bench-psu` as a [`BenchPsu`].
 pub fn register_builtin(reg: &mut Registry, lib: Arc<Library>, corner: Corner, env: Env) {
-    for &model in LIBRARY_MODELS {
+    let spice: std::collections::BTreeSet<String> = lib
+        .ids()
+        .filter_map(|id| lib.get(id))
+        .map(|p| p.part.part.model.clone())
+        .filter(|m| m.starts_with("spice:"))
+        .collect();
+    let models: Vec<String> = LIBRARY_MODELS.iter().map(|m| (*m).to_owned()).chain(spice).collect();
+    for model in &models {
         let lib = Arc::clone(&lib);
         reg.register(
             model,
@@ -61,6 +71,9 @@ pub fn register_builtin(reg: &mut Registry, lib: Arc<Library>, corner: Corner, e
             }
             if let Some(&v) = p.get("on") {
                 s.on = v != 0.0;
+            }
+            if let (Some(&lo), Some(&hi)) = (p.get("rated_min"), p.get("rated_max")) {
+                s.rated = Some((lo, hi));
             }
             Ok(Box::new(BenchPsu::new(spec.refdes, s)) as Box<dyn Component>)
         }),

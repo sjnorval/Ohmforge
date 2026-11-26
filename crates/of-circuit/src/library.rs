@@ -492,3 +492,95 @@ pub fn update_hashes(src: &str, file: &mut CircuitFile, res: &dyn Resolver) -> R
     }
     Ok(changed)
 }
+
+/// A part on a supply rail that states its supply range (`[electrical]`
+/// `vdd` or `vcc`, `min` and `max`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RailPart {
+    /// Reference designator, for example `U1`.
+    pub reference: String,
+    /// Part id, for example `ti.ne555`.
+    pub part: String,
+    /// Lowest supply (V).
+    pub min: f64,
+    /// Highest supply (V).
+    pub max: f64,
+}
+
+/// The parts on net `rail` (other than `skip`, the supply itself) that
+/// state a supply range, in pin order.
+pub fn rail_parts(file: &CircuitFile, rail: &str, skip: &str, lib: &PartsIndex) -> Vec<RailPart> {
+    let mut out = Vec::new();
+    let Some(net) = file.nets.iter().find(|n| n.name() == rail) else {
+        return out;
+    };
+    for p in &net.pins {
+        let Some((r, _)) = split_pin(p.get_ref()) else {
+            continue;
+        };
+        if r.eq_ignore_ascii_case(skip) || out.iter().any(|x: &RailPart| x.reference.eq_ignore_ascii_case(r)) {
+            continue;
+        }
+        let Some(c) = file.components.iter().find(|c| c.reference().eq_ignore_ascii_case(r)) else {
+            continue;
+        };
+        let Some(part) = lib.get(c.part_id()) else {
+            continue;
+        };
+        for key in ["vdd", "vcc"] {
+            let Some(t) = part.electrical.get(key).and_then(|v| v.as_table()) else {
+                continue;
+            };
+            let num = |k: &str| {
+                t.get(k)
+                    .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            };
+            if let (Some(min), Some(max)) = (num("min"), num("max")) {
+                out.push(RailPart {
+                    reference: c.reference().to_owned(),
+                    part: c.part_id().to_owned(),
+                    min,
+                    max,
+                });
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Warnings for bench supplies whose + rail carries parts with no common
+/// supply range, naming them, for example `PSU: parts on this rail have no
+/// common supply range (U1 espressif.esp32-c3 3.0–3.6 V, U2 ti.ne555
+/// 4.5–16.0 V)`.
+pub fn rail_warnings(file: &CircuitFile, lib: &PartsIndex) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in &file.components {
+        if lib.get(c.part_id()).is_none_or(|p| p.part.model != "rust:bench-psu") {
+            continue;
+        }
+        let plus = format!("{}.+", c.reference());
+        let Some(rail) = file
+            .nets
+            .iter()
+            .find(|n| n.pins.iter().any(|p| p.get_ref().eq_ignore_ascii_case(&plus)))
+        else {
+            continue;
+        };
+        let on_rail = rail_parts(file, rail.name(), c.reference(), lib);
+        let lo = on_rail.iter().map(|p| p.min).fold(f64::MIN, f64::max);
+        let hi = on_rail.iter().map(|p| p.max).fold(f64::MAX, f64::min);
+        if on_rail.len() > 1 && lo > hi {
+            let list: Vec<String> = on_rail
+                .iter()
+                .map(|p| format!("{} {} {:?}–{:?} V", p.reference, p.part, p.min, p.max))
+                .collect();
+            out.push(format!(
+                "{}: parts on this rail have no common supply range ({})",
+                c.reference(),
+                list.join(", ")
+            ));
+        }
+    }
+    out
+}

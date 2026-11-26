@@ -155,6 +155,24 @@ impl Device for Switch {
         };
         cx.conductance(&self.s, g);
     }
+    fn state_crossing(&self, x: &[f64], x_new: &[f64], states: &crate::integrate::States) -> Option<(f64, f64)> {
+        let was = *states.prev.get(self.state)? > 0.5;
+        let is = *states.now.get(self.state)? > 0.5;
+        if was == is {
+            return None;
+        }
+        let control = |x: &[f64]| match self.control {
+            SwitchControl::Voltage { cp, cn } => x[cp] - x[cn],
+            SwitchControl::Current { .. } => x[self.ctrl_branch],
+        };
+        let m = &self.model;
+        let level = if is {
+            m.threshold + m.hysteresis
+        } else {
+            m.threshold - m.hysteresis
+        };
+        Some((control(x) - level, control(x_new) - level))
+    }
 }
 
 #[cfg(test)]

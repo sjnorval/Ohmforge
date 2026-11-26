@@ -68,6 +68,7 @@ fn engine_led_resistor_psu_matches_bridge() {
             volts: 3.3,
             series_r: 0.1,
             current_limit: 0.5,
+            rated: None,
         },
     );
     eng.add(

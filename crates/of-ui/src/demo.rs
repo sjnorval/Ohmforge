@@ -324,13 +324,7 @@ impl OhmforgeDemo {
                 ComboBox::from_id_salt("demo_kind")
                     .selected_text(kind.label())
                     .show_ui(ui, |ui| {
-                        for k in [
-                            DemoKind::Blink,
-                            DemoKind::Dimmer,
-                            DemoKind::Fade,
-                            DemoKind::ButtonPoll,
-                            DemoKind::ButtonIrq,
-                        ] {
+                        for k in crate::kind::PICKER {
                             ui.selectable_value(&mut kind, k, k.label());
                         }
                     });
@@ -582,6 +576,18 @@ fn schematic(
         DemoKind::ButtonPoll | DemoKind::ButtonIrq => {
             button::show_schematic(ui, &board, current, glow, snap.button, snap.supply_status, meters)
         }
+        // The 555 painter draws whatever the file lays out (no fixed ids).
+        DemoKind::Ne555Astable | DemoKind::Ne555Monostable | DemoKind::Ne555Pwm | DemoKind::Clock555 => {
+            match crate::session_sim::parsed(kind) {
+                Ok(file) => {
+                    crate::ne555::show(ui, file, &board, current, glow, snap.button, snap.supply_status, meters)
+                }
+                Err(e) => {
+                    ui.label(format!("{}: {e}", kind.label()));
+                    SchematicHit::default()
+                }
+            }
+        }
     }
 }
 
@@ -727,6 +733,10 @@ fn scope_panel(
     held_scope: &mut Option<HeldScope>,
     session: &LiveSession,
 ) {
+    if kind.file_bench() {
+        file_instruments_panel(ui, snap, time_div, session);
+        return;
+    }
     panel().show(ui, |ui| {
         let title = if matches!(kind, DemoKind::Dimmer | DemoKind::Fade) {
             "LED current (averaged)"
@@ -774,6 +784,47 @@ fn scope_panel(
         );
         if zoom != 0 {
             apply_time_div(session, time_div, trace::step_time_div(*time_div, zoom));
+        }
+    });
+}
+
+/// The circuit file's own scopes and multimeters (`[[instrument]]`), for
+/// the demos without an ESP32-C3: one plot per scope probe, scaled to its
+/// samples, and each meter's reading.
+fn file_instruments_panel(ui: &mut Ui, snap: &Snapshot, time_div: &mut f64, session: &LiveSession) {
+    panel().show(ui, |ui| {
+        let window = trace::visible_window(*time_div);
+        let start = (snap.time - window).max(0.0);
+        let end = start + window;
+        for (reference, chans) in &snap.file_scopes {
+            for (name, pts) in chans {
+                ui.label(RichText::new(format!("{reference} \u{00b7} {name}")).strong());
+                let (lo, hi) = pts
+                    .iter()
+                    .filter(|(t, _)| *t >= start)
+                    .fold((0.0f64, 1.0f64), |(a, b), &(_, v)| (a.min(v), b.max(v)));
+                let max_y = hi.ceil().max(1.0);
+                let zoom = scope(
+                    ui,
+                    ScopePlot {
+                        time: snap.time,
+                        start,
+                        end,
+                        min_y: lo.floor().min(0.0),
+                        max_y,
+                        y_step: if max_y > 4.0 { 1.0 } else { 0.5 },
+                        y_unit: "V",
+                        x_caption: "Simulation time",
+                    },
+                    pts.iter().copied(),
+                );
+                if zoom != 0 {
+                    apply_time_div(session, time_div, trace::step_time_div(*time_div, zoom));
+                }
+            }
+        }
+        for (reference, probe, text) in &snap.file_meters {
+            ui.monospace(format!("{reference} \u{00b7} {probe}: {text}"));
         }
     });
 }
