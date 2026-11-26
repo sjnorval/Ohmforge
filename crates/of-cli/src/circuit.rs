@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use of_circuit::fs::{FsResolver, find_circuit_files, load_parts, read_text};
-use of_circuit::library::{PartsIndex, check_firmware, check_parts, normalize, update_hashes};
+use of_circuit::library::{PartsIndex, check_firmware, check_parts, check_signals, normalize, update_hashes};
 use of_circuit::{CircuitError, diagnostics, parse_unchecked, save};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +116,7 @@ fn check_file(path: &Path, lib: &PartsIndex) -> bool {
     };
     let mut errors = diagnostics(&src, &file);
     errors.extend(check_parts(&src, &file, lib));
+    errors.extend(check_signals(&src, &file, lib));
     errors.extend(check_firmware(&src, &file, &FsResolver::for_file(path)));
     errors.sort_by_key(|e| (e.line, e.column));
     let ok = report(path, errors);

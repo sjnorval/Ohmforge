@@ -47,9 +47,9 @@ fn led_probe(kind: DemoKind) -> Result<Signal, String> {
     let probe = file
         .probes
         .iter()
-        .find(|p| p.name == "LED current")
+        .find(|p| p.name() == "LED current")
         .ok_or_else(|| format!("{}: no `LED current` probe", file_stem(kind)))?;
-    probe.signal.parse().map_err(|e| format!("{}: {e}", file_stem(kind)))
+    probe.signal().parse().map_err(|e| format!("{}: {e}", file_stem(kind)))
 }
 
 /// The circuit file stem of `kind` (`circuits/demos/<stem>.circuit.toml`).

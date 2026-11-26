@@ -4,7 +4,8 @@
 use std::fmt::Write as _;
 
 use crate::{
-    CircuitFile, ComponentEntry, FirmwareRef, Keepout, NetEntry, ParamValue, SchematicPin, SimSettings, SymbolEntry,
+    CircuitFile, ComponentEntry, FirmwareRef, InstrumentEntry, Keepout, NetEntry, ParamValue, SchematicPin,
+    SimSettings, SymbolEntry,
 };
 
 /// Canonical text for `file`. Comments are not kept; use `note` and
@@ -39,8 +40,11 @@ pub fn save(file: &CircuitFile) -> String {
     }
     for p in &file.probes {
         w.push_str("\n[[probe]]\n");
-        kv(&mut w, "name", &string(&p.name));
-        kv(&mut w, "signal", &string(&p.signal));
+        kv(&mut w, "name", &string(p.name()));
+        kv(&mut w, "signal", &string(p.signal()));
+    }
+    for i in &file.instruments {
+        write_instrument(&mut w, i);
     }
     w
 }
@@ -113,6 +117,31 @@ fn write_component(w: &mut String, c: &ComponentEntry) {
         }
         kv(w, "body", &coords(&sch.body));
         write_pins(w, &sch.pins);
+    }
+}
+
+fn write_instrument(w: &mut String, i: &InstrumentEntry) {
+    w.push_str("\n[[instrument]]\n");
+    kv(w, "ref", &string(i.reference()));
+    kv(w, "kind", &string(i.kind()));
+    if let Some(p) = &i.profile {
+        kv(w, "profile", &string(p.get_ref()));
+    }
+    if let Some(m) = i.mode() {
+        kv(w, "mode", &string(m));
+    }
+    let probes: Vec<String> = i.probes.iter().map(|p| string(p.get_ref())).collect();
+    kv(w, "probes", &format!("[{}]", probes.join(", ")));
+    if let Some(at) = i.at {
+        kv(w, "at", &coords(&at));
+    }
+    if !i.params.is_empty() {
+        let items: Vec<String> = i
+            .params
+            .iter()
+            .map(|(k, v)| format!("{} = {}", key(k), param(v)))
+            .collect();
+        kv(w, "params", &format!("{{ {} }}", items.join(", ")));
     }
 }
 

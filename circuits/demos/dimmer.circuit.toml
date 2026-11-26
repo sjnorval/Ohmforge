@@ -146,3 +146,14 @@ keepouts = [
 [[probe]]
 name = "LED current"
 signal = "i(R2)"
+
+[[instrument]]
+ref = "XMM1"
+kind = "multimeter"
+mode = "dc_a"
+probes = ["LED current"]
+
+[[instrument]]
+ref = "XSC1"
+kind = "scope"
+probes = ["LED current"]

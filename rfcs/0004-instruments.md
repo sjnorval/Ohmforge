@@ -143,6 +143,17 @@ Format and compatibility rules:
 - Unknown keys are errors, as elsewhere in RFC 0003.
 - Instruments are drawn in the existing schematic style. They are not part of wire routing, so the wiring goldens are unaffected.
 
+#### E5e notes
+
+Recorded when E5e landed (2026-11-26):
+
+- **Signal names are case-sensitive**, as the running `Session` reads them. `circuit check` (`of_circuit::library::check_signals`) reports a name in the wrong case with the declared spelling, for example `v(VDD)` when the net is `vdd`.
+- **Strict profiles and params.** Only `profile = "ideal"` resolves until the real-world profiles of E5f; any other id is a `circuit check` error. Only the scope has `params` so far (`time_div` a positive time, `trigger` `rise` or `fall`, `level` a number), and a param on any other kind is an error. A multimeter needs a `mode` and reads exactly one signal.
+- **`ohmforge run --log`** writes raw ideal samples on the `--step` grid, read through `Probeable`. It does not apply the multimeter's whole-PWM-period averaging; that stays a display effect of the instrument.
+- **Digital `d(..)` signals** are skipped by `--log` with a warning until the logic analyser (E5g), so the VCD holds `real` variables only for now.
+- **Parity of the log** is checked against the CLI's own solver column: on blink the `LED current` column equals `i(R1)` from `ohmforge run --out` at the same sample times within max(1 nA, 1 ppm). It is not compared with the desktop's parity-golden grid.
+- **Drawing instruments on the desktop schematic is deferred** to a later slice. The demo files carry `XMM1` and `XSC1` without `at`, and the desktop does not read the table yet.
+
 ### Real-world profiles
 
 Profiles live at `parts/instruments/<vendor>.<model>/instrument.toml` (CC-BY-SA-4.0). Every numeric field has a `source` (document, revision, table or page). The reference profiles (decision D5) are:

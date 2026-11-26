@@ -83,7 +83,8 @@ cargo check --workspace
 cargo test --workspace
 cargo run -p of-cli -- --version
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv   # SPICE netlist to CSV
-cargo run -p of-cli -- circuit check circuits/   # validate circuit files (*.circuit.toml, RFC 0003)
+cargo run -p of-cli -- circuit check circuits/   # validate circuit files (*.circuit.toml, RFC 0003), their probe and instrument signals included
+cargo run -p of-cli -- run circuits/demos/blink.circuit.toml --log led.csv   # log the file's probes and instruments (CSV, or .vcd)
 cargo run -p of-cli -- validate-parts parts/   # check every part.toml in the parts library
 cargo run -p of-cli -- bom dimmer --out bom.csv   # demo-board BOM as CSV (blink, dimmer, fade or button)
 cargo test -p of-soc-esp32c3          # blinky, timer-interrupt, XIP and button firmware on the ESP32-C3 model, LED and button co-simulated

@@ -5,6 +5,13 @@
 //! signal not already listed is sampled every `--step` until `--until`.
 //! The CSV (and VCD) writers are the SPICE path's. `i(REF)` of a resistor
 //! is computed from its pin voltages when the solver has no branch current.
+//!
+//! `--log FILE.csv|FILE.vcd` (E5e, RFC 0004) logs the file's measurements
+//! instead: every `[[probe]]` (column named after the probe) and then every
+//! inline `[[instrument]]` signal not already logged, read through the
+//! measurement service's `Probeable` view of the session (ideal profiles, so
+//! exactly what the solver has) on the same `--step` grid. VCD variables are
+//! `real`; digital `d(..)` signals come with the logic analyser (E5g).
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -18,6 +25,7 @@ use of_components::analog::{Env, Library};
 use of_components::register_builtin;
 use of_core::{SimTime, Stop};
 use of_engine::Registry;
+use of_instruments::{Probeable, Signal};
 use of_soc_esp32c3::Esp32c3Engine;
 
 /// The pinned ESP32-C3 ROM release (`scripts/fetch-esp-rom-elfs.sh`).
@@ -37,6 +45,7 @@ pub struct Args {
     pub step: f64,
     pub out: Option<PathBuf>,
     pub vcd: Option<PathBuf>,
+    pub log: Option<PathBuf>,
     pub uart: bool,
     pub parts: PathBuf,
 }
@@ -72,6 +81,7 @@ pub fn parse_args(file: PathBuf, rest: &[String]) -> Result<Args, String> {
         step: 10e-6,
         out: None,
         vcd: None,
+        log: None,
         uart: false,
         parts: PathBuf::from("parts"),
     };
@@ -83,6 +93,11 @@ pub fn parse_args(file: PathBuf, rest: &[String]) -> Result<Args, String> {
             "--step" => a.step = parse_time(&value("a time")?)?,
             "--out" | "-o" => a.out = Some(value("a file name")?.into()),
             "--vcd" => a.vcd = Some(value("a file name")?.into()),
+            "--log" => {
+                let path = PathBuf::from(value("a .csv or .vcd file name")?);
+                log_format(&path)?;
+                a.log = Some(path);
+            }
             "--parts" => a.parts = value("a directory")?.into(),
             "--uart" => a.uart = true,
             s if s.starts_with('-') => return Err(format!("unknown option '{s}'")),
@@ -117,11 +132,65 @@ fn signals(file: &of_circuit::CircuitFile) -> Vec<String> {
         .map(|n| format!("v({})", n.name()))
         .collect();
     for p in &file.probes {
-        if !out.iter().any(|s| s.eq_ignore_ascii_case(&p.signal)) {
-            out.push(p.signal.clone());
+        if !out.iter().any(|s| s.eq_ignore_ascii_case(p.signal())) {
+            out.push(p.signal().to_owned());
         }
     }
     out
+}
+
+/// How `--log` writes a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogFormat {
+    Csv,
+    Vcd,
+}
+
+fn log_format(path: &Path) -> Result<LogFormat, String> {
+    match path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("csv") => Ok(LogFormat::Csv),
+        Some("vcd") => Ok(LogFormat::Vcd),
+        _ => Err(format!("--log '{}' needs a .csv or .vcd file name", path.display())),
+    }
+}
+
+/// Logged columns: probes by name in file order, then inline instrument
+/// signals not already logged. Digital signals are skipped with a warning.
+fn logged(file: &of_circuit::CircuitFile) -> Result<Vec<(String, Signal)>, String> {
+    let mut out: Vec<(String, Signal)> = Vec::new();
+    let parse = |text: &str, what: &str| -> Result<Signal, String> {
+        text.parse()
+            .map_err(|e| format!("{what}: {e} (run `ohmforge circuit check`)"))
+    };
+    for p in &file.probes {
+        out.push((
+            p.name().to_owned(),
+            parse(p.signal(), &format!("probe '{}'", p.name()))?,
+        ));
+    }
+    for i in &file.instruments {
+        for p in i.probes.iter().map(|p| p.get_ref()) {
+            if file.probe(p).is_some() {
+                continue;
+            }
+            let sig = parse(p, i.reference())?;
+            if !out.iter().any(|(_, s)| *s == sig) {
+                out.push((sig.to_string(), sig));
+            }
+        }
+    }
+    out.retain(|(name, s)| {
+        let digital = matches!(s, Signal::Digital { .. });
+        if digital {
+            eprintln!("warning: '{name}' ({s}) is digital; the logic analyser logs it (E5g), --log skips it");
+        }
+        !digital
+    });
+    Ok(out)
 }
 
 /// `i(REF)` of a two-pin resistor, from pin 1 to pin 2.
@@ -189,6 +258,13 @@ pub fn run(a: &Args) -> Result<(), String> {
     let mut b = build(&src, &file, &parts, &reg, &res).map_err(|e| e.with_path(&a.file).to_string())?;
 
     let names = signals(&b.file);
+    let log = match &a.log {
+        Some(p) => Some((p.clone(), log_format(p)?, logged(&b.file)?)),
+        None => None,
+    };
+    let log_len = log.as_ref().map_or(0, |(_, _, l)| l.len());
+    let mut log_columns = vec![Vec::new(); log_len];
+    let mut log_missing = vec![false; log_len];
     let mut x = Vec::new();
     let mut columns = vec![Vec::new(); names.len()];
     let mut missing = vec![false; names.len()];
@@ -207,6 +283,16 @@ pub fn run(a: &Args) -> Result<(), String> {
             }
             columns[i].push(v.unwrap_or(f64::NAN));
         }
+        for (i, (name, sig)) in log.iter().flat_map(|(_, _, l)| l).enumerate() {
+            let v = b.session.sample(sig);
+            if let Err(e) = &v
+                && !log_missing[i]
+            {
+                eprintln!("warning: '{name}': {e}");
+                log_missing[i] = true;
+            }
+            log_columns[i].push(v.unwrap_or(f64::NAN));
+        }
     }
     eprintln!(
         "{}: {} samples to {:.6} s",
@@ -222,6 +308,14 @@ pub fn run(a: &Args) -> Result<(), String> {
     }
     if let Some(p) = &a.vcd {
         write(p, |w| waves.write_vcd(w))?;
+    }
+    if let Some((path, format, l)) = log {
+        let names = l.into_iter().map(|(n, _)| n).collect();
+        let logged = Waveforms::from_columns("time", waves.x.clone(), names, log_columns);
+        match format {
+            LogFormat::Csv => write(&path, |w| logged.write_csv(w))?,
+            LogFormat::Vcd => write(&path, |w| logged.write_vcd(w))?,
+        }
     }
     if a.uart {
         let mcus: Vec<String> = b

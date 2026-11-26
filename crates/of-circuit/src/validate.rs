@@ -5,7 +5,10 @@ use std::ops::Range;
 
 use toml::Spanned;
 
-use crate::{CircuitError, CircuitFile, NetKind, SYMBOL_KINDS, SchematicPin};
+use crate::{
+    CircuitError, CircuitFile, IDEAL_PROFILE, INSTRUMENT_KINDS, InstrumentEntry, MULTIMETER_MODES, NetKind, ParamValue,
+    SCOPE_PARAMS, SCOPE_TRIGGERS, SYMBOL_KINDS, SchematicPin,
+};
 
 /// What a ref names.
 #[derive(Clone, Copy)]
@@ -64,6 +67,28 @@ fn valid_ref(r: &str) -> bool {
     !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// A profile id: `ideal` or `<vendor>.<model>`, each half letters, digits, `_` or `-`.
+fn valid_profile(p: &str) -> bool {
+    p == IDEAL_PROFILE || p.split_once('.').is_some_and(|(v, m)| valid_ref(v) && valid_ref(m))
+}
+
+/// Seconds in a time such as `1ms`, `250us`, `10ns`, `2s` or `1e-3`; `None`
+/// unless it is a positive finite time.
+pub(crate) fn parse_time(s: &str) -> Option<f64> {
+    let t = s.trim();
+    let (num, scale) = [("ns", 1e-9), ("us", 1e-6), ("\u{b5}s", 1e-6), ("ms", 1e-3), ("s", 1.0)]
+        .iter()
+        .find_map(|(suffix, k)| t.strip_suffix(suffix).map(|n| (n, *k)))
+        .unwrap_or((t, 1.0));
+    let v: f64 = num.trim().parse().ok()?;
+    (v.is_finite() && v > 0.0).then_some(v * scale)
+}
+
+/// True when an instrument probe entry is an inline signal rather than a probe name.
+pub(crate) fn is_inline_signal(s: &str) -> bool {
+    s.contains('(')
+}
+
 fn valid_sha(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
@@ -101,7 +126,14 @@ impl Sink<'_> {
 /// and it alone has `kind = "ground"`; every routed schematic pin is on a net and
 /// drawn once; slide parameters are numeric when set; known symbol kinds;
 /// firmware paths are relative with `/` separators and hashes are 64 lower-case
-/// hex characters; partitions come with their hash; positive `[sim]` steps.
+/// hex characters; partitions come with their hash; positive `[sim]` steps;
+/// unique, non-empty probe names; instruments (RFC 0004) with a unique ref, a
+/// known kind, a mode only on (and always on) a multimeter, a profile id of the
+/// right shape, probes that name a `[[probe]]` or are inline signals (a
+/// multimeter takes exactly one) and known, well-typed `params`.
+///
+/// Signal grammar and resolution need the parts library:
+/// `library::check_signals` (feature `engine`).
 pub fn diagnostics(src: &str, file: &CircuitFile) -> Vec<CircuitError> {
     let mut s = Sink { src, out: Vec::new() };
 
@@ -124,7 +156,8 @@ pub fn diagnostics(src: &str, file: &CircuitFile) -> Vec<CircuitError> {
         .components
         .iter()
         .map(|c| &c.reference)
-        .chain(file.symbols.iter().map(|y| &y.reference));
+        .chain(file.symbols.iter().map(|y| &y.reference))
+        .chain(file.instruments.iter().map(|i| &i.reference));
     for r in all_refs {
         let name = r.get_ref();
         if !valid_ref(name) {
@@ -301,9 +334,100 @@ pub fn diagnostics(src: &str, file: &CircuitFile) -> Vec<CircuitError> {
         }
     }
 
+    // Probes and instruments.
+    let mut probe_names = BTreeSet::new();
+    for p in &file.probes {
+        let name = p.name();
+        if name.trim().is_empty() {
+            s.err(p.name.span(), "probe name is empty");
+        } else if !probe_names.insert(name) {
+            s.err(p.name.span(), format!("duplicate probe name '{name}'"));
+        }
+    }
+    for i in &file.instruments {
+        check_instrument(&mut s, i, &probe_names);
+    }
+
     let mut out = s.out;
     out.sort_by_key(|e| (e.line, e.column));
     out
+}
+
+fn check_instrument(s: &mut Sink<'_>, i: &InstrumentEntry, probe_names: &BTreeSet<&str>) {
+    let r = i.reference();
+    let kind = i.kind();
+    if !INSTRUMENT_KINDS.contains(&kind) {
+        s.err(
+            i.kind.span(),
+            format!(
+                "{r}: unknown instrument kind '{kind}' (expected {})",
+                INSTRUMENT_KINDS.join(", ")
+            ),
+        );
+    }
+    match (&i.mode, kind == "multimeter") {
+        (None, true) => s.err(
+            i.kind.span(),
+            format!("{r}: a multimeter needs a mode ({})", MULTIMETER_MODES.join(", ")),
+        ),
+        (Some(m), true) if !MULTIMETER_MODES.contains(&m.get_ref().as_str()) => s.err(
+            m.span(),
+            format!(
+                "{r}: unknown multimeter mode '{}' (expected {})",
+                m.get_ref(),
+                MULTIMETER_MODES.join(", ")
+            ),
+        ),
+        (Some(m), false) => s.err(m.span(), format!("{r}: only a multimeter has a mode")),
+        _ => {}
+    }
+    if let Some(p) = &i.profile
+        && !valid_profile(p.get_ref())
+    {
+        s.err(
+            p.span(),
+            format!(
+                "{r}: profile '{}' must be \"{IDEAL_PROFILE}\" or <vendor>.<model>",
+                p.get_ref()
+            ),
+        );
+    }
+    if i.probes.is_empty() {
+        s.err(i.reference.span(), format!("{r}: probes is empty"));
+    }
+    if kind == "multimeter" && i.probes.len() > 1 {
+        s.err(
+            i.probes[1].span(),
+            format!("{r}: a multimeter reads one signal (use v(a,b) for a voltage between two nets)"),
+        );
+    }
+    for p in &i.probes {
+        let text = p.get_ref();
+        if !is_inline_signal(text) && !probe_names.contains(text.as_str()) {
+            s.err(
+                p.span(),
+                format!("{r}: no [[probe]] named '{text}' (inline signals look like v(net) or i(R1))"),
+            );
+        }
+    }
+    for (k, v) in &i.params {
+        let problem = match (kind, k.as_str(), v) {
+            ("scope", "time_div", ParamValue::Text(t)) if parse_time(t).is_some() => None,
+            ("scope", "time_div", _) => Some("time_div must be a time such as \"1ms\"".to_owned()),
+            ("scope", "trigger", ParamValue::Text(t)) if SCOPE_TRIGGERS.contains(&t.as_str()) => None,
+            ("scope", "trigger", _) => Some(format!("trigger must be one of {}", SCOPE_TRIGGERS.join(", "))),
+            ("scope", "level", ParamValue::Number(x)) if x.is_finite() => None,
+            ("scope", "level", _) => Some("level must be a number (volts or amps of the first channel)".into()),
+            ("scope", other, _) => Some(format!(
+                "unknown scope param '{other}' (expected {})",
+                SCOPE_PARAMS.join(", ")
+            )),
+            (_, other, _) => Some(format!("unknown {kind} param '{other}'")),
+        };
+        if let Some(problem) = problem {
+            s.err(i.reference.span(), format!("{r}: {problem}"));
+        }
+    }
 }
 
 /// The first structural problem, if any.
