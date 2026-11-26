@@ -2,7 +2,7 @@
 
 Status: proposed (design only, no code). The roadmap already has P3 “KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export” and an item to explore Gerber, drill, BOM and pick-and-place via that export.
 Date: 2026-11-25.
-Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §9 and §11; [`wire-routing.md`](wire-routing.md); [`engine-components.md`](engine-components.md) E6; [`parts-availability.md`](parts-availability.md); [`interconnects.md`](interconnects.md) (copper weight in the PCB export); [`part-creator.md`](part-creator.md) (import and export of a *part* symbol, C3; this note remains the *circuit* export).
+Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §9 and §11; [`wire-routing.md`](wire-routing.md); [`engine-components.md`](engine-components.md) E6; [`parts-availability.md`](parts-availability.md); [`interconnects.md`](interconnects.md) (copper weight in the PCB export); [`part-creator.md`](part-creator.md) (import and export of a *part* symbol, C3; this note remains the *circuit* export); [`ecosystem-integrations.md`](ecosystem-integrations.md) (pinned official KiCad libraries, KiBot CI, KiCanvas companion).
 
 Ohmforge is not a PCB layout tool. Once a circuit is a real, orderable design, the user should be able to take it into KiCad as a schematic and netlist, with footprints and MPNs preserved, and from there to a fabricator. This note describes that export path and the limits of the “explore fabrication” item.
 
@@ -17,7 +17,8 @@ Goals:
 - Export a KiCad schematic and netlist from an E4 circuit file, including symbols, reference designators, values, MPNs, and footprints when `part.toml` has them.
 - Export an XLSX BOM (and keep the CSV) that a human can send to a supplier, with the same rows as the in-app BOM.
 - Document a fabrication path: the user opens the export in KiCad, lays out the board there, and produces Gerber, drill, BOM and pick-and-place (CPL) with KiCad. Ohmforge may later write a starter `.kicad_pcb` with footprints unrouted if that stays small and lawful; it is not required for 0.2.
-- Keep licensing clean: we generate KiCad’s documented file formats; we do not copy KiCad source, and we do not link GPL code into the Ohmforge workspace.
+- Keep licensing clean: we generate KiCad’s documented file formats; we do not copy KiCad source, and we do not link GPL code into the Ohmforge workspace. Official symbol and footprint libraries stay user-local (or in a CI image) and are referenced by name; they are not vendored into `parts/`.
+- After the exporter exists, KiBot may be run **out of process** in CI as a round-trip check. KiCanvas may be an optional MIT companion for viewing the export in a browser (P4). Neither is linked into the workspace as a copyleft dependency.
 
 Non-goals:
 
@@ -50,5 +51,5 @@ File → Export → KiCad writes a folder with the schematic, the netlist, and t
 
 ## 7. Open questions
 
-- The pinned KiCad format version, and whether to emit a `fp-lib-table` / symbol library or only reference standard libraries plus a small Ohmforge library we maintain. The part creator (C3) should use the same version and mapping tables.
+- The pinned KiCad format version **and the official library revision**, and whether to emit a `fp-lib-table` / symbol library or only reference standard libraries plus a small Ohmforge library we maintain. The part creator (C3) should use the same version and mapping tables ([`ecosystem-integrations.md`](ecosystem-integrations.md) §2.1, open decision there).
 - Whether a starter unrouted PCB is in 0.2 or is explicitly deferred.

@@ -17,7 +17,7 @@ To merge into `parts/`:
 - `[license] data` and `artwork` are `CC-BY-SA-4.0`.
 - No vendor SPICE model whose terms forbid redistribution (`parts/LICENSE.md`, `CONTRIBUTING.md`). Store URL + checksum instead (planned `[model_source]`).
 - No encrypted file (see [spice-import.md](spice-import.md) §4).
-- No vendored third-party KiCad symbol or footprint libraries; footprints are **name references only** (`parts/LICENSE.md` even notes the common KiCad licence exception as a reason not to copy those libraries into the tree).
+- No vendored third-party KiCad symbol or footprint libraries; footprints are **name references only** (`parts/LICENSE.md` even notes the common KiCad licence exception as a reason not to copy those libraries into the tree). Official KiCad libraries, used at C3 and by `of-kicad`, stay user-local and pinned; see [`../ecosystem-integrations.md`](../ecosystem-integrations.md) §2.1. Official packs must also refuse SnapEDA, Component Search Engine, and similar non-redistributable content.
 - No committed datasheet PDFs; link them.
 - Attribution for any imported, redistributable text stays in the pack (`NOTICE` or `[model_source]`).
 - Share-alike: a derived official part stays CC-BY-SA-4.0 and credits the project, as the parts licence already says.

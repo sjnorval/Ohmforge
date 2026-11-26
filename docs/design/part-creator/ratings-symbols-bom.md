@@ -1,6 +1,6 @@
 # Part creator: ratings, citations, symbols and BOM
 
-Status: proposed (design only). Grounded in `[electrical]` as used in `parts/**/part.toml`, [`../compatibility-checks.md`](../compatibility-checks.md), [`../kicad-export.md`](../kicad-export.md), `crates/of-bom/src/lib.rs`, and [`../parts-availability.md`](../parts-availability.md).
+Status: proposed (design only). Grounded in `[electrical]` as used in `parts/**/part.toml`, [`../compatibility-checks.md`](../compatibility-checks.md), [`../kicad-export.md`](../kicad-export.md), `crates/of-bom/src/lib.rs`, and [`../parts-availability.md`](../parts-availability.md). Datasheet-fill and KiCad-library sources: [`sources.md`](sources.md) and [`../ecosystem-integrations.md`](../ecosystem-integrations.md).
 Date: 2026-11-26.
 Parent: [`../part-creator.md`](../part-creator.md).
 
