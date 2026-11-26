@@ -31,6 +31,8 @@
   - [Licensing](design/part-creator/licensing.md)
   - [UX, testing and milestones](design/part-creator/ux-and-testing.md)
   - [Pitfalls, checks and decisions](design/part-creator/pitfalls-and-decisions.md)
+  - [Sources, datasheet fill and KiCad import](design/part-creator/sources.md)
+- [Ecosystem integrations](design/ecosystem-integrations.md)
 - [Model and waveform interop](design/model-and-waveform-interop.md)
 - [MicroPython on the ESP32-C3](design/micropython.md)
 - [Wireless simulation and fidelity documentation](design/wireless.md)

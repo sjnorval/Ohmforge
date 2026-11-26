@@ -2,7 +2,7 @@
 
 Status: proposed (design only, no code). Expanded 2026-11-26 so a developer can implement the tool without guessing: every subsection is grounded in the current crates and `part.toml` files, and planned schema extensions are marked as such.
 Date: 2026-11-26.
-Related: the detailed notes under [`part-creator/`](part-creator/); [`model-and-waveform-interop.md`](model-and-waveform-interop.md); [`kicad-export.md`](kicad-export.md); [`compatibility-checks.md`](compatibility-checks.md); [`parts-availability.md`](parts-availability.md); [`engine-components.md`](engine-components.md) E6; [`editor-integration.md`](editor-integration.md); [`CONTRIBUTING.md`](../../CONTRIBUTING.md#adding-a-part); [`parts/README.md`](../../parts/README.md); [`parts/LICENSE.md`](../../parts/LICENSE.md).
+Related: the detailed notes under [`part-creator/`](part-creator/), including [`part-creator/sources.md`](part-creator/sources.md); [`ecosystem-integrations.md`](ecosystem-integrations.md); [`model-and-waveform-interop.md`](model-and-waveform-interop.md); [`kicad-export.md`](kicad-export.md); [`compatibility-checks.md`](compatibility-checks.md); [`parts-availability.md`](parts-availability.md); [`engine-components.md`](engine-components.md) E6; [`editor-integration.md`](editor-integration.md); [`CONTRIBUTING.md`](../../CONTRIBUTING.md#adding-a-part); [`parts/README.md`](../../parts/README.md); [`parts/LICENSE.md`](../../parts/LICENSE.md).
 
 The quality and size of the parts library is the main limit on whether common hobby projects actually run in Ohmforge. This note (and the notes it indexes) specify a **part creator**: a tool that authors a complete part pack and, over time, can stand on its own as a general-purpose part authoring tool.
 
@@ -18,6 +18,7 @@ The quality and size of the parts library is the main limit on whether common ho
 6. [Licensing](part-creator/licensing.md) — official CC-BY-SA packs, user packs, provenance, KiCad and vendor-model rules.
 7. [UX and testing](part-creator/ux-and-testing.md) — flows, undo, autosave, errors, tests per milestone, acceptance and definition of done for C1–C5.
 8. [Pitfalls, checks, risks and open decisions](part-creator/pitfalls-and-decisions.md) — numbered checklist (detection, mitigation, test), risk register, decisions that need a maintainer call.
+9. [Sources, datasheet fill and KiCad import](part-creator/sources.md) — JLCSearch backlog, Tabula and WebPlotDigitizer, official KiCad libraries, marking lookup, and what must never enter an official pack (see also [`ecosystem-integrations.md`](ecosystem-integrations.md)).
 
 ## 1. Why this, and not another plan item
 
@@ -62,7 +63,7 @@ Goals, non-goals, crate placement (`of-part-creator` or an extension of `of-part
 
 - C1 (P3): CLI, schema hygiene, unencrypted SPICE import, ngspice-runnable deck, a stricter validator.
 - C2 (P3): desktop authoring UI.
-- C3 (P4): KiCad import/export and datasheet-assisted fill.
+- C3 (P4): KiCad import/export and datasheet-assisted fill ([`part-creator/sources.md`](part-creator/sources.md); official KiCad libraries, Tabula and WebPlotDigitizer as user-run helpers, [`ecosystem-integrations.md`](ecosystem-integrations.md)).
 - C4 (P5): Verilog-A and IBIS bindings.
 - C5 (P6): standalone binary and the part-authoring guide.
 

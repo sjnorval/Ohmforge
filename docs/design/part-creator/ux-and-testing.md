@@ -52,7 +52,7 @@ These refine, not replace, the phase list in the index.
 
 **C2.** A window edits identity, pins, ratings, variants, licence, and (once E6 allows) a basic symbol. Undo and autosave work as above. “Check model” surfaces the C1 report next to the field. Saving `ti.ne555` or `ams.ams1117-3.3` as a working copy does not introduce a noisy diff. A new contributor authors a part in the UI and uses it from a hand-written circuit file under `ohmforge run`.
 
-**C3.** A pinned KiCad symbol for a single-unit part imports and exports and opens in the pinned KiCad version; missing footprints are listed. Datasheet-assisted fill is proposal-only.
+**C3.** A pinned KiCad symbol for a single-unit part imports and exports and opens in the pinned KiCad version; missing footprints are listed. Datasheet-assisted fill is proposal-only. Official KiCad libraries are the name authority; Tabula and WebPlotDigitizer are user-run helpers as in [`sources.md`](sources.md) and [`../ecosystem-integrations.md`](../ecosystem-integrations.md).
 
 **C4.** One Verilog-A and one IBIS example pack, each with a failing path when the sidecar or file is missing; `deny.toml` still has no GPL/LGPL dependencies.
 

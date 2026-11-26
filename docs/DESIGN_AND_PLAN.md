@@ -39,12 +39,13 @@
 | Time base | Global `u64` picosecond clock, deterministic and replayable |
 | UI | egui + wgpu via eframe; native and WASM from one codebase |
 | Plugins | Native Rust components in-tree; sandboxed WASM components for the community |
-| BOM | First-class: MPN, supplier SKUs, ZAR pricing snapshots, CSV/XLSX/KiCad/JLCPCB export |
+| BOM | First-class: MPN, supplier SKUs, ZAR pricing snapshots, CSV/XLSX/HTML/KiCad/JLCPCB export; later dated live offers and inventory import ([`design/ecosystem-integrations.md`](design/ecosystem-integrations.md)) |
 | Firmware workflow | The user's editor and toolchain (VS Code, Arduino IDE 2, esptool, cargo); no in-app sketch editor in P2–P6 |
 | Project sharing | File-based project packs and share links, no account required; cloud sync stays parked |
 | MicroPython | Unmodified official images on the ESP32-C3 in P4; later chips in P6 |
 | Part authoring | A part-creator tool writes `part.toml` packs (symbol, pins, model, citations, MPN); later usable standalone ([`design/part-creator.md`](design/part-creator.md)) |
 | Vendor models | Unencrypted public SPICE (and later Verilog-A or IBIS) may be bound with a licence record; encrypted models are refused; restrictive models stay URL plus checksum, fetched by the user, never committed ([`design/model-and-waveform-interop.md`](design/model-and-waveform-interop.md)) |
+| Ecosystem integrations | Open tools and data sources (official KiCad libraries, Tabula, WebPlotDigitizer, JLCSearch-guided backlog, Nexar/Findchips after terms review, InvenTree/Part-DB inventory, interactive HTML BOM, WaveDrom, KiCanvas, KiBot, and others) are planned in [`design/ecosystem-integrations.md`](design/ecosystem-integrations.md); copyleft tools stay out of process or user-run; official packs never include SnapEDA or Component Search Engine content |
 | Licence | Code AGPL-3.0-or-later (commercial licence available separately); parts data and docs CC-BY-SA-4.0; QEMU, OpenVAF and other GPL or LGPL tools stay out of process |
 
 ---
@@ -369,7 +370,7 @@ The BOM is derived from the design, never typed by hand. Each placed instance po
 | Do-not-fit and notes | Per instance |
 
 - **Suppliers out of the box:** LCSC, Mouser, DigiKey, RS Components, plus South African stores such as Communica, DIYElectronics and Micro Robotics as offer entries.
-- **Exports:** CSV, XLSX (`rust_xlsxwriter`), KiCad netlist and `.kicad_sch` with MPN fields so `kicad-cli` BOM export works, JLCPCB BOM/CPL, and a Markdown or PDF build sheet.
+- **Exports:** CSV, XLSX (`rust_xlsxwriter`), an interactive HTML BOM ([`design/ecosystem-integrations.md`](design/ecosystem-integrations.md) §2.10), KiCad netlist and `.kicad_sch` with MPN fields so `kicad-cli` BOM export works, JLCPCB BOM/CPL, and a Markdown or PDF build sheet. Later: dated supplier offers, inventory import, and starter-pack buy links (same note).
 - **Generated build checklist:** parts to buy, wiring order, pre-power checks (polarity, decoupling present, level shifting for 5 V parts, GPIO current under limit, I2C pull-ups), then first-power test steps with expected readings taken from the simulation.
 - **Power budget** and battery-life summary attached to every BOM, so the bill states what the build will draw.
 
@@ -407,6 +408,7 @@ The rig runs on a self-hosted GitHub Actions runner; captured traces are stored 
 | Falstad CircuitJS, SimulIDE | GPL-2.0, GPL-3.0 | Ideas only; no code copied or translated |
 | Wokwi | Proprietary | Inspiration only; our plugin API is our own design |
 | KiCad libraries | CC-BY-SA 4.0 with exception | Do not bundle; reference footprint names as strings only |
+| Ecosystem tools (Tabula, WebPlotDigitizer, KiBot, and others) | Mixed; see [`design/ecosystem-integrations.md`](design/ecosystem-integrations.md) | Out of process, user-run, or MIT with attribution; no official-pack content from SnapEDA or Component Search Engine |
 | Vendor SPICE models | Often no redistribution | Store URL plus checksum; user fetches |
 
 > ⚠️ **The one rule that prevents licence conflicts.** No GPL-2.0-only or LGPL code is linked into any crate in the main workspace (GPL-2.0-only cannot be combined with AGPL-3.0). `cargo-deny` enforces this on every pull request, and anything copyleft lives in its own repository and process. The FSF treats programs talking over pipes or sockets as separate works, which is what keeps the QEMU bridge clean.
@@ -524,7 +526,7 @@ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
 | P0 Foundations | 0–6 | Workspace, scheduler, virtual time, project format, CI, licences, docs skeleton | Repo public, CI green on three OSes and WASM |
 | P1 Analog core | 4–16 | MNA, DC op, transient, R/C/L/D/BJT/MOSFET, LTE timestep, CLI netlist runner | Reference set within 1 % of ngspice |
 | P2 ESP32-C3 MVP | 12–28 | RV32IMC core, ROM boot, GPIO/IOMUX, UART, timers, ADC, LEDC; schematic editor; scope and logic analyser; BOM v1 | MVP release 0.1 |
-| P3 Breadth | 28–42 | Classic ESP32 via QEMU sidecar; I2C, SPI, RMT, DAC; breadboard view; official examples and file-based sharing; first compatibility checks; 50 parts; part creator first slices; KiCad and XLSX export; SPICE import and analog waveform files | 0.2: common hobby projects run |
+| P3 Breadth | 28–42 | Classic ESP32 via QEMU sidecar; I2C, SPI, RMT, DAC; breadboard view; official examples and file-based sharing; first compatibility checks; 50 parts (JLCSearch-guided backlog); part creator first slices; KiCad and XLSX export; SPICE import, analog waveform files and WaveDrom; interactive HTML BOM and rebuild-and-buy packs | 0.2: common hobby projects run |
 | P4 Own Xtensa and web | 40–60 | LX6/LX7 core, web app, Wi-Fi virtual radio with a fidelity page, MicroPython on the C3, sleep modes and power profiler; Verilog-A sidecar; part-creator KiCad and datasheet import | 0.3: classic ESP32 in the browser |
 | P5 Realism | 56–72 | Monte Carlo, thermal, fault injection, hardware-in-the-loop lab, supplier price plugins, optional converter switch mode, IBIS pin models | 0.4: validation report published |
 | P6 1.0 | 70–84 | Stable component API and WASM SDK, ESP32-S3 and C6, docs complete, standalone part creator, optional HDL sidecar, BLE stretch | 1.0 |

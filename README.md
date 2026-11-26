@@ -47,6 +47,8 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 **Planned: part creator, and model and waveform interop.** A tool to author a complete part pack (pins, symbol, cited ratings, SPICE binding, MPNs and licence records), later usable standalone ([`docs/design/part-creator.md`](docs/design/part-creator.md)). Related: licence-recorded SPICE import, standard analog waveform files, a Verilog-A sidecar, and later IBIS and HDL sidecars ([`docs/design/model-and-waveform-interop.md`](docs/design/model-and-waveform-interop.md)).
 
+**Planned: ecosystem integrations.** Official KiCad libraries, datasheet-assisted fill helpers, a buyable parts backlog, an interactive HTML BOM and rebuild-and-buy packs, WaveDrom captures, availability and inventory hooks, and related tools are planned in [`docs/design/ecosystem-integrations.md`](docs/design/ecosystem-integrations.md).
+
 ## Workspace layout
 
 | Crate | Purpose |

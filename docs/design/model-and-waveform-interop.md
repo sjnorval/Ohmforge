@@ -2,7 +2,7 @@
 
 Status: proposed (design only, no code). This note records techniques to add to the plan: live simulation in the editor, cleaner SPICE and compact-model interop, standard analog waveform files, an optional converter-oriented switch mode, IBIS pin models, out-of-process HDL blocks, and a parked radio-frequency analysis thread.
 Date: 2026-11-26.
-Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §4 (analog engine), §7 (component model), §9 (UI and instruments); [`part-creator.md`](part-creator.md); [`kicad-export.md`](kicad-export.md); [`interconnects.md`](interconnects.md); [`engine-components.md`](engine-components.md) E5 and E6; [`ROADMAP.md`](../ROADMAP.md).
+Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §4 (analog engine), §7 (component model), §9 (UI and instruments); [`part-creator.md`](part-creator.md); [`kicad-export.md`](kicad-export.md); [`interconnects.md`](interconnects.md); [`engine-components.md`](engine-components.md) E5 and E6; [`ROADMAP.md`](../ROADMAP.md); [`ecosystem-integrations.md`](ecosystem-integrations.md) (WaveDrom JSON from captures).
 
 Ohmforge already has its own analog solver, checked against ngspice as an external golden, a growing `part.toml` library, CSV and VCD logging, and a planned `.subckt` import. The items below fill gaps in how users bring models in, take waveforms out, and keep the editor honest while they are still wiring. They do not change the licence boundary: ngspice, OpenVAF and any GPL or LGPL tool stay out of process; Ohmforge never links them.
 
@@ -79,7 +79,11 @@ Community digital parts may be described in synthesizable Verilog or VHDL and si
 
 Acceptance: a small, in-tree test Verilog (or VHDL) block, run out of process, drives a pin in a circuit file with deterministic timing; the sidecar is optional at build time; no GPL or LGPL simulator is linked.
 
-### 3.8 S-parameters and harmonic balance (parked)
+### 3.8 WaveDrom JSON from digital captures (P3)
+
+Logic-analyser and digital-bus captures should export a documented subset of WaveDrom JSON so a timing diagram can be pasted into a lesson, a cited check, or the mdBook without a screenshot. This sits beside CSV and VCD; it does not replace the analog waveform-file item above. The exporter lives with the E5 instruments / CLI; the first slice does not need to bundle the MIT renderer (a later in-app preview may, with attribution). Details, licence notes and acceptance are in [`ecosystem-integrations.md`](ecosystem-integrations.md) §2.11.
+
+### 3.9 S-parameters and harmonic balance (parked)
 
 S-parameter and harmonic-balance analyses matter for radio-frequency matching, but they are not required for the P2 to P6 ESP32 firmware-and-board path. The P4 virtual radio already has a fidelity page ([`wireless.md`](wireless.md)). This thread stays under Future ideas until there is a concrete need (for example antenna-matching on a development board) and a design discussion.
 
@@ -90,6 +94,7 @@ S-parameter and harmonic-balance analyses matter for radio-frequency matching, b
 | Always-on simulation in the editor | P3 | With the schematic editor; Pause stays first-class |
 | SPICE import, licence records, refuse encrypted, ngspice-runnable deck | P3 | Tightly coupled to the part creator and the existing `.subckt` item |
 | Analog waveform file (SPICE raw or equivalent) | P3 | Beside existing CSV/VCD; sigrok `.sr` stays on B5 |
+| WaveDrom JSON from digital captures | P3 | E5 instruments; format only in the first slice |
 | Verilog-A via OpenVAF sidecar | P4 | After `.subckt` import; licence review of generated code first |
 | Ideal-switch converter mode | P5 | Optional; default remains SPICE-grade |
 | IBIS pin models | P5 | Extension of interconnects W4, not a field solver |

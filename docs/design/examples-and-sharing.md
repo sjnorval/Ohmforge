@@ -2,7 +2,7 @@
 
 Status: proposed (design only, no code). Nothing in this document is implemented yet except the bundled desktop demos described in section 1.
 Date: 2026-11-25.
-Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §8 (firmware loading), §9 (user interface), future ideas for cloud accounts in [`ROADMAP.md`](../ROADMAP.md); [`engine-components.md`](engine-components.md) (E4 circuit files); [`editor-integration.md`](editor-integration.md) (loading firmware from a file or an editor); [`first-schematic.md`](../src/guide/first-schematic.md).
+Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §8 (firmware loading), §9 (user interface), future ideas for cloud accounts in [`ROADMAP.md`](../ROADMAP.md); [`engine-components.md`](engine-components.md) (E4 circuit files); [`editor-integration.md`](editor-integration.md) (loading firmware from a file or an editor); [`first-schematic.md`](../src/guide/first-schematic.md); [`ecosystem-integrations.md`](ecosystem-integrations.md) (rebuild-and-buy packs, interactive HTML BOM, lessons).
 
 People should be able to open a finished, well-explained project in one step, and to hand a project to someone else as a file, without creating an account or using a server. This note plans an official example gallery in the app and a shareable project pack that travels as a folder or archive. Cloud accounts and cross-device sync stay a parked future idea; they are not a dependency.
 
@@ -16,7 +16,7 @@ Goals:
 
 - An official gallery of complete, documented examples that open in the app the same way a user project will.
 - At least five examples for release 0.2, covering the P2 demo set plus one slightly richer board (for example a sensor on I2C once B2 lands, or a clear “next step” that still runs with the parts available at the time).
-- A shareable **project pack**: one folder (or a zip / `.ohmforge` archive of that folder) that contains the circuit, the firmware image or a clear pointer to how to rebuild it, notes, and any extra BOM lines. Opening the pack on another machine, offline, is enough.
+- A shareable **project pack**: one folder (or a zip / `.ohmforge` archive of that folder) that contains the circuit, the firmware image or a clear pointer to how to rebuild it, notes, and any extra BOM lines. Opening the pack on another machine, offline, is enough. Official starter packs also include a rebuild-and-buy path: a dated ZAR BOM, an interactive HTML BOM, and supplier links ([`ecosystem-integrations.md`](ecosystem-integrations.md) §2.14). A Kitspace-compatible manifest, if added, is optional and generated; official packs are not published to a third-party gallery from CI unless a maintainer later agrees.
 - A stable, documented share-link form that the P4 web app can open (a path, a `file:` URL, or an HTTPS URL of a pack). No login.
 - Examples and pack text stay under CC-BY-SA-4.0; any firmware source in the tree stays under AGPL-3.0-or-later unless it is a third-party official image fetched by a pinned script and never committed (the same rule as the ROM and ESP-IDF bootloader).
 
@@ -52,7 +52,7 @@ Non-goals:
 - A new user can open an official example from the gallery, run it, and change a part or a value without editing Rust.
 - A pack created on one machine opens on another with no account, including offline, and produces the same smoke result in CI.
 - Packs contain no keychain material or API keys.
-- The five 0.2 examples each have a short README and a CI smoke.
+- The five 0.2 examples each have a short README, a CI smoke, and a BOM with MPNs and a dated ZAR total (CSV and HTML).
 
 ## 7. Open questions
 
