@@ -16,6 +16,9 @@ use crate::button;
 use crate::kind::DemoKind;
 use crate::live::{self, Command, LiveSession, Snapshot};
 use crate::meters::{MeterKind, PlacedMeter, ProbeRef};
+use of_instruments::profile;
+
+use crate::bench::BenchProfiles;
 use crate::meters_ui::{MeterView, SchematicHit, reading_text};
 use of_components::BounceSettings;
 
@@ -50,6 +53,8 @@ pub struct OhmforgeDemo {
     scope_hold: bool,
     held_scope: Option<HeldScope>,
     show_startup_animation: bool,
+    /// Real-world profiles of the meters, scope and PSU readout (ideal by default).
+    bench: BenchProfiles,
 }
 
 struct HeldScope {
@@ -91,6 +96,7 @@ impl OhmforgeDemo {
             time_div: DEFAULT_TIME_DIV,
             scope_hold: false,
             held_scope: None,
+            bench: BenchProfiles::default(),
             show_startup_animation: crate::prefs::load().show_startup_animation,
         }
     }
@@ -189,6 +195,29 @@ impl OhmforgeDemo {
             },
         }
     }
+    /// Ideal or a real-world profile for the meters, the scope and the PSU readout.
+    fn profile_bar(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Profiles").strong());
+            let b = &mut self.bench;
+            profile_combo(
+                ui,
+                "profile_meter",
+                "meters",
+                &mut b.meter,
+                profile::multimeters(),
+                |p| &p.name,
+            );
+            profile_combo(ui, "profile_scope", "scope", &mut b.scope, profile::scopes(), |p| {
+                &p.name
+            });
+            profile_combo(ui, "profile_psu", "PSU", &mut b.psu, profile::supplies(), |p| &p.name);
+        });
+        if let Some(note) = self.bench.scope_note(scope_scale(self.kind).2, "mA") {
+            ui.weak(note);
+        }
+    }
+
     fn meter_bar(&mut self, ui: &mut Ui, snap: &Snapshot) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Meters").strong());
@@ -245,7 +274,7 @@ impl OhmforgeDemo {
         let mut remove = None;
         for meter in &self.meters {
             ui.horizontal(|ui| {
-                let reading = reading_text(&snap.meter_readings, meter.id);
+                let reading = reading_text(&snap.meter_readings, meter.id, &self.bench);
                 let through = meter
                     .meter
                     .part
@@ -271,7 +300,10 @@ impl OhmforgeDemo {
 
     /// Draw the demo. The kernel runs on the worker thread.
     pub fn ui(&mut self, ui: &mut Ui) {
-        let snap = self.session.snapshot();
+        let mut snap = self.session.snapshot();
+        // Real-world profiles: the scope's 8-bit trace and the PSU's readback.
+        self.bench.scope_trace(&mut snap.led_trace, scope_scale(self.kind).2);
+        let psu_band = self.bench.supply(&mut snap.supply_status);
         if snap.generation != self.generation {
             self.generation = snap.generation;
             self.reset_monitor();
@@ -420,8 +452,11 @@ impl OhmforgeDemo {
 
             let status = snap.supply_status;
             ui.horizontal(|ui| {
+                let band = psu_band
+                    .map(|b| format!("  (\u{b1} {:.3} V, \u{b1} {:.1} mA)", b.volts_band, b.amps_band * 1e3))
+                    .unwrap_or_default();
                 ui.monospace(format!(
-                    "PSU  {:.2} V  {:.2} mA  {}",
+                    "PSU  {:.2} V  {:.2} mA  {}{band}",
                     status.volts,
                     status.display_amps() * 1e3,
                     supply::mode_label(status.mode)
@@ -452,6 +487,7 @@ impl OhmforgeDemo {
             }
 
             ui.add_space(8.0);
+            self.profile_bar(ui);
             self.meter_bar(ui, &snap);
 
             ui.add_space(8.0);
@@ -469,6 +505,7 @@ impl OhmforgeDemo {
                         pending_a: self.pending_a.as_ref().map(|p| p.id.as_str()),
                         meters: &self.meters,
                         readings: &snap.meter_readings,
+                        bench: self.bench,
                     };
                     instruments(
                         ui,
@@ -613,6 +650,34 @@ fn scope_header(
     }
 }
 
+/// The LED scope's vertical span and mA per division.
+fn scope_scale(kind: DemoKind) -> (f64, f64, f64) {
+    if matches!(kind, DemoKind::Blink) {
+        (-4.0, 8.0, 2.0)
+    } else {
+        (0.0, 6.0, 1.0)
+    }
+}
+
+/// A profile chooser: "Ideal" or one of `options`.
+fn profile_combo<T: PartialEq + 'static>(
+    ui: &mut Ui,
+    salt: &str,
+    label: &str,
+    value: &mut Option<&'static T>,
+    options: impl Iterator<Item = &'static T>,
+    name: impl Fn(&'static T) -> &'static str,
+) {
+    ui.weak(label);
+    let current = value.map_or("Ideal", &name);
+    ComboBox::from_id_salt(salt).selected_text(current).show_ui(ui, |ui| {
+        ui.selectable_value(value, None, "Ideal");
+        for p in options {
+            ui.selectable_value(value, Some(p), name(p));
+        }
+    });
+}
+
 fn apply_time_div(session: &LiveSession, time_div: &mut f64, new: f64) {
     let new = trace::snap_time_div(new);
     if (new - *time_div).abs() < 1e-15 {
@@ -691,11 +756,7 @@ fn scope_panel(
         let window = trace::visible_window(*time_div);
         let start = (time - window).max(0.0);
         let end = start + window;
-        let (min_y, max_y, y_step) = if matches!(kind, DemoKind::Blink) {
-            (-4.0, 8.0, 2.0)
-        } else {
-            (0.0, 6.0, 1.0)
-        };
+        let (min_y, max_y, y_step) = scope_scale(kind);
         let zoom = scope(
             ui,
             ScopePlot {

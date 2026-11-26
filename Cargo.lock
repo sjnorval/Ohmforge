@@ -2128,7 +2128,9 @@ dependencies = [
  "of-components",
  "of-core",
  "of-engine",
+ "serde",
  "thiserror 2.0.21",
+ "toml",
 ]
 
 [[package]]

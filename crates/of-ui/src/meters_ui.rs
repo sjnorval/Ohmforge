@@ -4,6 +4,7 @@ use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Ui};
 
 use of_instruments::Reading;
 
+use crate::bench::BenchProfiles;
 use crate::meters::{MeterKind, PlacedMeter, ProbeRef};
 use crate::theme::TEAL;
 
@@ -23,22 +24,24 @@ pub struct MeterView<'a> {
     pub meters: &'a [PlacedMeter],
     /// The worker's readings, by meter id.
     pub readings: &'a [(u64, Reading)],
+    /// Real-world profiles (ideal by default).
+    pub bench: BenchProfiles,
 }
 
 impl MeterView<'_> {
     /// The display text of meter `id` (`—` until the worker has read it).
     pub fn text(&self, id: u64) -> String {
-        reading_text(self.readings, id)
+        reading_text(self.readings, id, &self.bench)
     }
 }
 
-/// The display text of meter `id` in `readings`.
-pub fn reading_text(readings: &[(u64, Reading)], id: u64) -> String {
-    readings
+/// The display text of meter `id` in `readings`, through the bench profile.
+pub fn reading_text(readings: &[(u64, Reading)], id: u64, bench: &BenchProfiles) -> String {
+    let reading = readings
         .iter()
         .find(|(i, _)| *i == id)
-        .map_or(Reading::Missing, |(_, r)| r.clone())
-        .display()
+        .map_or(Reading::Missing, |(_, r)| r.clone());
+    bench.meter_text(&reading)
 }
 
 /// Result of interacting with the schematic overlay.

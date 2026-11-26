@@ -4,7 +4,8 @@
 //! firmware hashes, resolves firmware through a [`Resolver`], builds every
 //! component through the model [`Registry`] in file order and elaborates the
 //! analog circuit. [`build`] then starts an [`of_engine::Session`] with the
-//! file's `[sim]` quantum and step.
+//! file's `[sim]` quantum and step. Instruments with a real-world profile add
+//! their inputs first ([`crate::loads`]), so adding one rebuilds the session.
 //!
 //! The registry decides the corner and temperature of library parts (see
 //! [`corner`]); the circuit only names parts, params, nets and firmware.
@@ -76,6 +77,10 @@ pub fn build_engine(
     reg: &Registry,
     res: &dyn Resolver,
 ) -> Result<BuiltEngine, CircuitError> {
+    // Real-world instruments re-elaborate the circuit with their inputs (E5f).
+    let loaded =
+        crate::loads::with_loads(file, &crate::loads::instrument_loads(file, parts)).map_err(CircuitError::general)?;
+    let file = &loaded;
     if let Some(e) = check_parts(src, file, parts).into_iter().next() {
         return Err(e);
     }

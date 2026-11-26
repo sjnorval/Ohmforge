@@ -6,10 +6,12 @@
 //! signals into bounded [`ring::TraceBuf`] rings on a [`SamplePlan`]; [`session`]
 //! makes the engine `Session` a [`Probeable`] (E5b).
 //! [`stats`] holds the windowed and period-aligned averages, duty/frequency,
-//! min/max and RMS. The serial monitor model lives in [`serial`]; egui panels
+//! min/max and RMS. [`profile`] holds the real-world profiles (E5f: Fluke 87V,
+//! Rigol DS1054Z and DP832) and the [`profile::LoadElement`]s they add. The serial monitor model lives in [`serial`]; egui panels
 //! live in `of-ui`.
 
 pub mod meter;
+pub mod profile;
 pub mod psu;
 pub mod ring;
 pub mod scope;

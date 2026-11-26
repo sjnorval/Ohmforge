@@ -437,6 +437,9 @@ pub const INSTRUMENT_KINDS: &[&str] = &["multimeter", "scope", "logic", "logger"
 /// Multimeter modes (DC only; AC and resistance come in a later addendum).
 pub const MULTIMETER_MODES: &[&str] = &["dc_v", "dc_a"];
 
+/// Multimeter current inputs (`params.input`, real-world profiles; default `mA`).
+pub const MULTIMETER_INPUTS: &[&str] = &["uA", "mA", "A"];
+
 /// The profile that reads exactly what the solver has and never loads the circuit.
 pub const IDEAL_PROFILE: &str = "ideal";
 

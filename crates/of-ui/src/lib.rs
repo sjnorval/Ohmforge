@@ -6,6 +6,8 @@ mod wiring;
 #[cfg(feature = "gui")]
 mod adc_pwm;
 #[cfg(feature = "gui")]
+mod bench;
+#[cfg(feature = "gui")]
 mod blink;
 #[cfg(feature = "gui")]
 mod boards;

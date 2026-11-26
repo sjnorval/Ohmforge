@@ -34,6 +34,8 @@ pub mod embedded;
 pub mod fs;
 #[cfg(feature = "engine")]
 pub mod library;
+#[cfg(feature = "engine")]
+pub mod loads;
 
 pub use error::CircuitError;
 pub use format::*;

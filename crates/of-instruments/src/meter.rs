@@ -12,6 +12,7 @@
 //!   real DMM's integrating ADC does ([`Averaging`]; `stats::average_periods`).
 //! - The ground net is `0` or `gnd` (the schematic uses `0`, circuit files `gnd`).
 
+use crate::profile::{AmpInput, Display, DmmProfile};
 use crate::service::{ChannelId, MeasurementService};
 use crate::signal::Signal;
 use crate::stats::average_periods;
@@ -128,6 +129,17 @@ impl Reading {
             Self::Missing => "—".into(),
         }
     }
+
+    /// What a real-world multimeter shows for this reading: the profile's
+    /// autoranged value and ± band (`None` for an error or no samples yet).
+    /// Amps use the current `input` jack.
+    pub fn on(&self, profile: &DmmProfile, input: AmpInput) -> Option<Display> {
+        match self {
+            Self::Volts(v) => Some(profile.dc_volts(*v)),
+            Self::Amps { amps, .. } => Some(profile.dc_amps(input, *amps)),
+            Self::Error(_) | Self::Missing => None,
+        }
+    }
 }
 
 fn is_ground(net: &str) -> bool {
@@ -221,6 +233,19 @@ impl Multimeter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reading_shows_on_a_real_meter() {
+        let fluke = crate::profile::multimeters().find(|p| p.id == "fluke.87v").unwrap();
+        let v = Reading::Volts(1.6492).on(fluke, AmpInput::Milli).unwrap();
+        assert_eq!(v.to_string(), "1.649 ± 0.002 V");
+        let a = Reading::Amps {
+            amps: 22.98e-3,
+            part: "R1".into(),
+        };
+        assert_eq!(a.on(fluke, AmpInput::Milli).unwrap().to_string(), "22.98 ± 0.09 mA");
+        assert!(Reading::Missing.on(fluke, AmpInput::Milli).is_none());
+    }
     use crate::service::{ProbeError, Probeable, SamplePlan};
     use std::collections::BTreeMap;
 

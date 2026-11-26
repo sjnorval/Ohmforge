@@ -17,3 +17,5 @@ of-core.workspace = true
 of-engine.workspace = true
 of-components.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+toml.workspace = true
