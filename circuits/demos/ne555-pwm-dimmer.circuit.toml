@@ -1,0 +1,251 @@
+format = 1
+
+[circuit]
+name = "555 PWM LED dimmer"
+ground = "gnd"
+description = "The classic two-diode 555 duty-cycle control: an NE555 astable (TI SLFS022K 6.3.2) whose 10 kohm pot RV1 splits the timing resistance, so C1 charges through R1 + RA and D1 and discharges through D2 and RB. Turning the pot sets the duty from about 18 % to 91 % at a nearly constant 1 kHz and dims the red LED. 1N4148 steering diodes, C1 100 nF, 10 nF on CONT, 5 V bench supply (NE555 range 4.5 to 16 V). Starts cold ([sim] uic). Scope on the timing capacitor and the output; meter on the LED current (its average follows the duty)."
+
+[sim]
+max_step = 1e-5
+uic = true
+
+[[component]]
+ref = "U1"
+part = "ti.ne555"
+at = [312, 56]
+
+[component.schematic]
+body = [0, 0, 104, 160]
+pins = [
+  { pin = "VCC", at = [24, 0], dir = "N" },
+  { pin = "RESET", at = [72, 0], dir = "N" },
+  { pin = "DISCH", at = [0, 40], dir = "W" },
+  { pin = "THRES", at = [0, 96], dir = "W" },
+  { pin = "TRIG", at = [0, 124], dir = "W" },
+  { pin = "OUT", at = [104, 48], dir = "E" },
+  { pin = "GND", at = [24, 160], dir = "S" },
+  { pin = "CONT", at = [72, 160], dir = "S" },
+]
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+at = [260, 8]
+params = { resistance = 1000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "RV1"
+part = "bourns.ptv09a-b103"
+at = [214, 66]
+params = { position = 0.5 }
+
+[component.schematic]
+body = [0, 0, 20, 60]
+pins = [
+  { pin = "3", at = [10, 0], dir = "N" },
+  { pin = "1", at = [10, 60], dir = "S" },
+  { pin = "W", id = "wiper", name = "wiper", at = [34, 60], dir = "E", slide = { to = [34, 0], param = "position" } },
+]
+
+[[component]]
+ref = "D1"
+part = "onsemi.1n4148"
+at = [214, 140]
+
+[component.schematic]
+body = [0, 0, 20, 32]
+pins = [
+  { pin = "A", at = [10, 0], dir = "N" },
+  { pin = "K", at = [10, 32], dir = "S" },
+]
+
+[[component]]
+ref = "D2"
+part = "onsemi.1n4148"
+at = [154, 130]
+
+[component.schematic]
+body = [0, 0, 20, 32]
+pins = [
+  { pin = "K", at = [10, 0], dir = "N" },
+  { pin = "A", at = [10, 32], dir = "S" },
+]
+
+[[component]]
+ref = "C1"
+part = "generic.capacitor-mlcc"
+at = [260, 212]
+params = { capacitance = 1e-7 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "C2"
+part = "generic.capacitor-mlcc"
+at = [372, 224]
+params = { capacitance = 1e-8 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "R3"
+part = "generic.resistor"
+at = [456, 92]
+params = { resistance = 220 }
+
+[component.schematic]
+body = [0, 0, 48, 24]
+pins = [
+  { pin = "1", at = [0, 12], dir = "W" },
+  { pin = "2", at = [48, 12], dir = "E" },
+]
+
+[[component]]
+ref = "D3"
+part = "generic.led-red-0603"
+at = [540, 136]
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "A", at = [12, 0], dir = "N" },
+  { pin = "K", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+at = [8, 8]
+params = { current_limit = 0.1, on = true, series_r = 0.1, volts = 5 }
+
+[component.schematic]
+body = [0, 0, 78, 52]
+pins = [
+  { pin = "+", id = "plus", at = [78, 14], dir = "E" },
+  { pin = "-", id = "minus", name = "−", at = [78, 42], dir = "E" },
+]
+
+[[symbol]]
+ref = "GND"
+kind = "ground"
+id = "gnd_sym"
+at = [289, 272]
+body = [0, 0, 22, 10]
+pins = [
+  { pin = "1", id = "pin", at = [11, 0], dir = "N" },
+]
+
+[[net]]
+name = "vcc"
+label = "VCC"
+kind = "power"
+pins = ["PSU.+", "U1.VCC", "U1.RESET", "R1.1"]
+
+[[net]]
+name = "gnd"
+label = "GND"
+kind = "ground"
+pins = ["PSU.-", "U1.GND", "C1.2", "C2.2", "D3.K", "GND.1"]
+
+[[net]]
+name = "dis"
+label = "DISCH"
+kind = "signal"
+pins = ["R1.2", "RV1.W", "U1.DISCH"]
+
+[[net]]
+name = "charge"
+label = "RA"
+kind = "signal"
+pins = ["RV1.1", "D1.A"]
+
+[[net]]
+name = "discharge"
+label = "RB"
+kind = "signal"
+pins = ["RV1.3", "D2.K"]
+
+[[net]]
+name = "cap"
+label = "C1"
+kind = "signal"
+pins = ["D1.K", "D2.A", "C1.1", "U1.THRES", "U1.TRIG"]
+
+[[net]]
+name = "cont"
+label = "CONT"
+kind = "signal"
+pins = ["U1.CONT", "C2.1"]
+
+[[net]]
+name = "out"
+label = "OUT"
+kind = "signal"
+pins = ["U1.OUT", "R3.1"]
+
+[[net]]
+name = "led_a"
+label = "LED anode"
+kind = "signal"
+pins = ["R3.2", "D3.A"]
+
+[schematic]
+keepouts = [
+  { rect = [237, 18, 254, 30], note = "R1" },
+  { rect = [222, 34, 254, 46], note = "1 kΩ" },
+  { rect = [133, 66, 158, 78], note = "RV1" },
+  { rect = [118, 82, 158, 94], note = "10 kΩ" },
+  { rect = [240, 142, 257, 154], note = "D1" },
+  { rect = [240, 158, 287, 170], note = "1N4148" },
+  { rect = [131, 132, 148, 144], note = "D2" },
+  { rect = [101, 148, 148, 160], note = "1N4148" },
+  { rect = [237, 210, 254, 222], note = "C1" },
+  { rect = [207, 226, 254, 238], note = "100 nF" },
+  { rect = [402, 222, 419, 234], note = "C2" },
+  { rect = [402, 238, 442, 250], note = "10 nF" },
+  { rect = [471, 62, 488, 74], note = "R3" },
+  { rect = [460, 76, 500, 88], note = "220 Ω" },
+  { rect = [570, 134, 587, 146], note = "D3" },
+  { rect = [570, 150, 625, 162], note = "Red LED" },
+  { rect = [289, 292, 311, 304], note = "GND" },
+]
+
+[[probe]]
+name = "Timing capacitor"
+signal = "v(cap)"
+
+[[probe]]
+name = "Output"
+signal = "v(out)"
+
+[[probe]]
+name = "LED current"
+signal = "i(R3)"
+
+[[instrument]]
+ref = "XSC1"
+kind = "scope"
+probes = ["Timing capacitor", "Output"]
+
+[[instrument]]
+ref = "XMM1"
+kind = "multimeter"
+mode = "dc_a"
+probes = ["LED current"]

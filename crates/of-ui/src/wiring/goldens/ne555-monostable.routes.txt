@@ -1,0 +1,91 @@
+# schematic routes
+# grid=4 clearance=4
+component c1 C1 156,120 180,144
+  pin 1 168,120 N cap
+  pin 2 168,144 S gnd
+component c2 C2 372,224 396,248
+  pin 1 384,224 N cont
+  pin 2 384,248 S gnd
+component d1 D1 540,136 564,160
+  pin A 552,136 N led_a
+  pin K 552,160 S gnd
+component gnd_sym GND 289,280 311,290
+  pin pin 300,280 N gnd
+component psu PSU 8,8 86,60
+  pin plus 86,22 E vcc
+  pin minus 86,50 E gnd
+component r1 R1 216,24 240,72
+  pin 1 228,24 N vcc
+  pin 2 228,72 S trig
+component r3 R3 456,92 504,116
+  pin 1 456,104 W out
+  pin 2 504,104 E led_a
+component ra RA 156,24 180,72
+  pin 1 168,24 N vcc
+  pin 2 168,72 S cap
+component sw1 SW1 216,200 240,240
+  pin 1 228,200 N trig
+  pin 2 228,240 S gnd
+component u1 U1 312,56 416,216
+  pin VCC 336,56 N vcc
+  pin RESET 384,56 N vcc
+  pin DISCH 312,96 W cap
+  pin THRES 312,152 W cap
+  pin TRIG 312,180 W trig
+  pin OUT 416,104 E out
+  pin GND 336,216 S gnd
+  pin CONT 384,216 S cont
+net cap signal ra.2 c1.1 u1.THRES u1.DISCH
+  route 168,72 168,112
+  route 168,120 168,112
+  route 304,152 304,96 312,96
+  route 312,152 246,152 246,112 168,112
+net cont signal u1.CONT c2.1
+  route 384,224 384,216
+net gnd ground psu.minus u1.GND c1.2 c2.2 d1.K sw1.2 gnd_sym.pin
+  route 552,160 552,256 92,256 92,50 86,50
+  route 150,256 150,150 168,150 168,144
+  route 228,256 228,240
+  route 300,256 300,280
+  route 336,256 336,216
+  route 384,256 384,248
+net led_a signal r3.2 d1.A
+  route 552,136 552,104 504,104
+net out signal u1.OUT r3.1
+  route 456,104 416,104
+net trig signal r1.2 sw1.1 u1.TRIG
+  route 228,72 228,180
+  route 312,180 228,180
+  route 228,200 228,180
+net vcc power psu.plus u1.VCC u1.RESET ra.1 r1.1
+  route 168,0 168,24
+  route 228,0 228,24
+  route 86,22 150,22 150,0 384,0 384,56
+  route 384,50 336,50 336,56
+keepout 133,34 150,46
+keepout 110,50 150,62
+keepout 133,118 150,130
+keepout 110,134 150,146
+keepout 402,222 419,234
+keepout 402,238 442,250
+keepout 246,34 263,46
+keepout 246,50 286,62
+keepout 246,206 271,218
+keepout 246,222 293,234
+keepout 471,62 488,74
+keepout 460,76 500,88
+keepout 570,134 587,146
+keepout 570,150 625,162
+keepout 289,300 311,312
+junction vcc 168,0
+junction vcc 228,0
+junction vcc 384,50
+junction cap 168,112
+junction cap 304,152
+junction trig 228,180
+junction gnd 150,256
+junction gnd 228,256
+junction gnd 300,256
+junction gnd 336,256
+junction gnd 384,256
+hop trig 228,112 h

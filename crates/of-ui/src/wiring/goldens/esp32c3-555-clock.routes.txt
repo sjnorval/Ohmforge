@@ -1,0 +1,138 @@
+# schematic routes
+# grid=4 clearance=4
+component c1 C1 156,240 180,264
+  pin 1 168,240 N cap
+  pin 2 168,264 S gnd
+component c2 C2 308,264 332,288
+  pin 1 320,264 N cont
+  pin 2 320,288 S gnd
+component c3 C3 536,80 560,104
+  pin plus 548,80 N vdd
+  pin minus 548,104 S gnd
+component d1 D1 796,176 820,200
+  pin A 808,176 N led_a
+  pin K 808,200 S gnd
+component gnd_sym GND 217,340 239,350
+  pin pin 228,340 N gnd
+component psu PSU 16,160 94,212
+  pin plus 94,174 E vcc
+  pin minus 94,202 E gnd
+component r1 R1 156,64 180,112
+  pin 1 168,64 N vcc
+  pin 2 168,112 S dis
+component r2 R2 156,144 180,192
+  pin 1 168,144 N dis
+  pin 2 168,192 S cap
+component r3 R3 392,132 440,156
+  pin 1 392,144 W out
+  pin 2 440,144 E clk
+component r4 R4 476,176 500,224
+  pin 1 488,176 N clk
+  pin 2 488,224 S gnd
+component r5 R5 712,132 760,156
+  pin 1 712,144 W gpio8
+  pin 2 760,144 E led_a
+component rtx RTX 724,220 748,268
+  pin 1 736,220 N tx
+  pin 2 736,268 S gnd
+component u1 U1 560,96 672,256
+  pin vdd 584,96 N vdd
+  pin GPIO4 560,144 W clk
+  pin gnd 584,256 S gnd
+  pin GPIO8 672,144 E gpio8
+  pin GPIO21 672,208 E tx
+component u2 U2 248,96 352,256
+  pin VCC 272,96 N vcc
+  pin RESET 320,96 N vcc
+  pin DISCH 248,136 W dis
+  pin THRES 248,192 W cap
+  pin TRIG 248,220 W cap
+  pin OUT 352,144 E out
+  pin GND 272,256 S gnd
+  pin CONT 320,256 S cont
+component u3 U3 424,40 504,84
+  pin VIN 424,62 W vcc
+  pin VOUT 504,62 E vdd
+  pin GND 464,84 S gnd
+net cap signal r2.2 c1.1 u2.THRES u2.TRIG
+  route 168,192 168,198
+  route 248,192 243,192 243,198
+  route 168,198 243,198
+  route 248,220 243,220 243,198
+  route 168,240 168,198
+net clk signal r3.2 r4.1 u1.GPIO4
+  route 440,144 560,144
+  route 488,144 488,176
+net cont signal u2.CONT c2.1
+  route 320,264 320,256
+net dis signal r1.2 r2.1 u2.DISCH
+  route 168,112 168,136
+  route 248,136 168,136
+  route 168,144 168,136
+net gnd ground psu.minus u2.GND c1.2 c2.2 r4.2 u3.GND c3.minus u1.gnd d1.K rtx.2 gnd_sym.pin
+  route 548,112 464,112 464,84
+  route 808,200 808,296 100,296 100,202 94,202
+  route 488,230 548,230 548,104
+  route 168,296 168,264
+  route 228,296 228,340
+  route 272,296 272,256
+  route 320,296 320,288
+  route 488,296 488,224
+  route 584,296 584,256
+  route 736,296 736,268
+net gpio8 signal u1.GPIO8 r5.1
+  route 712,144 672,144
+net led_a signal r5.2 d1.A
+  route 808,176 808,144 760,144
+net out signal u2.OUT r3.1
+  route 392,144 352,144
+net tx signal u1.GPIO21 rtx.1
+  route 736,220 736,208 672,208
+net vcc power psu.plus u2.VCC u2.RESET r1.1 u3.VIN
+  route 168,32 168,64
+  route 320,32 320,96
+  route 320,90 272,90 272,96
+  route 94,174 100,174 100,32 416,32 416,62 424,62
+net vdd power u3.VOUT c3.plus u1.vdd
+  route 548,62 548,80
+  route 584,96 584,62 504,62
+keepout 406,10 521,22
+keepout 133,74 150,86
+keepout 118,90 150,102
+keepout 133,154 150,166
+keepout 103,170 150,182
+keepout 133,238 150,250
+keepout 118,254 150,266
+keepout 338,262 355,274
+keepout 338,278 378,290
+keepout 407,102 424,114
+keepout 396,116 436,128
+keepout 506,186 523,198
+keepout 506,202 546,214
+keepout 513,78 530,90
+keepout 490,94 530,106
+keepout 727,102 744,114
+keepout 716,116 756,128
+keepout 826,174 843,186
+keepout 826,190 881,202
+keepout 754,230 779,242
+keepout 754,246 801,258
+keepout 217,360 239,372
+junction vcc 168,32
+junction vcc 320,32
+junction vdd 548,62
+junction vcc 320,90
+junction gnd 548,112
+junction dis 168,136
+junction clk 488,144
+junction cap 168,198
+junction cap 243,198
+junction gnd 488,230
+junction gnd 168,296
+junction gnd 228,296
+junction gnd 272,296
+junction gnd 320,296
+junction gnd 488,296
+junction gnd 584,296
+junction gnd 736,296
+hop clk 548,144 v

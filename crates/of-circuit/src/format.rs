@@ -109,6 +109,13 @@ pub struct SimSettings {
     pub temperature_c: Option<f64>,
     /// Base seed; per-component seeds default to this.
     pub seed: u64,
+    /// Start from initial conditions instead of an operating point: every
+    /// net at 0 V unless listed in `ic`, the supplies applied at t = 0 (a
+    /// cold power-up; needed for circuits with no DC operating point, such
+    /// as a 555 astable). Optional; `false` by default.
+    pub uic: bool,
+    /// Net voltages at t = 0 when `uic` is set (net name to volts).
+    pub ic: BTreeMap<String, f64>,
 }
 
 impl Default for SimSettings {
@@ -119,6 +126,8 @@ impl Default for SimSettings {
             corner: SimCorner::Typ,
             temperature_c: None,
             seed: 0,
+            uic: false,
+            ic: BTreeMap::new(),
         }
     }
 }

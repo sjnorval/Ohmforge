@@ -1,0 +1,335 @@
+format = 1
+
+[circuit]
+name = "ESP32-C3 clock counter (555)"
+ground = "gnd"
+description = "An NE555 astable (R1 1 kohm, R2 6.8 kohm, C1 1 uF: f = 1/(ln 2 (R1 + 2 R2) C1), about 99 Hz) clocks an ESP32-C3 GPIO4. The NE555 needs 4.5 V or more (TI SLFS022K), so the board is a 5 V board as the C3 dev boards are: the bench supply gives 5 V to the 555 and an AMS1117-3.3 LDO (22 uF tantalum on its output) gives the C3 its 3.3 V. The bipolar 555 output swings to about VCC - 1.7 V, which a 3.3 V input must not see: R3 10 kohm and R4 33 kohm divide it to about 3.1 V (above the C3 VIH of 0.75 VDD = 2.5 V, below VDD + 0.3 V; R3 also limits clamp current). Bare-metal firmware counts rising edges over 100 ms gates of whole periods and prints the frequency on UART0 (GPIO21, RTX stands in for a USB-UART input); the LED on GPIO8 toggles once per gate. Starts cold ([sim] uic)."
+
+[sim]
+max_step = 5e-5
+uic = true
+
+[[component]]
+ref = "U1"
+part = "espressif.esp32-c3"
+at = [560, 96]
+params = { inputs = ["GPIO4"], quiescent_a = 0.016 }
+
+[component.firmware]
+app = "../../firmware/esp32c3-clock-counter/clock.elf"
+app_sha256 = "0fd6f469fbe19ad8650844171b52d4ab2e6a277a9c7a074cacce67737b7457b1"
+boot = "direct"
+
+[component.schematic]
+body = [0, 0, 112, 160]
+pins = [
+  { pin = "3V3", id = "vdd", name = "3V3", at = [24, 0], dir = "N" },
+  { pin = "GPIO4", at = [0, 48], dir = "W" },
+  { pin = "GND", id = "gnd", name = "GND", at = [24, 160], dir = "S" },
+  { pin = "GPIO8", at = [112, 48], dir = "E" },
+  { pin = "GPIO21", at = [112, 112], dir = "E" },
+]
+
+[[component]]
+ref = "U2"
+part = "ti.ne555"
+at = [248, 96]
+
+[component.schematic]
+body = [0, 0, 104, 160]
+pins = [
+  { pin = "VCC", at = [24, 0], dir = "N" },
+  { pin = "RESET", at = [72, 0], dir = "N" },
+  { pin = "DISCH", at = [0, 40], dir = "W" },
+  { pin = "THRES", at = [0, 96], dir = "W" },
+  { pin = "TRIG", at = [0, 124], dir = "W" },
+  { pin = "OUT", at = [104, 48], dir = "E" },
+  { pin = "GND", at = [24, 160], dir = "S" },
+  { pin = "CONT", at = [72, 160], dir = "S" },
+]
+
+[[component]]
+ref = "U3"
+part = "ams.ams1117-3.3"
+at = [424, 40]
+
+[component.schematic]
+body = [0, 0, 80, 44]
+pins = [
+  { pin = "VIN", at = [0, 22], dir = "W" },
+  { pin = "VOUT", at = [80, 22], dir = "E" },
+  { pin = "GND", at = [40, 44], dir = "S" },
+]
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+at = [156, 64]
+params = { resistance = 1000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "R2"
+part = "generic.resistor"
+at = [156, 144]
+params = { resistance = 6800 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "C1"
+part = "generic.capacitor-mlcc"
+at = [156, 240]
+params = { capacitance = 1e-6 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "C2"
+part = "generic.capacitor-mlcc"
+at = [308, 264]
+params = { capacitance = 1e-8 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "R3"
+part = "generic.resistor"
+at = [392, 132]
+params = { resistance = 10000 }
+
+[component.schematic]
+body = [0, 0, 48, 24]
+pins = [
+  { pin = "1", at = [0, 12], dir = "W" },
+  { pin = "2", at = [48, 12], dir = "E" },
+]
+
+[[component]]
+ref = "R4"
+part = "generic.resistor"
+at = [476, 176]
+params = { resistance = 33000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "C3"
+part = "generic.capacitor-tantalum"
+at = [536, 80]
+params = { capacitance = 2.2e-5 }
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "+", id = "plus", at = [12, 0], dir = "N" },
+  { pin = "-", id = "minus", name = "−", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "R5"
+part = "generic.resistor"
+at = [712, 132]
+params = { resistance = 330 }
+
+[component.schematic]
+body = [0, 0, 48, 24]
+pins = [
+  { pin = "1", at = [0, 12], dir = "W" },
+  { pin = "2", at = [48, 12], dir = "E" },
+]
+
+[[component]]
+ref = "D1"
+part = "generic.led-red-0603"
+at = [796, 176]
+
+[component.schematic]
+body = [0, 0, 24, 24]
+pins = [
+  { pin = "A", at = [12, 0], dir = "N" },
+  { pin = "K", at = [12, 24], dir = "S" },
+]
+
+[[component]]
+ref = "RTX"
+part = "generic.resistor"
+at = [724, 220]
+params = { resistance = 100000 }
+
+[component.schematic]
+body = [0, 0, 24, 48]
+pins = [
+  { pin = "1", at = [12, 0], dir = "N" },
+  { pin = "2", at = [12, 48], dir = "S" },
+]
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+at = [16, 160]
+params = { current_limit = 0.5, on = true, series_r = 0.1, volts = 5 }
+
+[component.schematic]
+id = "psu"
+body = [0, 0, 78, 52]
+pins = [
+  { pin = "+", id = "plus", at = [78, 14], dir = "E" },
+  { pin = "-", id = "minus", name = "−", at = [78, 42], dir = "E" },
+]
+
+[[symbol]]
+ref = "GND"
+kind = "ground"
+id = "gnd_sym"
+at = [217, 340]
+body = [0, 0, 22, 10]
+pins = [
+  { pin = "1", id = "pin", at = [11, 0], dir = "N" },
+]
+
+[[net]]
+name = "vcc"
+label = "VCC 5 V"
+kind = "power"
+pins = ["PSU.+", "U2.VCC", "U2.RESET", "R1.1", "U3.VIN"]
+
+[[net]]
+name = "vdd"
+label = "VDD 3.3 V"
+kind = "power"
+pins = ["U3.VOUT", "C3.+", "U1.3V3"]
+
+[[net]]
+name = "gnd"
+label = "GND"
+kind = "ground"
+pins = ["PSU.-", "U2.GND", "C1.2", "C2.2", "R4.2", "U3.GND", "C3.-", "U1.GND", "D1.K", "RTX.2", "GND.1"]
+
+[[net]]
+name = "dis"
+label = "DISCH"
+kind = "signal"
+pins = ["R1.2", "R2.1", "U2.DISCH"]
+
+[[net]]
+name = "cap"
+label = "C1"
+kind = "signal"
+pins = ["R2.2", "C1.1", "U2.THRES", "U2.TRIG"]
+
+[[net]]
+name = "cont"
+label = "CONT"
+kind = "signal"
+pins = ["U2.CONT", "C2.1"]
+
+[[net]]
+name = "out"
+label = "555 OUT"
+kind = "signal"
+pins = ["U2.OUT", "R3.1"]
+
+[[net]]
+name = "clk"
+label = "CLK"
+kind = "signal"
+pins = ["R3.2", "R4.1", "U1.GPIO4"]
+
+[[net]]
+name = "gpio8"
+label = "GPIO8"
+kind = "signal"
+pins = ["U1.GPIO8", "R5.1"]
+
+[[net]]
+name = "led_a"
+label = "LED anode"
+kind = "signal"
+pins = ["R5.2", "D1.A"]
+
+[[net]]
+name = "tx"
+label = "TX"
+kind = "signal"
+pins = ["U1.GPIO21", "RTX.1"]
+
+[schematic]
+keepouts = [
+  { rect = [406, 10, 521, 22], note = "AMS1117-3.3 LDO" },
+  { rect = [133, 74, 150, 86], note = "R1" },
+  { rect = [118, 90, 150, 102], note = "1 kΩ" },
+  { rect = [133, 154, 150, 166], note = "R2" },
+  { rect = [103, 170, 150, 182], note = "6.8 kΩ" },
+  { rect = [133, 238, 150, 250], note = "C1" },
+  { rect = [118, 254, 150, 266], note = "1 µF" },
+  { rect = [338, 262, 355, 274], note = "C2" },
+  { rect = [338, 278, 378, 290], note = "10 nF" },
+  { rect = [407, 102, 424, 114], note = "R3" },
+  { rect = [396, 116, 436, 128], note = "10 kΩ" },
+  { rect = [506, 186, 523, 198], note = "R4" },
+  { rect = [506, 202, 546, 214], note = "33 kΩ" },
+  { rect = [513, 78, 530, 90], note = "C3" },
+  { rect = [490, 94, 530, 106], note = "22 µF" },
+  { rect = [727, 102, 744, 114], note = "R5" },
+  { rect = [716, 116, 756, 128], note = "330 Ω" },
+  { rect = [826, 174, 843, 186], note = "D1" },
+  { rect = [826, 190, 881, 202], note = "Red LED" },
+  { rect = [754, 230, 779, 242], note = "RTX" },
+  { rect = [754, 246, 801, 258], note = "100 kΩ" },
+  { rect = [217, 360, 239, 372], note = "GND" },
+]
+
+[[probe]]
+name = "LED current"
+signal = "i(R5)"
+
+[[probe]]
+name = "Clock at GPIO4"
+signal = "v(clk)"
+
+[[probe]]
+name = "Timing capacitor"
+signal = "v(cap)"
+
+[[instrument]]
+ref = "XSC1"
+kind = "scope"
+probes = ["Clock at GPIO4", "Timing capacitor"]
+
+[[instrument]]
+ref = "XLA1"
+kind = "logic"
+probes = ["d(U1.GPIO4)", "d(U1.GPIO21)"]
+
+[[instrument]]
+ref = "XU1"
+kind = "uart"
+probes = ["d(U1.GPIO21)"]
+params = { baud = 28818 }

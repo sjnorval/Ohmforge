@@ -25,6 +25,8 @@ mod live;
 mod meters;
 #[cfg(feature = "gui")]
 mod meters_ui;
+#[cfg(feature = "gui")]
+mod ne555;
 #[cfg(all(feature = "gui", test))]
 mod parity;
 #[cfg(feature = "gui")]

@@ -89,7 +89,7 @@ cargo run -p of-cli -- validate-parts parts/   # check every part.toml in the pa
 cargo run -p of-cli -- bom dimmer --out bom.csv   # demo-board BOM as CSV (blink, dimmer, fade or button)
 cargo test -p of-soc-esp32c3          # blinky, timer-interrupt, XIP and button firmware on the ESP32-C3 model, LED and button co-simulated
 scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests and the pot dimmer / LED fade demos (never committed)
-cargo run -p of-app --features gui   # desktop app: load screen, then live blink, dimmer, fade and push-button demos
+cargo run -p of-app --features gui   # desktop app: load screen, then live blink, dimmer, fade, push-button, 555 timer and ESP32-C3 555 clock counter demos
 cargo run -p of-app --features gui -- --no-splash   # skip the EILIi load screen this run (`OF_NO_SPLASH=1` also works; uncheck Show startup animation to persist)
 ```
 

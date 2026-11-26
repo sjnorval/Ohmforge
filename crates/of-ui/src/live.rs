@@ -90,6 +90,9 @@ pub(crate) struct Snapshot {
     pub layout: Vec<PartPins>,
     /// Each placed meter's reading, by meter id.
     pub meter_readings: Vec<(u64, Reading)>,
+    /// The file's scopes and multimeters (the 555 demos; empty otherwise).
+    pub file_scopes: crate::session_sim::ScopeTraces,
+    pub file_meters: Vec<(String, String, String)>,
     /// Bumped on every boot/reset so the UI can drop stale UART.
     pub generation: u64,
 }
@@ -124,6 +127,8 @@ impl Snapshot {
             logic: Vec::new(),
             layout: Vec::new(),
             meter_readings: Vec::new(),
+            file_scopes: Vec::new(),
+            file_meters: Vec::new(),
             generation: 0,
         }
     }
@@ -339,6 +344,27 @@ fn file_snapshot(s: &mut SessionSim, snap: &mut Snapshot) {
             snap.button = s.closed();
             snap.bounce = s.bounce();
             snap.button_v = s.button_volts().ok();
+        }
+        DemoKind::Clock555 => {
+            snap.led_instant = s.current_ma().unwrap_or(0.0);
+            snap.led_ma = s.average_ma();
+            snap.file_scopes = s.file_scope_traces();
+            snap.file_meters = s.file_meter_readings();
+        }
+        DemoKind::Ne555Astable | DemoKind::Ne555Monostable | DemoKind::Ne555Pwm => {
+            snap.led_instant = s.current_ma().unwrap_or(0.0);
+            snap.led_ma = s.average_ma();
+            let (d, f) = s.pwm_duty_freq();
+            snap.pwm_duty = d;
+            snap.pwm_freq = f;
+            if kind.has_pot() {
+                snap.pot = s.position();
+            }
+            if kind.has_button() {
+                snap.button = s.closed();
+            }
+            snap.file_scopes = s.file_scope_traces();
+            snap.file_meters = s.file_meter_readings();
         }
     }
     snap.uart = s.uart_bytes().to_vec();

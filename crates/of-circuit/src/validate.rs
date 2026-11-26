@@ -149,6 +149,17 @@ pub fn diagnostics(src: &str, file: &CircuitFile) -> Vec<CircuitError> {
     if sim.temperature_c.is_some_and(|t| !t.is_finite()) {
         s.err(sim_at..sim_at, "[sim] temperature_c must be finite");
     }
+    if !sim.ic.is_empty() && !sim.uic {
+        s.err(sim_at..sim_at, "[sim] ic needs uic = true");
+    }
+    for (net, v) in &sim.ic {
+        if !v.is_finite() {
+            s.err(sim_at..sim_at, format!("[sim] ic.{net} must be finite"));
+        }
+        if !file.nets.iter().any(|n| n.name.get_ref() == net) {
+            s.err(sim_at..sim_at, format!("[sim] ic names unknown net '{net}'"));
+        }
+    }
 
     // Refs.
     let mut seen: BTreeMap<String, &str> = BTreeMap::new();

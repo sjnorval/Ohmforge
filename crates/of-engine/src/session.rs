@@ -18,12 +18,17 @@ use of_core::{Engine, EngineId, Kernel, SimTime, Stop};
 use crate::{BuiltEngine, EngineError, PlacedComponent};
 
 /// Kernel and solver settings for a run.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SessionConfig {
     /// Kernel quantum (the longest any engine runs ahead).
     pub quantum: SimTime,
     /// Longest analog time step (s).
     pub max_step: f64,
+    /// Start from initial conditions (every node at 0 V unless in `ic`)
+    /// instead of an operating point: the circuit powers up at t = 0.
+    pub uic: bool,
+    /// Node voltages at t = 0 for `uic` (node name to volts).
+    pub ic: BTreeMap<String, f64>,
 }
 
 impl Default for SessionConfig {
@@ -31,6 +36,8 @@ impl Default for SessionConfig {
         Self {
             quantum: SimTime::from_us(50),
             max_step: 5e-6,
+            uic: false,
+            ic: BTreeMap::new(),
         }
     }
 }
@@ -137,6 +144,8 @@ impl BuiltEngine {
             Options::default(),
             EngineConfig {
                 max_step: cfg.max_step,
+                uic: cfg.uic,
+                ic: cfg.ic.clone(),
                 record: false,
                 ..EngineConfig::default()
             },

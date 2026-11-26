@@ -175,7 +175,9 @@ mod tests {
     use super::*;
     use crate::wiring::{check, serialize};
 
-    use crate::wiring::demos::{BLINK, BUTTON, BUTTON_IRQ, DIMMER, FADE};
+    use crate::wiring::demos::{
+        BLINK, BUTTON, BUTTON_IRQ, DIMMER, ESP32C3_555_CLOCK, FADE, NE555_ASTABLE, NE555_MONOSTABLE, NE555_PWM,
+    };
 
     fn file(name: &str, text: &str) -> CircuitFile {
         parse(text).unwrap_or_else(|e| panic!("{name}: {e}"))
@@ -260,6 +262,72 @@ mod tests {
                 &from_circuit(&f, &file_params).unwrap(),
                 include_str!("goldens/button.routes.txt"),
             );
+        }
+    }
+
+    /// The 555 files' (and the 555 clock counter's) house-style layouts route with no invariant
+    /// violation (the PWM dimmer at every wiper position), and as saved
+    /// (the dimmer's wiper at mid-travel) byte for byte to their route
+    /// goldens (`OF_WRITE_WIRING_GOLDENS` rewrites them). With
+    /// `OF_DUMP_555=<dir>` the routes are written there for rendering.
+    #[test]
+    fn the_555_layouts_hold_every_invariant() {
+        for (name, text, golden) in [
+            (
+                "ne555-astable",
+                NE555_ASTABLE,
+                include_str!("goldens/ne555-astable.routes.txt"),
+            ),
+            (
+                "ne555-monostable",
+                NE555_MONOSTABLE,
+                include_str!("goldens/ne555-monostable.routes.txt"),
+            ),
+            (
+                "ne555-pwm-dimmer",
+                NE555_PWM,
+                include_str!("goldens/ne555-pwm-dimmer.routes.txt"),
+            ),
+            (
+                "esp32c3-555-clock",
+                ESP32C3_555_CLOCK,
+                include_str!("goldens/esp32c3-555-clock.routes.txt"),
+            ),
+        ] {
+            let f = file(name, text);
+            let saved = from_circuit(&f, &file_params).unwrap_or_else(|e| panic!("{name}: {e}"));
+            if std::env::var_os("OF_WRITE_WIRING_GOLDENS").is_some() {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+                std::fs::write(
+                    root.join(format!("src/wiring/goldens/{name}.routes.txt")),
+                    serialize(&saved),
+                )
+                .unwrap();
+            } else {
+                assert_routes(name, &saved, golden);
+            }
+            for position in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let live = move |r: &str, p: &str| (r == "RV1" && p == "position").then_some(position);
+                let routed = from_circuit(&f, &live).unwrap_or_else(|e| panic!("{name}: {e}"));
+                if let Some(dir) = std::env::var_os("OF_DUMP_555")
+                    && (position == 0.5 || !text.contains("RV1"))
+                {
+                    std::fs::write(
+                        std::path::Path::new(&dir).join(format!("{name}.routes.txt")),
+                        serialize(&routed),
+                    )
+                    .unwrap();
+                }
+                let v = check(&routed);
+                assert!(
+                    v.is_empty(),
+                    "{name} at {position}:\n{}",
+                    v.iter().map(|v| v.line()).collect::<Vec<_>>().join("\n")
+                );
+                if !text.contains("RV1") {
+                    break;
+                }
+            }
         }
     }
 

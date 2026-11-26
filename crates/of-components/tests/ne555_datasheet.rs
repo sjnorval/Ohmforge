@@ -150,6 +150,32 @@ fn astable_frequency_and_duty_cycle() {
 }
 
 #[test]
+fn astable_timing_does_not_depend_on_max_step() {
+    // The astable with C1 = 10 uF (period about 148 ms) on a 100 us maximum
+    // step: the comparator and latch switches must flip at their threshold
+    // crossings, not at the end of whichever step crossed them.
+    let deck = astable_deck("CC cont 0 10n").replace(&format!("C1 thr 0 {C}"), "C1 thr 0 10u");
+    let mut c = timer(ASTABLE, &deck);
+    let req = analysis::TranRequest {
+        tstep: 1e-4,
+        tstop: 0.8,
+        tmax: 1e-4,
+        ..Default::default()
+    };
+    let w = analysis::transient(&mut c, &Options::default(), &req).unwrap();
+    let (t, v) = (w.x.clone(), w.signal("v(out)").unwrap().to_vec());
+    let (high, period) = cycle(&t, &v, 5.0, 0.2);
+    let (h0, l0) = astable_exact(5.0, 5.0 / 3.0, 10.0 / 3.0);
+    let k = 10e-6 / C;
+    assert!(within(high, h0 * k, 0.005), "high {high} vs {}", h0 * k);
+    assert!(
+        within(period, (h0 + l0) * k, 0.005),
+        "period {period} vs {}",
+        (h0 + l0) * k
+    );
+}
+
+#[test]
 fn monostable_width_is_1_1_rc() {
     // 6.3.1: tw = 1.1 RA C after TRIG falls below VCC / 3.
     let r = 10e3;

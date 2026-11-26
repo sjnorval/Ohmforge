@@ -8,7 +8,7 @@
 //! the LED current, exactly as the desktop did before E5d (in mA, so the
 //! numbers are unchanged).
 
-use of_components::psu::{RATED_MAX_V, RATED_MIN_V, SupplyMode, SupplySettings, SupplyStatus};
+use of_components::psu::{SupplyMode, SupplySettings, SupplyStatus};
 
 use crate::service::{ChannelId, MeasurementService, Probeable};
 use crate::signal::Signal;
@@ -53,12 +53,20 @@ impl PsuReadout {
             Some(2) => SupplyMode::Cc,
             _ => SupplyMode::Off,
         };
-        let rated = RATED_MIN_V..=RATED_MAX_V;
-        let outside_rated = if settings.on {
-            !rated.contains(&settings.volts) || !rated.contains(&volts)
-        } else {
-            !rated.contains(&volts) && volts > 0.05
+        // The load's rating, as the component reports it (from the parts on
+        // its + rail); no rating, no warning.
+        let rated = match (self.reading(src, "rated_min"), self.reading(src, "rated_max")) {
+            (Some(lo), Some(hi)) => Some((lo, hi)),
+            _ => settings.rated,
         };
+        let outside_rated = rated.is_some_and(|(lo, hi)| {
+            let rated = lo..=hi;
+            if settings.on {
+                !rated.contains(&settings.volts) || !rated.contains(&volts)
+            } else {
+                !rated.contains(&volts) && volts > 0.05
+            }
+        });
         SupplyStatus {
             volts,
             amps,
@@ -114,6 +122,9 @@ mod tests {
                     "volts" => Ok(self.volts),
                     "regulated_amps" => Ok(self.amps),
                     "mode" => Ok(self.mode),
+                    // An ESP32-C3 on the rail (vdd 3.0 to 3.6 V).
+                    "rated_min" => Ok(3.0),
+                    "rated_max" => Ok(3.6),
                     _ => Err(ProbeError::Unresolved(signal.clone())),
                 },
                 _ => Err(ProbeError::Unresolved(signal.clone())),
