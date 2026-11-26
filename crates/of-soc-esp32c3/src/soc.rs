@@ -322,23 +322,41 @@ impl Esp32c3 {
             self.watchdog_reset(r);
         }
         self.apply_cpu_clock();
-        // PWM output changes, each at its own time.
-        let changes = self.bus.take_signal_changes();
-        for &c in &changes {
-            self.bus.apply_signal(c);
-            self.stamp_pins(c.at);
-        }
-        if !changes.is_empty() {
-            self.bus.inputs_changed();
-        }
-        self.hart.set_interrupt_lines(self.bus.cpu_lines());
         for byte in self.bus.take_uart_tx() {
             if self.uart.len() >= Self::UART_LOG_CAPACITY {
                 let extra = self.uart.len() + 1 - Self::UART_LOG_CAPACITY;
                 self.uart.drain(..extra);
             }
             self.uart.push(UartByte { at: now, byte });
+            // The same byte leaves on U0TXD, bit by bit.
+            self.bus.uart0.queue_tx(now, byte, crate::uart::APB_HZ);
         }
+        // PWM and UART TX output changes, each at its own time.
+        let mut changes: Vec<(SimTime, Option<crate::ledc::SignalChange>, bool)> = self
+            .bus
+            .take_signal_changes()
+            .into_iter()
+            .map(|c| (c.at, Some(c), c.level))
+            .collect();
+        changes.extend(
+            self.bus
+                .uart0
+                .take_tx_edges()
+                .into_iter()
+                .map(|e| (e.at, None, e.level)),
+        );
+        changes.sort_by_key(|c| c.0);
+        for &(at, ledc, level) in &changes {
+            match ledc {
+                Some(c) => self.bus.apply_signal(c),
+                None => self.bus.gpio.set_output_signal(crate::gpio::U0TXD_OUT, level),
+            }
+            self.stamp_pins(at);
+        }
+        if !changes.is_empty() {
+            self.bus.inputs_changed();
+        }
+        self.hart.set_interrupt_lines(self.bus.cpu_lines());
         if self.bus.take_pins_dirty() {
             self.stamp_pins(now);
         }

@@ -119,7 +119,13 @@ fn session_blinky_matches_blinky_led() {
     }
 
     let soc = &s.engine_as::<Esp32c3Engine>("U1").unwrap().soc;
-    let gpio: Vec<_> = soc.pin_edges()[1..].iter().map(|e| e.at).collect();
+    let gpio: Vec<_> = soc
+        .pin_edges()
+        .iter()
+        .filter(|e| e.pin == 8)
+        .skip(1)
+        .map(|e| e.at)
+        .collect();
     assert_eq!(soc.uart_text(), "ohmforge blinky\n");
     assert_eq!(crossings.len(), gpio.len(), "crossings {crossings:?}");
     for (n, &(at, code)) in crossings.iter().enumerate() {

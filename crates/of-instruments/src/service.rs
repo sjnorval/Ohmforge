@@ -28,6 +28,15 @@ pub trait Probeable {
     fn now_secs(&self) -> f64;
     /// The value of `signal` at [`Self::now_secs`] (V, A or the reading's unit).
     fn sample(&mut self, signal: &Signal) -> Result<f64, ProbeError>;
+    /// The voltage of the net `refdes.pin` is on (V), what a digital input
+    /// such as a logic analyser channel sees. Sources without pins say
+    /// [`ProbeError::Unresolved`].
+    fn pin_volts(&mut self, refdes: &str, pin: &str) -> Result<f64, ProbeError> {
+        Err(ProbeError::Unresolved(Signal::Digital {
+            refdes: refdes.into(),
+            pin: pin.into(),
+        }))
+    }
 }
 
 /// When the service records samples.

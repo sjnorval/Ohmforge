@@ -9,7 +9,7 @@ const PANEL: Color32 = Color32::from_rgb(22, 26, 32);
 const HIT: Color32 = Color32::from_rgb(24, 160, 150);
 const HEX_WIDTH: usize = 16;
 
-fn panel() -> Frame {
+pub(crate) fn panel() -> Frame {
     Frame::new().fill(PANEL).corner_radius(8).inner_margin(Margin::same(14))
 }
 

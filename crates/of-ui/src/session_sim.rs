@@ -236,6 +236,55 @@ pub(crate) struct SessionSim {
     position: f64,
     supply: SupplySettings,
     supply_status: SupplyStatus,
+    /// The file's UART consoles and logic analysers (E5g); empty on the
+    /// shipped demos, so their runs are unchanged.
+    digital: of_instruments::digital::DigitalBench,
+}
+
+/// Default console baud when a `uart` instrument sets none.
+const DEFAULT_BAUD: f64 = 115_200.0;
+
+/// The UART consoles and logic analysers `file` lists.
+pub(crate) fn digital_bench(file: &CircuitFile) -> Result<of_instruments::digital::DigitalBench, String> {
+    use of_instruments::LogicAnalyser;
+    use of_instruments::digital::{DigitalBench, UartConsole};
+    let mut bench = DigitalBench::default();
+    for i in &file.instruments {
+        let signals = i
+            .probes
+            .iter()
+            .map(|p| {
+                let text = file.probe(p.get_ref()).map_or(p.get_ref().as_str(), |q| q.signal());
+                text.parse::<Signal>().map_err(|e| format!("{}: {e}", i.reference()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let number = |k: &str| match i.params.get(k) {
+            Some(of_circuit::ParamValue::Number(x)) => Some(*x),
+            _ => None,
+        };
+        match i.kind() {
+            "uart" => {
+                let tx = signals
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| format!("{}: no TX probe", i.reference()))?;
+                let baud = number("baud").unwrap_or(DEFAULT_BAUD);
+                bench.consoles.push(UartConsole::new(i.reference(), tx, baud));
+            }
+            "logic" => {
+                let la = match of_instruments::profile::lookup(i.profile()) {
+                    Some(of_instruments::profile::Profile::Logic(l)) => {
+                        LogicAnalyser::real(signals, l, number("sample_rate").unwrap_or(f64::MAX))
+                    }
+                    _ => LogicAnalyser::ideal(signals),
+                }
+                .map_err(|e| format!("{}: {e}", i.reference()))?;
+                bench.analysers.push((i.reference().to_owned(), la));
+            }
+            _ => {}
+        }
+    }
+    Ok(bench)
 }
 
 fn reached(stop: Stop, at: f64) -> Result<(), String> {
@@ -304,6 +353,7 @@ impl SessionSim {
             position: 0.5,
             supply: SupplySettings::default(),
             supply_status: SupplyStatus::default(),
+            digital: digital_bench(parsed(kind)?)?,
         };
         if edge_log {
             d.cpu().start_edge_log();
@@ -335,8 +385,38 @@ impl SessionSim {
     }
 
     fn run_to(&mut self, t: SimTime) -> Result<(), String> {
-        let stop = self.s.run_until(t).map_err(|e| e.to_string())?;
-        reached(stop, self.time())
+        let Some(step) = self.digital.step() else {
+            let stop = self.s.run_until(t).map_err(|e| e.to_string())?;
+            return reached(stop, self.time());
+        };
+        // Consoles and analysers capture on their own finer grid.
+        while self.s.now() < t {
+            let next = SimTime::from_secs_f64(self.time() + step)
+                .min(t)
+                .max(SimTime(self.s.now().0 + 1));
+            let stop = self.s.run_until(next).map_err(|e| e.to_string())?;
+            reached(stop, self.time())?;
+            self.digital.capture(&mut self.s).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// The consoles' titles and text so far.
+    pub(crate) fn consoles(&self) -> Vec<crate::digital_ui::ConsoleView> {
+        self.digital
+            .consoles
+            .iter()
+            .map(|c| crate::digital_ui::ConsoleView {
+                title: format!("{} · {} · {} 8N1", c.reference, c.signal, c.baud.round()),
+                text: c.text(),
+                framing_errors: c.framing_errors(),
+            })
+            .collect()
+    }
+
+    /// The logic analysers and their captures so far.
+    pub(crate) fn logic(&self) -> Vec<(String, of_instruments::LogicAnalyser)> {
+        self.digital.analysers.clone()
     }
 
     /// LED current (mA) from the file's `LED current` probe, now.
@@ -1416,10 +1496,16 @@ mod tests {
         assert_eq!(get("i(R1.3)"), Err(unresolved("i(R1.3)")));
         assert_eq!(get("i(U1)"), Err(unresolved("i(U1)")), "U1 has more than two pins");
         assert_eq!(get("r(PSU.nope)"), Err(unresolved("r(PSU.nope)")));
-        assert_eq!(
-            get("d(U1.GPIO8)"),
-            Err(ProbeError::NotAnalog("d(U1.GPIO8)".parse().unwrap()))
-        );
+        // E5g: d(REF.pin) is the pin's net voltage through the ideal input.
+        let d = get("d(U1.GPIO8)").unwrap();
+        assert_eq!(get("d(U1.NOPE)"), Err(unresolved("d(U1.NOPE)")));
+        let pin = s.pin_volts("U1", "GPIO8").unwrap();
+        let level = if pin > of_instruments::logic::IDEAL_THRESHOLD {
+            1.0
+        } else {
+            0.0
+        };
+        assert_eq!(d, level, "{pin} V");
         assert!((s.now_secs() - 1e-3).abs() < 1e-12);
     }
 
@@ -1700,5 +1786,29 @@ mod tests {
             s.advance(t).unwrap();
         }
         assert!((s.wiper_volts().unwrap() - 2.5).abs() < 0.08);
+    }
+}
+
+#[cfg(test)]
+mod digital_tests {
+    use super::*;
+
+    #[test]
+    fn the_bench_lists_the_files_consoles_and_analysers() {
+        let demo = demo_file(DemoKind::Blink).text;
+        let text = format!(
+            "{demo}\n[[instrument]]\nref = \"XU1\"\nkind = \"uart\"\nprobes = [\"d(U1.GPIO8)\"]\nparams = {{ baud = 9600 }}\n\n[[instrument]]\nref = \"XLA1\"\nkind = \"logic\"\nprofile = \"saleae.logic8\"\nprobes = [\"d(U1.GPIO8)\"]\n"
+        );
+        let file = of_circuit::parse(&text).unwrap();
+        let bench = digital_bench(&file).unwrap();
+        assert_eq!(bench.consoles.len(), 1);
+        assert_eq!(bench.consoles[0].baud, 9600.0);
+        // One channel: the Saleae's 100 MS/s.
+        assert_eq!(bench.analysers[0].1.period, Some(1e-8));
+        assert_eq!(bench.step(), Some(of_instruments::digital::MIN_LOGIC_STEP));
+        // The shipped demos list none, so their runs are unchanged.
+        for k in KINDS {
+            assert!(digital_bench(parsed(k).unwrap()).unwrap().is_empty(), "{k:?}");
+        }
     }
 }

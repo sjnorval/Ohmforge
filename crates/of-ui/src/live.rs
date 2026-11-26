@@ -83,6 +83,9 @@ pub(crate) struct Snapshot {
     pub led_trace: Vec<(f64, f64)>,
     pub uart: Vec<UartByte>,
     pub uart_baud: Option<f64>,
+    /// UART consoles and logic analysers the circuit file lists (E5g).
+    pub consoles: Vec<crate::digital_ui::ConsoleView>,
+    pub logic: Vec<(String, of_instruments::LogicAnalyser)>,
     /// Every part's pins and nets, for placing meters (E5c).
     pub layout: Vec<PartPins>,
     /// Each placed meter's reading, by meter id.
@@ -117,6 +120,8 @@ impl Snapshot {
             led_trace: Vec::new(),
             uart: Vec::new(),
             uart_baud: None,
+            consoles: Vec::new(),
+            logic: Vec::new(),
             layout: Vec::new(),
             meter_readings: Vec::new(),
             generation: 0,
@@ -338,6 +343,8 @@ fn file_snapshot(s: &mut SessionSim, snap: &mut Snapshot) {
     }
     snap.uart = s.uart_bytes().to_vec();
     snap.uart_baud = s.uart_baud();
+    snap.consoles = s.consoles();
+    snap.logic = s.logic();
     snap.layout = s.layout();
 }
 

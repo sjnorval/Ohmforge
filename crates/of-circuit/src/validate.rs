@@ -401,6 +401,12 @@ fn check_instrument(s: &mut Sink<'_>, i: &InstrumentEntry, probe_names: &BTreeSe
             format!("{r}: a multimeter reads one signal (use v(a,b) for a voltage between two nets)"),
         );
     }
+    if kind == "uart" && i.probes.len() > 2 {
+        s.err(
+            i.probes[2].span(),
+            format!("{r}: a UART console reads TX and optionally RX, e.g. [\"d(U1.TX)\", \"d(U1.RX)\"]"),
+        );
+    }
     for p in &i.probes {
         let text = p.get_ref();
         if !is_inline_signal(text) && !probe_names.contains(text.as_str()) {
@@ -420,6 +426,10 @@ fn check_instrument(s: &mut Sink<'_>, i: &InstrumentEntry, probe_names: &BTreeSe
             ("scope", "level", _) => Some("level must be a number (volts or amps of the first channel)".into()),
             ("multimeter", "input", ParamValue::Text(t)) if MULTIMETER_INPUTS.contains(&t.as_str()) => None,
             ("multimeter", "input", _) => Some(format!("input must be one of {}", MULTIMETER_INPUTS.join(", "))),
+            ("uart", "baud", ParamValue::Number(x)) if x.is_finite() && *x > 0.0 => None,
+            ("uart", "baud", _) => Some("baud must be a positive number, e.g. 115200".into()),
+            ("logic", "sample_rate", ParamValue::Number(x)) if x.is_finite() && *x > 0.0 => None,
+            ("logic", "sample_rate", _) => Some("sample_rate must be a positive number in Hz, e.g. 25e6".into()),
             ("scope", other, _) => Some(format!(
                 "unknown scope param '{other}' (expected {})",
                 SCOPE_PARAMS.join(", ")

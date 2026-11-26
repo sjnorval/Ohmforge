@@ -8,8 +8,11 @@
 //! [`stats`] holds the windowed and period-aligned averages, duty/frequency,
 //! min/max and RMS. [`profile`] holds the real-world profiles (E5f: Fluke 87V,
 //! Rigol DS1054Z and DP832) and the [`profile::LoadElement`]s they add. The serial monitor model lives in [`serial`]; egui panels
-//! live in `of-ui`.
+//! live in `of-ui`. E5g adds the [`logic`] analyser (thresholds with hold, edges
+//! on its sample clock) and the [`uart`] console decoder (8N1 from a pin's level).
 
+pub mod digital;
+pub mod logic;
 pub mod meter;
 pub mod profile;
 pub mod psu;
@@ -20,7 +23,9 @@ pub mod service;
 pub mod session;
 pub mod signal;
 pub mod stats;
+pub mod uart;
 
+pub use logic::{LogicAnalyser, LogicChannel, LogicInput};
 pub use meter::{Averaging, Candidate, MeterError, MeterMode, Multimeter, PartPins, Reading, candidates};
 pub use psu::PsuReadout;
 pub use ring::{SampleClock, TraceBuf};
@@ -28,3 +33,4 @@ pub use scope::{Scope, ScopeTrace};
 pub use serial::{Delivery, Dir, Entry, FindHit, SendError, SerialMonitor};
 pub use service::{Channel, ChannelId, MeasurementService, ProbeError, Probeable, SamplePlan};
 pub use signal::{ParseSignalError, Signal};
+pub use uart::{UartDecoder, UartEvent};

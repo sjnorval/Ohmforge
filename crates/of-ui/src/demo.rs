@@ -528,6 +528,7 @@ impl OhmforgeDemo {
                 ui.add_space(12.0);
                 let now = SimTime::from_secs_f64(snap.time);
                 self.serial_panel.show(ui, &mut self.monitor, "UART0", now);
+                crate::digital_ui::show(ui, &snap.consoles, &snap.logic, snap.time);
             }
         });
 

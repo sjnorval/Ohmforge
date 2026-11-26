@@ -13,7 +13,11 @@
 //! `--step` grid: exactly what the solver has, which includes the inputs of
 //! real-world instruments (E5f: `profile = "fluke.87v"` or `"rigol.ds1054z"`
 //! re-elaborate the circuit with the meter's or probe's loading). VCD
-//! variables are `real`; digital `d(..)` signals come with the logic analyser (E5g).
+//! variables are `real`, and digital `d(REF.pin)` signals are 1-bit `wire`s
+//! (CSV: 0 or 1): the pin's net voltage through the ideal input (one
+//! threshold, `of_instruments::logic::IDEAL_THRESHOLD`), or the thresholds,
+//! with the state held between them, of a logic analyser with a real-world
+//! profile that lists the signal (E5g: `saleae.logic8`, VIL 0.6 V / VIH 1.2 V).
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -27,7 +31,7 @@ use of_components::analog::{Env, Library};
 use of_components::register_builtin;
 use of_core::{SimTime, Stop};
 use of_engine::Registry;
-use of_instruments::{Probeable, Signal};
+use of_instruments::{LogicInput, Probeable, Signal, UartDecoder, UartEvent};
 use of_soc_esp32c3::Esp32c3Engine;
 
 /// The pinned ESP32-C3 ROM release (`scripts/fetch-esp-rom-elfs.sh`).
@@ -161,7 +165,7 @@ fn log_format(path: &Path) -> Result<LogFormat, String> {
 }
 
 /// Logged columns: probes by name in file order, then inline instrument
-/// signals not already logged. Digital signals are skipped with a warning.
+/// signals not already logged.
 fn logged(file: &of_circuit::CircuitFile) -> Result<Vec<(String, Signal)>, String> {
     let mut out: Vec<(String, Signal)> = Vec::new();
     let parse = |text: &str, what: &str| -> Result<Signal, String> {
@@ -185,14 +189,30 @@ fn logged(file: &of_circuit::CircuitFile) -> Result<Vec<(String, Signal)>, Strin
             }
         }
     }
-    out.retain(|(name, s)| {
-        let digital = matches!(s, Signal::Digital { .. });
-        if digital {
-            eprintln!("warning: '{name}' ({s}) is digital; the logic analyser logs it (E5g), --log skips it");
-        }
-        !digital
-    });
     Ok(out)
+}
+
+/// The digital input that reads `sig`: `None` for an analog signal, the
+/// profile's thresholds when a real-world logic analyser lists it, else ideal.
+fn digital_input(file: &of_circuit::CircuitFile, sig: &Signal) -> Option<LogicInput> {
+    if !matches!(sig, Signal::Digital { .. }) {
+        return None;
+    }
+    let lists = |i: &of_circuit::InstrumentEntry| {
+        i.probes.iter().any(|p| {
+            let text = file.probe(p.get_ref()).map_or(p.get_ref().as_str(), |q| q.signal());
+            text.parse::<Signal>().is_ok_and(|s| s == *sig)
+        })
+    };
+    let real = file
+        .instruments
+        .iter()
+        .filter(|i| i.kind() == "logic" && lists(i))
+        .find_map(|i| match of_instruments::profile::lookup(i.profile()) {
+            Some(of_instruments::profile::Profile::Logic(l)) => Some(l.input()),
+            _ => None,
+        });
+    Some(real.unwrap_or_else(LogicInput::ideal))
 }
 
 /// `i(REF)` of a two-pin resistor, from pin 1 to pin 2.
@@ -267,14 +287,36 @@ pub fn run(a: &Args) -> Result<(), String> {
     let log_len = log.as_ref().map_or(0, |(_, _, l)| l.len());
     let mut log_columns = vec![Vec::new(); log_len];
     let mut log_missing = vec![false; log_len];
+    let mut log_inputs: Vec<Option<LogicInput>> = log
+        .iter()
+        .flat_map(|(_, _, l)| l)
+        .map(|(_, s)| digital_input(&b.file, s))
+        .collect();
+    let wires: Vec<bool> = log_inputs.iter().map(Option::is_some).collect();
     let mut x = Vec::new();
     let mut columns = vec![Vec::new(); names.len()];
     let mut missing = vec![false; names.len()];
     let steps = (a.until / a.step).round().max(1.0) as u64;
+    let mut uarts = if a.uart { uart_consoles(&b.file)? } else { Vec::new() };
+    let uart_dt = uarts.iter().map(|u| u.tick).fold(f64::INFINITY, f64::min);
     for k in 0..=steps {
         let t = (k as f64 * a.step).min(a.until);
         if k > 0 {
-            run_to(&mut b, t)?;
+            if uarts.is_empty() {
+                run_to(&mut b, t)?;
+            } else {
+                // Step at an eighth of the fastest bit time so every bit
+                // centre is seen, as the console's receiver samples it.
+                let mut tt = b.session.now().as_secs_f64();
+                while tt < t {
+                    tt = (tt + uart_dt).min(t);
+                    run_to(&mut b, tt)?;
+                    let now = b.session.now().as_secs_f64();
+                    for u in &mut uarts {
+                        u.sample(&mut b.session, now)?;
+                    }
+                }
+            }
         }
         x.push(b.session.now().as_secs_f64());
         for (i, n) in names.iter().enumerate() {
@@ -286,7 +328,13 @@ pub fn run(a: &Args) -> Result<(), String> {
             columns[i].push(v.unwrap_or(f64::NAN));
         }
         for (i, (name, sig)) in log.iter().flat_map(|(_, _, l)| l).enumerate() {
-            let v = b.session.sample(sig);
+            let v = match (sig, log_inputs[i].as_mut()) {
+                (Signal::Digital { refdes, pin }, Some(input)) => b
+                    .session
+                    .pin_volts(refdes, pin)
+                    .map(|v| if input.feed(v) { 1.0 } else { 0.0 }),
+                _ => b.session.sample(sig),
+            };
             if let Err(e) = &v
                 && !log_missing[i]
             {
@@ -316,7 +364,27 @@ pub fn run(a: &Args) -> Result<(), String> {
         let logged = Waveforms::from_columns("time", waves.x.clone(), names, log_columns);
         match format {
             LogFormat::Csv => write(&path, |w| logged.write_csv(w))?,
-            LogFormat::Vcd => write(&path, |w| logged.write_vcd(w))?,
+            LogFormat::Vcd => write(&path, |w| logged.write_vcd_wires(w, &wires))?,
+        }
+    }
+    for u in &uarts {
+        let framing = u
+            .events
+            .iter()
+            .filter(|e| matches!(e, UartEvent::FramingError(_)))
+            .count();
+        if framing > 0 {
+            eprintln!(
+                "warning: {}: {framing} framing error(s) at {} baud",
+                u.reference, u.baud
+            );
+        }
+        let text = UartDecoder::text(&u.events);
+        let mut out = io::stdout().lock();
+        writeln!(out, "{} ({} at {} baud, 8N1):", u.reference, u.signal, u.baud).map_err(|e| e.to_string())?;
+        write!(out, "{text}").map_err(|e| e.to_string())?;
+        if !text.is_empty() && !text.ends_with('\n') {
+            writeln!(out).map_err(|e| e.to_string())?;
         }
     }
     if a.uart {
@@ -339,4 +407,60 @@ pub fn run(a: &Args) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Default console baud when a `uart` instrument sets none.
+const DEFAULT_BAUD: f64 = 115_200.0;
+
+/// A `uart` instrument decoding its TX probe: an ideal digital input into an
+/// 8N1 receiver at the instrument's `baud`.
+struct UartConsole {
+    reference: String,
+    signal: String,
+    refdes: String,
+    pin: String,
+    baud: f64,
+    tick: f64,
+    input: LogicInput,
+    decoder: UartDecoder,
+    events: Vec<UartEvent>,
+}
+
+impl UartConsole {
+    fn sample<P: Probeable + ?Sized>(&mut self, src: &mut P, now: f64) -> Result<(), String> {
+        let v = src
+            .pin_volts(&self.refdes, &self.pin)
+            .map_err(|e| format!("{}: {e}", self.reference))?;
+        let level = self.input.feed(v);
+        self.events.extend(self.decoder.feed(now, level));
+        Ok(())
+    }
+}
+
+/// The circuit's `uart` instruments; the first probe is TX (`d(REF.pin)`).
+fn uart_consoles(file: &of_circuit::CircuitFile) -> Result<Vec<UartConsole>, String> {
+    let mut out = Vec::new();
+    for i in file.instruments.iter().filter(|i| i.kind() == "uart") {
+        let Some(p) = i.probes.first() else { continue };
+        let text = file.probe(p.get_ref()).map_or(p.get_ref().as_str(), |q| q.signal());
+        let Ok(Signal::Digital { refdes, pin }) = text.parse::<Signal>() else {
+            return Err(format!("{}: TX probe must be d(REF.pin), got {text}", i.reference()));
+        };
+        let baud = match i.params.get("baud") {
+            Some(of_circuit::ParamValue::Number(x)) => *x,
+            _ => DEFAULT_BAUD,
+        };
+        out.push(UartConsole {
+            reference: i.reference().to_owned(),
+            signal: text.to_owned(),
+            refdes,
+            pin,
+            baud,
+            tick: 1.0 / (8.0 * baud),
+            input: LogicInput::ideal(),
+            decoder: UartDecoder::new(baud),
+            events: Vec::new(),
+        });
+    }
+    Ok(out)
 }

@@ -16,6 +16,8 @@ mod button;
 #[cfg(feature = "gui")]
 mod demo;
 #[cfg(feature = "gui")]
+mod digital_ui;
+#[cfg(feature = "gui")]
 mod kind;
 #[cfg(feature = "gui")]
 mod live;

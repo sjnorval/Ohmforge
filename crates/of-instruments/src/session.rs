@@ -7,11 +7,13 @@
 //!   current into the named pin, both from `Component::terminal_currents`, so
 //!   any branch reads without per-demo registration.
 //! - `r(PSU.volts)` is a named `Component::readings` value.
-//! - `d(U1.GPIO8)` has no analog value here ([`ProbeError::NotAnalog`]); the
-//!   logic analyser reads digital edges from the component's engine (E5g).
+//! - `d(U1.GPIO8)` is the pin's net voltage read by the ideal digital input
+//!   (1 at or above [`IDEAL_THRESHOLD`], else 0); [`Probeable::pin_volts`]
+//!   gives the voltage itself, which the logic analyser thresholds (E5g).
 
 use of_engine::Session;
 
+use crate::logic::IDEAL_THRESHOLD;
 use crate::service::{ProbeError, Probeable};
 use crate::signal::Signal;
 
@@ -55,7 +57,26 @@ impl Probeable for Session {
                 .find(|(k, _)| k == name)
                 .map(|(_, v)| v)
                 .ok_or_else(unresolved),
-            Signal::Digital { .. } => Err(ProbeError::NotAnalog(signal.clone())),
+            Signal::Digital { refdes, pin } => {
+                let v = self.pin_volts(refdes, pin)?;
+                Ok(if v >= IDEAL_THRESHOLD { 1.0 } else { 0.0 })
+            }
         }
+    }
+
+    fn pin_volts(&mut self, refdes: &str, pin: &str) -> Result<f64, ProbeError> {
+        let unresolved = || {
+            ProbeError::Unresolved(Signal::Digital {
+                refdes: refdes.into(),
+                pin: pin.into(),
+            })
+        };
+        let net = self
+            .components()
+            .iter()
+            .find(|c| c.component.info().refdes == refdes)
+            .and_then(|c| c.pin_nets.get(pin).cloned())
+            .ok_or_else(unresolved)?;
+        net_volts(self, &net).ok_or_else(unresolved)
     }
 }

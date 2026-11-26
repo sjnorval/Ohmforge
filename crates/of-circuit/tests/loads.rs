@@ -199,3 +199,74 @@ fn real_profiles_are_checked_against_the_instrument_kind() {
         "{errs:?}"
     );
 }
+
+#[test]
+fn a_logic_analyser_loads_and_reads_the_pin() {
+    use of_instruments::LogicAnalyser;
+    use of_instruments::profile::logics;
+    let la = r#"
+[[instrument]]
+ref = "XLA1"
+kind = "logic"
+profile = "saleae.logic8"
+probes = ["d(R2.1)"]
+"#;
+    let src = divider(9e3, 11e3, la);
+    let f = parse(&src).unwrap();
+    assert_eq!(
+        instrument_loads(&f, &parts())[0].element,
+        LoadElement::Shunt {
+            net: "mid".into(),
+            reference: "gnd".into(),
+            ohms: 1e6,
+            farads: 10e-12
+        }
+    );
+    let low = par(11e3, 1e6);
+    let want = 3.3 * low / (9e3 + RS + low);
+    let mut b = build(&src, &f, &parts(), &registry(), &EmbeddedResolver::new()).unwrap();
+    b.session.run_until(SimTime::from_ms(1)).unwrap();
+    parity(b.session.pin_volts("R2", "1").unwrap(), want);
+    // Ideal d(): 1.79 V is above the 1.65 V threshold.
+    assert_eq!(b.session.sample(&"d(R2.1)".parse().unwrap()).unwrap(), 1.0);
+    let saleae = logics().find(|p| p.id == "saleae.logic8").unwrap();
+    let mut analyser = LogicAnalyser::real(vec!["d(R2.1)".parse().unwrap()], saleae, 25e6).unwrap();
+    analyser.capture(&mut b.session).unwrap();
+    assert_eq!(analyser.channels[0].state_at(1e-3), Some(true));
+    assert!(b.session.pin_volts("R2", "nope").is_err());
+}
+
+#[test]
+fn uart_and_logic_rules_are_checked() {
+    let bad = |extra: &str| {
+        let src = divider(9e3, 11e3, extra);
+        match parse(&src) {
+            Err(e) => vec![e.to_string()],
+            Ok(f) => of_circuit::library::check_signals(&src, &f, &parts())
+                .iter()
+                .map(|e| e.to_string())
+                .collect(),
+        }
+    };
+    let uart_v = bad("\n[[instrument]]\nref = \"XU1\"\nkind = \"uart\"\nprobes = [\"v(mid)\"]\n");
+    assert!(
+        uart_v.iter().any(|e| e.contains("a UART console reads d(..)")),
+        "{uart_v:?}"
+    );
+    let three =
+        bad("\n[[instrument]]\nref = \"XU1\"\nkind = \"uart\"\nprobes = [\"d(R1.1)\", \"d(R1.2)\", \"d(R2.1)\"]\n");
+    assert!(three.iter().any(|e| e.contains("TX and optionally RX")), "{three:?}");
+    let baud =
+        bad("\n[[instrument]]\nref = \"XU1\"\nkind = \"uart\"\nprobes = [\"d(R1.2)\"]\nparams = { baud = -1 }\n");
+    assert!(
+        baud.iter().any(|e| e.contains("baud must be a positive number")),
+        "{baud:?}"
+    );
+    let rate = bad(
+        "\n[[instrument]]\nref = \"XLA1\"\nkind = \"logic\"\nprobes = [\"d(R1.2)\"]\nparams = { sample_rate = \"fast\" }\n",
+    );
+    assert!(rate.iter().any(|e| e.contains("sample_rate must be")), "{rate:?}");
+    let ok =
+        bad("\n[[instrument]]\nref = \"XU1\"\nkind = \"uart\"\nprobes = [\"d(R1.2)\"]\nparams = { baud = 115200 }\n");
+    assert!(ok.is_empty(), "{ok:?}");
+}
