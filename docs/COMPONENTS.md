@@ -44,6 +44,7 @@ Nine parts, all with an `[analog]` section. There is no digital or protocol mode
 | `generic.led-blue-0603` | `parts/leds/blue-0603` | Blue 0603 LED (APT1608QBC/D), typical 3.3 V at 20 mA |
 | `generic.npn-small-signal` | `parts/discretes/npn-small-signal` | MMBT3904-class Gummel-Poon NPN (Ohmforge parameters, not a vendor model) |
 | `ams.ams1117-3.3` | `parts/regulators/ams1117` | AMS1117-3.3 1 A LDO macromodel (`ams1117.lib`), checked against the datasheet and ngspice |
+| `ti.ne555` | `parts/timers/ne555` | NE555 timer macromodel (`ne555.lib`), checked against TI SLFS022K |
 | `bosch.bme280` | `parts/sensors/bosch-bme280` | GY-BME280 supply load only; I2C behaviour is not implemented |
 | `generic.pushbutton` | `parts/switches/pushbutton-6mm` | 6 mm tactile push button (SPST-NO) as an ideal switch: 0.1 Ω closed, 100 MΩ open, pressed and released at run time; bounce is a sequence of presses and releases |
 | `bourns.ptv09a-b103` | `parts/passives/bourns-ptv09a` | Bourns PTV09A 10 kΩ ±20 % linear potentiometer: two resistors split at the wiper (`position` 0 to 1), turned at run time |
@@ -173,7 +174,7 @@ Electromechanical models (DC motor with back-EMF and inertia, servo) are listed 
 
 ## ICs
 
-- [ ] **555 timer** (NE555 / TLC555) — Analog macromodel or `subckt`; passive / GPIO. P3. Can be built from solver primitives or a subcircuit; no new SoC peripheral needed for a free-running oscillator. A 555 output can drive a GPIO input.
+- [x] **NE555 timer** (`ti.ne555`) — Analog SPICE macromodel (`subckt`); passive / GPIO. P3. Comparators, latch with RESET priority, discharge saturation, output drops, supply and pin currents, checked against TI SLFS022K (astable, monostable, RESET, CONT). A 555 output can drive a GPIO input. The CMOS TLC555 is still open.
 - [ ] **Op-amp** (LM358 class) — Analog macromodel or `subckt`; analog pins, sometimes ADC. P2. Named with AMS1117 and TL431 in the roadmap for phase P3. The `subckt` path already works (as the AMS1117 shows). Firmware can read the result through the ADC.
 - [ ] **Comparator** (LM393 class) — Analog macromodel; GPIO or analog. P2. Same `subckt` path. Its output can drive a C3 GPIO input.
 - [ ] **Shunt reference, TL431** — Analog macromodel or `subckt`; power / analog. P2. Also named in the phase P3 macromodel work. No SoC peripheral needed.
@@ -220,7 +221,7 @@ Checklist tiers below are the P1/P2/P3 *component* priorities, not roadmap phase
 | Boards and interconnect | 10 | 0 | 5 | 3 | 2 |
 | **Total** | **84** | **9** | **17** | **48** | **19** |
 
-The eleven library parts are: the chip resistor, MLCC, tantalum capacitor, red/green/blue 0603 LEDs, small-signal NPN, AMS1117-3.3, the BME280 supply load, the tactile push button and the potentiometer.
+The twelve library parts are: the chip resistor, MLCC, tantalum capacitor, red/green/blue 0603 LEDs, small-signal NPN, AMS1117-3.3, the NE555 timer, the BME280 supply load, the tactile push button and the potentiometer.
 
 ## Suggested order
 

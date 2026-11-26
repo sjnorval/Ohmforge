@@ -190,6 +190,7 @@ Each step lands with its own tests; firmware is ours and tiny, built with zig an
 - [ ] Compatibility and electrical-rule checks, first slice (design: [`design/compatibility-checks.md`](design/compatibility-checks.md)): cited interface and rating fields in `part.toml`, a visible Checks panel, and CLI findings for LED-without-resistor, supply out of range, logic-level mismatch and missing decoupling when the citations exist. The full `ohmforge review` rule set remains AI4 in P4. Needs E4, E6
 - [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour, tests and, where a check uses a rating, a citation (growth targets: [`COMPONENTS.md`](COMPONENTS.md)). Needs E6
 - [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
+- [x] NE555 timer macromodel (`ti.ne555`, from TI SLFS022K, datasheet checks through the bridge); 555 demos follow with the demo rework
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
 - [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export (design: [`design/kicad-export.md`](design/kicad-export.md); exported wires use the same routed paths). Needs E4, E6
 - [ ] Parts availability, first slice (design: [`design/parts-availability.md`](design/parts-availability.md); builds on BOM v1 #59 and E6 #50)
