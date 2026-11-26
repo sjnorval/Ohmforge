@@ -36,7 +36,7 @@ Non-goals:
 
 - Mains installation design. Fixed wiring rules (IEC 60364-5-52, and SANS 10142-1 in South Africa) are out of scope; Ohmforge is for low-voltage electronics and says so in its warnings.
 - Certifying a design. Ampacity figures are guidance from published formulas and our own models, not a compliance statement.
-- Field solving, skin and proximity effect, impedance-controlled routing or signal-integrity analysis beyond the lumped values in W4.
+- Field solving, skin and proximity effect, impedance-controlled routing or signal-integrity analysis beyond the lumped values in W4. IBIS pin models are a later, table-driven extension (P5; [`model-and-waveform-interop.md`](model-and-waveform-interop.md)), not a field solver, and are not part of W1–W4.
 - A PCB layout editor. Trace attributes come from the user or from an imported or exported layout.
 
 ## 3. Standards and how we use them

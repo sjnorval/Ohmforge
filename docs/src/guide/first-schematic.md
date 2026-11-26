@@ -1,6 +1,6 @@
 # Your first schematic (preview of the planned workflow)
 
-> **Coming soon. Nothing in steps 1 to 10 works yet.** This page previews how you will create a new schematic from scratch once the planned pieces land: circuit files (engine phase E4) and parts and BOM from components (E6) in [`engine-components.md`](../design/engine-components.md), the schematic editor's place-and-wire work ([`wire-routing.md`](../design/wire-routing.md)), automatic layout ([`schematic-layout.md`](../design/schematic-layout.md)), themes ([`schematic-themes.md`](../design/schematic-themes.md)), stress states ([`component-stress-states.md`](../design/component-stress-states.md)), wires and traces ([`interconnects.md`](../design/interconnects.md)), parts availability ([`parts-availability.md`](../design/parts-availability.md)), firmware upload from your editor ([`editor-integration.md`](../design/editor-integration.md)), and sweeps and design review ([`ai-and-scenario-sweeps.md`](../design/ai-and-scenario-sweeps.md)). The phase each step needs is named in the step; the [roadmap](../roadmap.md) tracks them, and an illustrated version of this guide is a P3 roadmap item. Details marked *planned* are not decided yet. If you would rather start from a finished circuit, the official example gallery
+> **Coming soon. Nothing in steps 1 to 10 works yet in the app as a from-scratch editor.** This page previews how you will create a new schematic from scratch once the remaining pieces land: circuit files (engine phase E4, done) and parts and BOM from components (E6) in [`engine-components.md`](../design/engine-components.md), the schematic editor's place-and-wire work ([`wire-routing.md`](../design/wire-routing.md)), automatic layout ([`schematic-layout.md`](../design/schematic-layout.md)), themes ([`schematic-themes.md`](../design/schematic-themes.md)), stress states ([`component-stress-states.md`](../design/component-stress-states.md)), wires and traces ([`interconnects.md`](../design/interconnects.md)), parts availability ([`parts-availability.md`](../design/parts-availability.md)), firmware upload from your editor ([`editor-integration.md`](../design/editor-integration.md)), and sweeps and design review ([`ai-and-scenario-sweeps.md`](../design/ai-and-scenario-sweeps.md)). The phase each step needs is named in the step; the [roadmap](../roadmap.md) tracks them, and an illustrated version of this guide is a P3 roadmap item. Details marked *planned* are not decided yet. If you would rather start from a finished circuit, the official example gallery
 (P3; [Official examples and sharing](examples-and-sharing.md)) copies a project
 into a folder you own. This guide is the from-scratch path.
 
@@ -10,7 +10,7 @@ For what you can do **today**, see [What works today](#what-works-today) at the 
 
 ## 1. Start a new project
 
-*Needs E4 (circuit files).*
+*Needs E4 (circuit files, done). A general File → New project in the app is still to do.*
 
 Create a new project from the app. A project is a folder holding:
 
@@ -22,7 +22,7 @@ The exact menu names and project file layout are *planned*.
 
 ## 2. Add the ESP32-C3 and the bench supply
 
-*Needs E3 (done) and E4.*
+*Needs E3 (done) and E4 (done).*
 
 1. Add the **ESP32-C3** (`espressif.esp32-c3`). Its pins are the chip's own: `3V3`, `GND` and the GPIOs.
 2. Add the **bench PSU** and set its voltage (3.3 V for the C3), series resistance and current limit. Connect its `+` to the 3V3 supply net and its `−` to ground; every supply needs both connections.
@@ -107,10 +107,10 @@ Build your firmware the way you already do, then load it in one of these ways:
 |---|---|
 | Run the five built-in demos in the desktop app (LED blink, potentiometer dimmer, LED fade, push button poll and irq) and change the bench supply, pot and button | Creating or saving a schematic, or opening an official example pack, in the app |
 | Simulate your own **analog** circuit as a SPICE netlist with `ohmforge run` | An ESP32-C3 or firmware in a netlist |
-| Run a demo **circuit file** headless, firmware included: `ohmforge run circuits/demos/blink.circuit.toml --uart` (CSV of every net and probe, VCD), and check or format circuit files with `ohmforge circuit check` / `fmt` | Opening a circuit file in the app (E4c) |
+| Run a demo **circuit file** headless, firmware included: `ohmforge run circuits/demos/blink.circuit.toml --uart` (CSV of every net and probe, VCD), and check or format circuit files with `ohmforge circuit check` / `fmt`. The desktop app runs the five demos from those embedded files (E4d) | Opening an arbitrary circuit file, or starting a new schematic, in the app |
 | Add a part under `parts/` and check it with `ohmforge validate-parts parts/` | Using a new part in the app |
 | Export a demo board's BOM with `ohmforge bom <blink\|dimmer\|fade\|button>` | A BOM for your own circuit |
 
 - **Build and run**: `cargo build --release -p of-app --features gui` and `cargo run --release -p of-app --features gui`; the CLI is `cargo run --release -p of-cli -- <command>`. There are no released binaries yet. All demos except LED blink need `scripts/fetch-esp-rom-elfs.sh` (or `.ps1`) first.
 - **SPICE netlists**: example circuits checked against ngspice are in `crates/of-analog/tests/circuits/` (for example `led_dc.cir`, `rc_step.cir`, `mvp_board.cir`). Run one with `cargo run --release -p of-cli -- run <file.cir> --out out.csv --vcd out.vcd`.
-- **New boards with firmware** can be written as a circuit file by hand, starting from a copy of one in `circuits/demos/` (format: [RFC 0003](https://github.com/sjnorval/Ohmforge/blob/main/rfcs/0003-circuit-file.md)), and run with `ohmforge run`; the app shows only the built-in demos. In Rust: see `crates/of-soc-esp32c3/tests/` (`blinky_led.rs`, `esp_hal_blinky.rs`), `crates/of-engine/tests/e2_ports.rs`, and the demo boards in `crates/of-ui/src/` with schematic coordinates placed by hand in `crates/of-ui/src/wiring/*.rs`.
+- **New boards with firmware** can be written as a circuit file by hand, starting from a copy of one in `circuits/demos/` (format: [RFC 0003](https://github.com/sjnorval/Ohmforge/blob/main/rfcs/0003-circuit-file.md)), and run with `ohmforge run`; the app shows only the built-in demos. In Rust: see `crates/of-soc-esp32c3/tests/` (`blinky_led.rs`, `esp_hal_blinky.rs`), `crates/of-engine/tests/e2_ports.rs`. Schematic geometry for the demos comes from the circuit files (`wiring::from_circuit`); the old hand-wired `wiring/*.rs` boards were removed in E4d.

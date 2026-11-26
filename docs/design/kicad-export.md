@@ -2,7 +2,7 @@
 
 Status: proposed (design only, no code). The roadmap already has P3 “KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export” and an item to explore Gerber, drill, BOM and pick-and-place via that export.
 Date: 2026-11-25.
-Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §9 and §11; [`wire-routing.md`](wire-routing.md); [`engine-components.md`](engine-components.md) E6; [`parts-availability.md`](parts-availability.md); [`interconnects.md`](interconnects.md) (copper weight in the PCB export).
+Related: [`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §9 and §11; [`wire-routing.md`](wire-routing.md); [`engine-components.md`](engine-components.md) E6; [`parts-availability.md`](parts-availability.md); [`interconnects.md`](interconnects.md) (copper weight in the PCB export); [`part-creator.md`](part-creator.md) (import and export of a *part* symbol, C3; this note remains the *circuit* export).
 
 Ohmforge is not a PCB layout tool. Once a circuit is a real, orderable design, the user should be able to take it into KiCad as a schematic and netlist, with footprints and MPNs preserved, and from there to a fabricator. This note describes that export path and the limits of the “explore fabrication” item.
 
@@ -50,5 +50,5 @@ File → Export → KiCad writes a folder with the schematic, the netlist, and t
 
 ## 7. Open questions
 
-- The pinned KiCad format version, and whether to emit a `fp-lib-table` / symbol library or only reference standard libraries plus a small Ohmforge library we maintain.
+- The pinned KiCad format version, and whether to emit a `fp-lib-table` / symbol library or only reference standard libraries plus a small Ohmforge library we maintain. The part creator (C3) should use the same version and mapping tables.
 - Whether a starter unrouted PCB is in 0.2 or is explicitly deferred.

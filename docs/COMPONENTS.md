@@ -16,7 +16,7 @@ These are release aims, not a promise that every checklist row below will be don
 
 The WASM SDK stays in P6. Official parts are the path to 50 in P3. Prefer a smaller set of well-cited, tested, orderable parts over a large set of unsourced symbols.
 
-Status: 20 November 2026 (Africa/Johannesburg), checked against `main` after the ADC, LEDC and potentiometer (#24); statuses updated 23 November 2026 for UART0 RX (#25, #30), the engine plan (#43), green and blue 0603 LEDs (#52) and the PSU return and averaging fix (#54). Checkboxes and "already in the library" notes were taken from the tree, not from plans.
+Status: 26 November 2026 (Africa/Johannesburg), checked against `main` after the NE555 macromodel (#99). Earlier checkpoints: ADC, LEDC and potentiometer (#24); UART0 RX (#25, #30); the engine plan (#43); green and blue 0603 LEDs (#52); the PSU return and averaging fix (#54); E2/E3 (`bench.psu`, `espressif.esp32-c3`); E4 circuit files; E5 instruments. Checkboxes and "already in the library" notes were taken from the tree, not from plans. The part creator that should grow this list is specified in [`design/part-creator.md`](design/part-creator.md).
 
 ## How to read the list
 
@@ -32,7 +32,7 @@ Status: 20 November 2026 (Africa/Johannesburg), checked against `main` after the
 
 ## Already in the library
 
-Nine parts, all with an `[analog]` section. There is no digital or protocol model in `of-components` yet (`rust:bme280` is named in the BME280 `part.toml`, but only the supply load is implemented).
+Twelve circuit parts with an `[analog]` section, plus the ESP32-C3 and the bench PSU (Rust models, no `[analog]` bridge kind) and four instrument profiles under `parts/instruments/`. There is no digital or protocol model in `of-components` yet (`rust:bme280` is named in the BME280 `part.toml`, but only the supply load is implemented).
 
 | Part id | Folder | What the model does |
 |---|---|---|
@@ -48,6 +48,8 @@ Nine parts, all with an `[analog]` section. There is no digital or protocol mode
 | `bosch.bme280` | `parts/sensors/bosch-bme280` | GY-BME280 supply load only; I2C behaviour is not implemented |
 | `generic.pushbutton` | `parts/switches/pushbutton-6mm` | 6 mm tactile push button (SPST-NO) as an ideal switch: 0.1 Ω closed, 100 MΩ open, pressed and released at run time; bounce is a sequence of presses and releases |
 | `bourns.ptv09a-b103` | `parts/passives/bourns-ptv09a` | Bourns PTV09A 10 kΩ ±20 % linear potentiometer: two resistors split at the wiper (`position` 0 to 1), turned at run time |
+| `espressif.esp32-c3` | `parts/mcu/esp32-c3` | ESP32-C3 as an engine component (`rust:esp32c3`); GPIO, ADC, LEDC, UART0 and datasheet supply current |
+| `bench.psu` | `parts/bench/psu` | Bench power supply (CV with a current limit); bench equipment, omitted from the BOM |
 
 These parts are already used in the blinky co-simulation (resistor + red LED), the esp-hal button co-simulation (push button on GPIO9 with the internal pull-up, LED on GPIO8; `crates/of-soc-esp32c3/tests/esp_hal_button.rs`), the esp-hal ADC/PWM co-simulation (potentiometer wiper on GPIO2, PWM-dimmed LED on GPIO8; `tests/esp_hal_adc_pwm.rs`) and in the MVP analog board check (USB 5 V stimulus, AMS1117, both capacitors, NPN switch and LEDs).
 
@@ -72,7 +74,7 @@ Taken from `of-analog`, `of-components`, `of-soc-esp32c3` and the roadmap. This 
 
 **Other chips and the breadboard view.** `of-soc-esp32` is a placeholder. Classic ESP32 through a QEMU sidecar is phase P3; an owned Xtensa core is P4; ESP32-S3 and ESP32-C6 are P6. The breadboard view sits in P3 beside the schematic editor, which is itself still to do (the desktop app today is a demo picker for the blink, pot dimmer, LED fade and push-button).
 
-**Engine plan.** Under [`design/engine-components.md`](design/engine-components.md) every part here becomes a component on one engine API (E2 and E3 in P2, E4 to E6 in P3; #46 to #50): its `part.toml` declares all pins, including supply and ground pins (no hidden connections to ground), names a registered model, and later gains a `[symbol]` and a `bom` flag. The bench supply (`bench.psu`, E2, #46) and the ESP32-C3 itself (`espressif.esp32-c3`, E3, #47) are planned components too; the bench supply is bench equipment and stays out of the BOM.
+**Engine plan.** Under [`design/engine-components.md`](design/engine-components.md) every part here is a component on one engine API (E2 and E3 in P2, done; E4 done and E5 nearly done in P3; E6, #50, still open): its `part.toml` declares all pins, including supply and ground pins (no hidden connections to ground), names a registered model, and later gains a `[symbol]` and a `bom` flag. The bench supply (`bench.psu`, E2) and the ESP32-C3 (`espressif.esp32-c3`, E3) are on `main`; the bench supply is bench equipment and stays out of the BOM. Instrument profiles live under `parts/instruments/` (E5f, E5g).
 
 ---
 
@@ -221,7 +223,7 @@ Checklist tiers below are the P1/P2/P3 *component* priorities, not roadmap phase
 | Boards and interconnect | 10 | 0 | 5 | 3 | 2 |
 | **Total** | **84** | **9** | **17** | **48** | **19** |
 
-The twelve library parts are: the chip resistor, MLCC, tantalum capacitor, red/green/blue 0603 LEDs, small-signal NPN, AMS1117-3.3, the NE555 timer, the BME280 supply load, the tactile push button and the potentiometer.
+The twelve circuit library parts are: the chip resistor, MLCC, tantalum capacitor, red/green/blue 0603 LEDs, small-signal NPN, AMS1117-3.3, the NE555 timer, the BME280 supply load, the tactile push button and the potentiometer. The tree also has `espressif.esp32-c3`, `bench.psu`, and instrument profiles for the Fluke 87V, Rigol DS1054Z, Rigol DP832 and Saleae Logic 8.
 
 ## Suggested order
 

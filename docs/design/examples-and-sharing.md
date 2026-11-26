@@ -8,7 +8,7 @@ People should be able to open a finished, well-explained project in one step, an
 
 ## 1. Current state
 
-On `main` (25 November 2026) the desktop app has a demo picker with bundled blink, dimmer, fade and push-button projects. Those demos are compiled into the app; you cannot yet open an arbitrary circuit file, and there is no pack or share-link format. Circuit files themselves are engine phase E4 (#48).
+On `main` (26 November 2026) the five official demos are circuit files in `circuits/demos/` (E4 complete, #73 and #77 to #80). `ohmforge run <file.circuit.toml>` runs any such file headless. The desktop app still launches those bundled demos from the embedded files rather than a general File → Open of an arbitrary project, and there is no pack or share-link format yet.
 
 ## 2. Goals and non-goals
 
