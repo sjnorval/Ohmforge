@@ -175,8 +175,8 @@ pub fn check_parts(src: &str, file: &CircuitFile, lib: &PartsIndex) -> Vec<Circu
 /// - names are case-sensitive, as the running session reads them;
 /// - a multimeter in `dc_v` reads a `v(..)`, in `dc_a` an `i(..)`; a scope reads
 ///   analog signals, a logic analyser `d(..)`;
-/// - real-world profiles (`parts/instruments/`) arrive in E5f, so only
-///   `"ideal"` resolves today.
+/// - a profile is `"ideal"` or a built-in real-world profile
+///   (`of_instruments::profile::lookup`) of the instrument's kind.
 ///
 /// Parts missing from `lib` are reported by [`check_parts`], not here.
 pub fn check_signals(src: &str, file: &CircuitFile, lib: &PartsIndex) -> Vec<CircuitError> {
@@ -196,13 +196,33 @@ pub fn check_signals(src: &str, file: &CircuitFile, lib: &PartsIndex) -> Vec<Cir
         if i.profile() != IDEAL_PROFILE
             && let Some(p) = &i.profile
         {
-            err(
-                p.span(),
-                format!(
-                    "{r}: unknown instrument profile '{}' (only \"{IDEAL_PROFILE}\" until the real-world profiles of E5f)",
-                    p.get_ref()
+            match of_instruments::profile::lookup(p.get_ref()) {
+                None => {
+                    let known: Vec<String> = of_instruments::profile::builtins()
+                        .iter()
+                        .filter(|k| k.kind().is_some())
+                        .map(|k| format!("\"{}\"", k.id()))
+                        .collect();
+                    err(
+                        p.span(),
+                        format!(
+                            "{r}: unknown instrument profile '{}' (known: \"{IDEAL_PROFILE}\", {})",
+                            p.get_ref(),
+                            known.join(", ")
+                        ),
+                    );
+                }
+                Some(k) if k.kind() != Some(i.kind()) => err(
+                    p.span(),
+                    format!(
+                        "{r}: '{}' is a {} profile, not a {} one",
+                        p.get_ref(),
+                        k.kind().unwrap_or("bench-supply"),
+                        i.kind()
+                    ),
                 ),
-            );
+                Some(_) => {}
+            }
         }
         for p in &i.probes {
             let text = p.get_ref();

@@ -1,0 +1,38 @@
+# Rigol DS1054Z oscilloscope analog front end, 1X probe (RFC 0004, engine E5f).
+# Data file, CC-BY-SA-4.0 (parts library). Facts from vendor PDFs, cited per table;
+# no vendor text is copied. Page numbers are the printed ones.
+# [DS]: DS1000Z datasheet DSA20100-2020-09,
+#       https://www.rigol.com/dam/global/downloads/brochures/en/data-sheet/oscilloscopes/DS1000Z_DataSheet_EN.pdf
+# [PG]: MSO1000Z/DS1000Z Programming Guide PGA19108-1110,
+#       https://www.rigol.com/dam/global/downloads/brochures/en/program-guide/oscilloscopes/DS1000Z_ProgrammingGuide_EN.pdf
+
+[instrument]
+id = "rigol.ds1054z"
+kind = "scope"
+name = "Rigol DS1054Z"
+verified = "2026-11-25"
+
+# 8 bits; YINCrement = VerticalScale/25, YREFerence = 127.
+[scope.adc]
+codes_per_div = 25.0
+reference_code = 127
+max_code = 255
+source = "[DS] p. 6; [PG] pp. 2-223, 2-224"
+
+# (1 MΩ ±1 %) ‖ (15 pF ±3 pF), nominal values.
+[scope.input]
+ohms = 1e6
+farads = 15e-12
+source = "[DS] p. 6"
+
+# DC gain ±4 % of full scale below 10 mV/div, ±3 % from 10 mV/div; offset ±0.1 div ± 2 mV ± 1 %
+# of offset. "Full scale" is taken as the 8-division screen (Rigol does not define it).
+[scope.accuracy]
+screen_divs = 8.0
+gain_pct_low = 4.0
+gain_pct = 3.0
+gain_low_below_volts_div = 10e-3
+offset_divs = 0.1
+offset_volts = 2e-3
+offset_pct = 1.0
+source = "[DS] p. 7"

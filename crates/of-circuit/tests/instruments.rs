@@ -328,8 +328,8 @@ mod signals {
                 "no net 'nope'",
             ),
             (
-                &["kind = \"scope\"", "profile = \"rigol.ds1054z\"", "probes = [\"Rail\"]"],
-                "\"rigol.ds1054z\"",
+                &["kind = \"scope\"", "profile = \"acme.x1\"", "probes = [\"Rail\"]"],
+                "\"acme.x1\"",
                 "unknown instrument profile",
             ),
         ];

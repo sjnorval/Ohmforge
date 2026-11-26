@@ -206,6 +206,22 @@ regulation rate") each < 0.01 % + 2 mV for voltage and < 0.01 % + 250 µA for cu
 warm-up (note 1). Only readback resolution and accuracy belong to the instrument profile;
 regulation and ripple describe the `bench.psu` component, not the readout.
 
+Fluke 87V (verified 2026-11-26 against [FL]: 80 Series V Users Manual, May 2004 Rev. 3,
+3/25, <https://media.fluke.com/72b063d9-22bd-44a7-a91b-b2c100f399c5_original%20file.pdf>).
+Accuracy is ±([% of reading] + [counts]) at 18 °C to 28 °C, ≤ 90 % RH, for one year after
+calibration; the display is 6000 counts (19,999 in 4½-digit mode, where the counts multiply
+by 10); Model 87 column. Page numbers are the printed ones.
+
+| Figure | Value | Source |
+|---|---|---|
+| DC volts | 600.0 mV (0.1 mV): 0.1 % + 1; 6.000 V, 60.00 V, 600.0 V (1 mV, 10 mV, 0.1 V): 0.05 % + 1; 1000 V (1 V): 0.05 % + 1 | [FL] Table 11, p. 42 |
+| Volts input impedance | 10 MΩ, < 100 pF (nominal) | [FL] Table 17, p. 47 |
+| DC current, µA | 600.0 µA (0.1 µA): 0.2 % + 4; 6000 µA (1 µA): 0.2 % + 2; burden 100 µV/µA (typical) | [FL] Table 13, p. 44 |
+| DC current, mA | 60.00 mA (0.01 mA): 0.2 % + 4; 400.0 mA (0.1 mA): 0.2 % + 2; burden 1.8 mV/mA (typical); 400 mA continuous, 600 mA for 18 h at most | [FL] Table 13, p. 44 |
+| DC current, A | 6.000 A (1 mA): 0.2 % + 4; 10.00 A (10 mA): 0.2 % + 2; burden 0.03 V/A (typical) | [FL] Table 13, p. 44 |
+| Resistance | 600.0 Ω: 0.2 % + 2 (with REL); 6.000 kΩ, 60.00 kΩ: 0.2 % + 1; 600.0 kΩ, 6.000 MΩ: 0.6 % + 1; 50.00 MΩ: 1.0 % + 3 (+0.5 % of reading above 30 MΩ) | [FL] Table 11, p. 42 |
+| Ohms test source | open circuit < 7.9 V dc; short-circuit current 1 mA (600 Ω), 100 µA (6 kΩ), 10 µA (60 kΩ), 1 µA (600 kΩ, 6 MΩ), 0.5 µA (50 MΩ), typical | [FL] Table 17, p. 47 |
+
 A profile models only deterministic effects:
 
 - loading or burden;
@@ -234,9 +250,18 @@ The engine elaborates these as ordinary analog devices with names under the
 instrument's ref, for example `XMM1.rin`, so they show in the solution like any part.
 Shunts are added between steps. A series element changes the topology, so it is
 applied before the session starts, or through a `Session` re-elaboration that
-keeps the time and state. The exact `Session` method is settled in E5f, and it is
-the only component-API or engine change in E5. Ideal profiles return no elements.
+keeps the time and state. Decided 2026-11-26 (Stefan): a series ammeter joins the
+circuit by re-elaborating it when the ammeter is added, not through a pre-placed
+zero-ohm element at every ammeter point. Ideal profiles return no elements.
 Trace parity runs only ideal profiles.
+
+#### E5f notes
+
+- **Re-elaboration at build.** `of_circuit::loads` turns each real-world `[[instrument]]` into load elements (a `dc_v` multimeter: its input resistance across the probed nets; a `dc_a` multimeter: its burden in series with the probed pin, on the `params.input` jack `uA`, `mA` (default) or `A`; a scope: its input from each probed net to ground) and `with_loads` adds them to the file as `generic.resistor` and `generic.capacitor-mlcc` placements; `build` applies this before elaborating, so adding a real ammeter rebuilds the session from t = 0. The ideal profile adds nothing, so the demos, goldens and trace parity do not change. Carrying time and state across a run-time re-elaboration (the desktop adding a meter mid-run) is still to do.
+- **Names.** Refs cannot contain `.`, so the elements are `XMM1_R1`, `XMM1_C1` and the moved pin's net `XMM1_n1` rather than `XMM1.rin`.
+- **Profiles are data.** The figures live in `parts/instruments/<vendor>.<model>/instrument.toml` (`fluke.87v`, `rigol.ds1054z`, `rigol.dp832`; every table has a `source`, and a missing or unknown field is an error); `of_instruments::profile` embeds them with `include_str!` (so wasm32 has them), parses them once (`parse`, `builtins`, `lookup`) and holds only behaviour. `circuit check` accepts `fluke.87v` on a multimeter and `rigol.ds1054z` on a scope; `rigol.dp832` is a readback profile, not an instrument.
+- **What a profile computes.** Autorange to the smallest range whose printed full scale holds the reading rounded to its last digit (no hysteresis; the manual gives none), `OL` above the top range (and above 400.0 mA on the mA jack), and the ± band from the table; the DS1054Z quantises at V/div ÷ 25 around code 127, clips to codes 0–255 and bands as gain × 8 div × V/div plus the offset term (taking the 8-division screen as "full scale" is an assumption); the DP832 rounds the readback to 10 mV / 1 mA and bands per channel. The 87V's resistance ranges are in the profile (display and band, including the 0.5 % adder above 30 MΩ), but the meter's test current through an unpowered circuit is not simulated, so resistance mode is not offered yet. `Reading::on(profile, input)` turns an ideal meter reading into what the profile shows, for example `22.98 ± 0.09 mA`.
+- **Desktop.** A Profiles row picks Ideal (the default) or a profile for the meters, the LED scope and the PSU readout (`of-ui` `bench::BenchProfiles`): meters show the 87V's value, band and `OL` (mA jack), the scope trace is quantised at its mA/div ÷ 25 with a note of the step and the band without its absolute-volt terms (the current probe's ratio is not modelled), and the PSU face shows the DP832's CH1 readback and bands. It is display only: the desktop does not re-elaborate the circuit with a meter's load mid-run. The 87V's < 100 pF is an upper bound, so the meter adds no capacitance; the scope's 15 pF is nominal (1X probe; probe ratios are not modelled).
 
 ## Determinism and wasm32 impact
 
@@ -261,7 +286,7 @@ Trace parity runs only ideal profiles.
 
 ## Unresolved questions
 
-- The exact `Session` API for a series load element at run time (E5f): re-elaboration versus a pre-placed zero-ohm element per ammeter point. Still open; it blocks E5f.
+- **Series load element (resolved 2026-11-26).** Re-elaboration when the ammeter is added, not a pre-placed zero-ohm element (see "Load-element API" and the E5f notes).
 - AC and resistance modes for the multimeter are left to a later RFC addendum.
 
 Resolved:

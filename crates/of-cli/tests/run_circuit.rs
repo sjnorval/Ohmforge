@@ -150,3 +150,79 @@ fn log_needs_a_csv_or_vcd_file() {
     assert!(!o.status.success());
     assert!(stderr(&o).contains(".csv or .vcd"), "{}", stderr(&o));
 }
+
+/// A Fluke 87V on a 10 kOhm/10 kOhm divider at 3.3 V (0.1 Ohm PSU) loads it with 10 MOhm (E5f).
+#[test]
+fn a_real_meter_loads_the_logged_circuit() {
+    let dir = std::env::temp_dir().join(format!("ohmforge-run-e5f-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("divider.circuit.toml");
+    std::fs::write(
+        &file,
+        r#"format = 1
+
+[circuit]
+name = "Divider"
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+params = { volts = 3.3 }
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+params = { resistance = 10000 }
+
+[[component]]
+ref = "R2"
+part = "generic.resistor"
+params = { resistance = 10000 }
+
+[[net]]
+name = "vdd"
+kind = "power"
+pins = ["PSU.+", "R1.1"]
+
+[[net]]
+name = "mid"
+pins = ["R1.2", "R2.1"]
+
+[[net]]
+name = "gnd"
+kind = "ground"
+pins = ["R2.2", "PSU.-"]
+
+[[instrument]]
+ref = "XMM1"
+kind = "multimeter"
+profile = "fluke.87v"
+mode = "dc_v"
+probes = ["v(mid)"]
+"#,
+    )
+    .unwrap();
+    let csv = dir.join("divider.csv");
+    let o = run(&[
+        file.to_str().unwrap(),
+        "--until",
+        "1ms",
+        "--step",
+        "500us",
+        "--log",
+        csv.to_str().unwrap(),
+    ]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let data = std::fs::read_to_string(&csv).unwrap();
+    let mut lines = data.lines();
+    assert_eq!(lines.next(), Some("time,v(mid)"));
+    let last: Vec<f64> = lines
+        .next_back()
+        .unwrap()
+        .split(',')
+        .map(|v| v.parse().unwrap())
+        .collect();
+    let low = 10e3 * 10e6 / (10e3 + 10e6);
+    let want = 3.3 * low / (10e3 + 0.1 + low);
+    assert!((last[1] - want).abs() <= 1e-6 * want, "{last:?} vs {want}");
+}

@@ -1,0 +1,180 @@
+# Fluke 87V true-RMS multimeter: DC volts, DC amps and resistance (RFC 0004, engine E5f).
+# Data file, CC-BY-SA-4.0 (parts library). Facts from the vendor manual, cited per table;
+# no vendor text is copied. Accuracy is ±(% of reading + counts of the last digit),
+# 18 °C to 28 °C, ≤ 90 % RH, one year after calibration, Model 87 column, 6000-count mode.
+# [FL]: Fluke 80 Series V Users Manual, May 2004 Rev. 3, 3/25,
+#       https://media.fluke.com/72b063d9-22bd-44a7-a91b-b2c100f399c5_original%20file.pdf
+# Page numbers are the printed ones.
+
+[instrument]
+id = "fluke.87v"
+kind = "multimeter"
+name = "Fluke 87V"
+verified = "2026-11-26"
+
+[multimeter]
+max_counts = 6000
+counts_source = "[FL] Specifications: 6000 counts, updates 4/s"
+
+# 10 MΩ, < 100 pF nominal; the capacitance is only an upper bound, so none is modelled.
+[multimeter.input]
+ohms = 10e6
+source = "[FL] Table 17, p. 47"
+
+[[multimeter.dc_v]]
+label = "600.0 mV"
+resolution = 1e-4
+pct = 0.1
+counts = 1
+full_scale = 0.6
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.dc_v]]
+label = "6.000 V"
+resolution = 1e-3
+pct = 0.05
+counts = 1
+full_scale = 6.0
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.dc_v]]
+label = "60.00 V"
+resolution = 1e-2
+pct = 0.05
+counts = 1
+full_scale = 60.0
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.dc_v]]
+label = "600.0 V"
+resolution = 0.1
+pct = 0.05
+counts = 1
+full_scale = 600.0
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.dc_v]]
+label = "1000 V"
+resolution = 1.0
+pct = 0.05
+counts = 1
+full_scale = 1000.0
+source = "[FL] Table 11, p. 42"
+
+# The 600.0 Ω figure assumes REL removes the lead resistance.
+[[multimeter.ohms]]
+label = "600.0 Ω"
+resolution = 0.1
+pct = 0.2
+counts = 2
+full_scale = 600.0
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.ohms]]
+label = "6.000 kΩ"
+resolution = 1.0
+pct = 0.2
+counts = 1
+full_scale = 6e3
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.ohms]]
+label = "60.00 kΩ"
+resolution = 10.0
+pct = 0.2
+counts = 1
+full_scale = 60e3
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.ohms]]
+label = "600.0 kΩ"
+resolution = 100.0
+pct = 0.6
+counts = 1
+full_scale = 600e3
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.ohms]]
+label = "6.000 MΩ"
+resolution = 1e3
+pct = 0.6
+counts = 1
+full_scale = 6e6
+source = "[FL] Table 11, p. 42"
+
+[[multimeter.ohms]]
+label = "50.00 MΩ"
+resolution = 10e3
+pct = 1.0
+counts = 3
+full_scale = 50e6
+source = "[FL] Table 11, p. 42"
+
+# 50.00 MΩ range: add 0.5 % of reading above 30 MΩ.
+[multimeter.ohms_adder]
+above = 30e6
+pct = 0.5
+source = "[FL] Table 11, p. 42"
+
+# µA position: burden 100 µV/µA (typical) = 100 Ω.
+[multimeter.micro]
+burden_ohms = 100.0
+source = "[FL] Table 13, p. 44"
+
+[[multimeter.micro.ranges]]
+label = "600.0 µA"
+resolution = 1e-7
+pct = 0.2
+counts = 4
+full_scale = 600e-6
+source = "[FL] Table 13, p. 44"
+
+[[multimeter.micro.ranges]]
+label = "6000 µA"
+resolution = 1e-6
+pct = 0.2
+counts = 2
+full_scale = 6000e-6
+source = "[FL] Table 13, p. 44"
+
+# mA position: burden 1.8 mV/mA (typical) = 1.8 Ω; 400 mA continuous (note 5).
+[multimeter.milli]
+burden_ohms = 1.8
+source = "[FL] Table 13, p. 44"
+
+[[multimeter.milli.ranges]]
+label = "60.00 mA"
+resolution = 1e-5
+pct = 0.2
+counts = 4
+full_scale = 0.06
+source = "[FL] Table 13, p. 44"
+
+[[multimeter.milli.ranges]]
+label = "400.0 mA"
+resolution = 1e-4
+pct = 0.2
+counts = 2
+full_scale = 0.4
+source = "[FL] Table 13, p. 44"
+
+# A jack: burden 0.03 V/A (typical) = 0.03 Ω.
+[multimeter.amps]
+burden_ohms = 0.03
+source = "[FL] Table 13, p. 44"
+
+[[multimeter.amps.ranges]]
+label = "6.000 A"
+resolution = 1e-3
+pct = 0.2
+counts = 4
+full_scale = 6.0
+source = "[FL] Table 13, p. 44"
+
+[[multimeter.amps.ranges]]
+label = "10.00 A"
+resolution = 1e-2
+pct = 0.2
+counts = 2
+full_scale = 10.0
+source = "[FL] Table 13, p. 44"

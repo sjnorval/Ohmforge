@@ -1,0 +1,48 @@
+# Rigol DP832 bench supply readback, standard resolution (RFC 0004, engine E5f).
+# Data file, CC-BY-SA-4.0 (parts library). Facts from the vendor datasheet, cited per table;
+# no vendor text is copied. Annual accuracy at 25 °C ± 5 °C after a one-hour warm-up.
+# [DP]: DP800 datasheet DSH03108-1110-202505 (May 2025),
+#       https://www.rigol.com/dam/global/downloads/brochures/en/data-sheet/dc-powers/DP800_DataSheet_EN.pdf
+# Page numbers are the printed ones.
+
+[instrument]
+id = "rigol.dp832"
+kind = "psu"
+name = "Rigol DP832"
+verified = "2026-11-25"
+
+[[psu.channels]]
+name = "CH1"
+max_volts = 30.0
+max_amps = 3.0
+volts_resolution = 10e-3
+amps_resolution = 1e-3
+volts_pct = 0.05
+volts_offset = 10e-3
+amps_pct = 0.15
+amps_offset = 5e-3
+source = "[DP] pp. 1, 7 (rating, readback accuracy), p. 8 (readback resolution)"
+
+[[psu.channels]]
+name = "CH2"
+max_volts = 30.0
+max_amps = 3.0
+volts_resolution = 10e-3
+amps_resolution = 1e-3
+volts_pct = 0.05
+volts_offset = 10e-3
+amps_pct = 0.15
+amps_offset = 5e-3
+source = "[DP] pp. 1, 7 (rating, readback accuracy), p. 8 (readback resolution)"
+
+[[psu.channels]]
+name = "CH3"
+max_volts = 5.0
+max_amps = 3.0
+volts_resolution = 10e-3
+amps_resolution = 1e-3
+volts_pct = 0.1
+volts_offset = 5e-3
+amps_pct = 0.15
+amps_offset = 5e-3
+source = "[DP] pp. 1, 7 (rating, readback accuracy), p. 8 (readback resolution)"

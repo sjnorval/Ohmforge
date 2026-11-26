@@ -6,8 +6,8 @@ use std::ops::Range;
 use toml::Spanned;
 
 use crate::{
-    CircuitError, CircuitFile, IDEAL_PROFILE, INSTRUMENT_KINDS, InstrumentEntry, MULTIMETER_MODES, NetKind, ParamValue,
-    SCOPE_PARAMS, SCOPE_TRIGGERS, SYMBOL_KINDS, SchematicPin,
+    CircuitError, CircuitFile, IDEAL_PROFILE, INSTRUMENT_KINDS, InstrumentEntry, MULTIMETER_INPUTS, MULTIMETER_MODES,
+    NetKind, ParamValue, SCOPE_PARAMS, SCOPE_TRIGGERS, SYMBOL_KINDS, SchematicPin,
 };
 
 /// What a ref names.
@@ -418,6 +418,8 @@ fn check_instrument(s: &mut Sink<'_>, i: &InstrumentEntry, probe_names: &BTreeSe
             ("scope", "trigger", _) => Some(format!("trigger must be one of {}", SCOPE_TRIGGERS.join(", "))),
             ("scope", "level", ParamValue::Number(x)) if x.is_finite() => None,
             ("scope", "level", _) => Some("level must be a number (volts or amps of the first channel)".into()),
+            ("multimeter", "input", ParamValue::Text(t)) if MULTIMETER_INPUTS.contains(&t.as_str()) => None,
+            ("multimeter", "input", _) => Some(format!("input must be one of {}", MULTIMETER_INPUTS.join(", "))),
             ("scope", other, _) => Some(format!(
                 "unknown scope param '{other}' (expected {})",
                 SCOPE_PARAMS.join(", ")

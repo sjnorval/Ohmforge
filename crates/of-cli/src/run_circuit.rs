@@ -9,9 +9,11 @@
 //! `--log FILE.csv|FILE.vcd` (E5e, RFC 0004) logs the file's measurements
 //! instead: every `[[probe]]` (column named after the probe) and then every
 //! inline `[[instrument]]` signal not already logged, read through the
-//! measurement service's `Probeable` view of the session (ideal profiles, so
-//! exactly what the solver has) on the same `--step` grid. VCD variables are
-//! `real`; digital `d(..)` signals come with the logic analyser (E5g).
+//! measurement service's `Probeable` view of the session on the same
+//! `--step` grid: exactly what the solver has, which includes the inputs of
+//! real-world instruments (E5f: `profile = "fluke.87v"` or `"rigol.ds1054z"`
+//! re-elaborate the circuit with the meter's or probe's loading). VCD
+//! variables are `real`; digital `d(..)` signals come with the logic analyser (E5g).
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
