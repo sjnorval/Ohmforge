@@ -1,0 +1,57 @@
+# Saleae Logic 8 logic analyser, digital inputs (RFC 0004, engine E5g).
+# Data file, CC-BY-SA-4.0 (parts library). Facts from Saleae's own documents, cited per table;
+# no vendor text is copied.
+# [LS]: Saleae Logic 8 USB Logic Analyzer data sheet (undated),
+#       https://downloads.saleae.com/specs/Logic+8+Data+Sheet.pdf
+# [SV]: Saleae support, "Supported Voltages",
+#       https://www.saleae.com/support/specifications-hardware/electrical-characteristics/supported-voltages
+# [SR]: Saleae support, "What Sample Rate Settings Are Available?",
+#       https://github.com/saleae/gitbook-docs/blob/master/getting-help/troubleshooting/technical-faq/what-sample-rate-settings-are-available.md
+# Not modelled: 25 MHz digital bandwidth, the analog channels, operating input 0 V to 5 V
+# and ±25 V protection ([LS] ratings).
+
+[instrument]
+id = "saleae.logic8"
+kind = "logic"
+name = "Saleae Logic 8"
+verified = "2026-11-26"
+
+[logic]
+channels = 8
+channels_source = "[LS] Key specifications: eight digital channels"
+rates = [100e6, 50e6, 40e6, 25e6, 20e6, 10e6, 8e6, 5e6, 4e6, 2e6, 1e6]
+rates_source = "[LS] Electrical characteristics: digital sampling rates"
+
+# 1 MΩ ‖ 10 pF.
+[logic.input]
+ohms = 1e6
+farads = 10e-12
+source = "[LS] Electrical characteristics: input impedance"
+
+# Fixed VIL 0.6 V, VIH 1.2 V; between them Saleae calls the result undefined, and the
+# model holds the last state.
+[logic.thresholds]
+vil = 0.6
+vih = 1.2
+source = "[LS] Electrical characteristics: digital logic threshold; [SV] Logic 8"
+
+# 100 MSPS on up to 3 channels, 50 MSPS on up to 6, 40 MSPS on up to 7, 25 MSPS on all 8.
+[[logic.rate_limits]]
+channels = 3
+max_rate = 100e6
+source = "[LS] note ***; [SR]"
+
+[[logic.rate_limits]]
+channels = 6
+max_rate = 50e6
+source = "[LS] note ***; [SR]"
+
+[[logic.rate_limits]]
+channels = 7
+max_rate = 40e6
+source = "[LS] note ***; [SR]"
+
+[[logic.rate_limits]]
+channels = 8
+max_rate = 25e6
+source = "[LS] example rate combinations: 8 channels, digital only, 25 MSPS"

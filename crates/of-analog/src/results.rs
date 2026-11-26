@@ -220,17 +220,29 @@ impl Waveforms {
 
     /// Write an IEEE 1364 VCD file with `real` variables (time in fs).
     pub fn write_vcd(&self, w: &mut dyn Write) -> io::Result<()> {
+        self.write_vcd_wires(w, &[])
+    }
+
+    /// [`Self::write_vcd`] with column `k` a 1-bit `wire` when `wire[k]` is
+    /// true (values 0 and 1; anything else, such as NaN, is `x`).
+    pub fn write_vcd_wires(&self, w: &mut dyn Write, wire: &[bool]) -> io::Result<()> {
         writeln!(w, "$date ohmforge $end")?;
         writeln!(w, "$version ohmforge {} $end", env!("CARGO_PKG_VERSION"))?;
         writeln!(w, "$timescale 1fs $end")?;
         writeln!(w, "$scope module circuit $end")?;
         let ids: Vec<String> = (0..self.names.len()).map(vcd_id).collect();
-        for (n, id) in self.names.iter().zip(&ids) {
+        let is_wire = |j: usize| wire.get(j).copied().unwrap_or(false);
+        for (j, (n, id)) in self.names.iter().zip(&ids).enumerate() {
             let clean: String = n
                 .chars()
                 .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
                 .collect();
-            writeln!(w, "$var real 64 {id} {} $end", clean.trim_end_matches('_'))?;
+            let clean = clean.trim_end_matches('_');
+            if is_wire(j) {
+                writeln!(w, "$var wire 1 {id} {clean} $end")?;
+            } else {
+                writeln!(w, "$var real 64 {id} {clean} $end")?;
+            }
         }
         writeln!(w, "$upscope $end")?;
         writeln!(w, "$enddefinitions $end")?;
@@ -242,8 +254,17 @@ impl Waveforms {
             }
             last_t = Some(t);
             writeln!(w, "#{t}")?;
-            for (c, id) in self.columns.iter().zip(&ids) {
-                writeln!(w, "r{:.10e} {id}", c[k])?;
+            for (j, (c, id)) in self.columns.iter().zip(&ids).enumerate() {
+                if is_wire(j) {
+                    let bit = match c[k] {
+                        0.0 => '0',
+                        1.0 => '1',
+                        _ => 'x',
+                    };
+                    writeln!(w, "{bit}{id}")?;
+                } else {
+                    writeln!(w, "r{:.10e} {id}", c[k])?;
+                }
             }
         }
         Ok(())

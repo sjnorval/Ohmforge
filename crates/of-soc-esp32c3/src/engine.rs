@@ -273,6 +273,10 @@ impl Esp32c3Engine {
 
     /// Forward changes of `link.pin` as events to `link.target`.
     pub fn link_pin(&mut self, link: PinLink) {
+        if usize::from(link.pin) == crate::gpio::U0TXD_PIN {
+            // A circuit watches U0TXD: time UART0's frames on it.
+            self.soc.bus.uart0.set_tx_line(true);
+        }
         self.links.push(link);
     }
 

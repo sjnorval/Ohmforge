@@ -201,9 +201,15 @@ pub struct Gpio {
     signals: u128,
 }
 
-/// Peripheral output signals a modelled peripheral drives: the LEDC
-/// channels (45 to 50).
-const DRIVEN_SIGNALS: u128 = 0x3f << 45;
+/// `U0TXD_OUT`, UART0's TX output signal in the GPIO matrix (TRM table
+/// 5.11-1). GPIO21's IO MUX function 0 is U0TXD directly (ESP32-C3 Series
+/// Datasheet v2.5, Table 2-4 IO MUX Pin Functions).
+pub const U0TXD_OUT: usize = 6;
+/// The pin whose IO MUX function 0 is U0TXD.
+pub const U0TXD_PIN: usize = 21;
+/// Peripheral output signals a modelled peripheral drives: UART0 TX (6)
+/// and the LEDC channels (45 to 50).
+const DRIVEN_SIGNALS: u128 = (0x3f << 45) | (1 << U0TXD_OUT);
 /// `GPIO_FUNCn_OUT_SEL_CFG` bits.
 const INV_SEL: u32 = 1 << 8;
 const OEN_SEL: u32 = 1 << 9;
@@ -254,7 +260,8 @@ impl Gpio {
             external: 0,
             input: 0,
             status: 0,
-            signals: 0,
+            // The UART TX line idles high.
+            signals: 1 << U0TXD_OUT,
         };
         g.input = g.input_levels();
         g
@@ -460,6 +467,13 @@ impl Gpio {
             pull_up,
             pull_down,
         };
+        if pin == U0TXD_PIN && (mux >> io_mux::MCU_SEL_SHIFT) & 7 == 0 {
+            // IO MUX function 0: U0TXD, driven by UART0 (output always enabled).
+            return PinOut {
+                level: Some(self.signals >> U0TXD_OUT & 1 != 0),
+                ..hiz
+            };
+        }
         let sel = self.out_sel[pin];
         let gpio_fn = (mux >> io_mux::MCU_SEL_SHIFT) & 7 == 1;
         let sig = sel & 0xff;
@@ -521,6 +535,21 @@ mod tests {
     }
 
     #[test]
+    fn gpio21_is_u0txd_after_reset_and_through_the_matrix() {
+        let mut g = Gpio::new();
+        assert_eq!(g.pin_out(U0TXD_PIN).level, Some(true), "idle high from reset");
+        g.set_output_signal(U0TXD_OUT, false);
+        assert_eq!(g.pin_out(U0TXD_PIN).level, Some(false));
+        // GPIO3 through the matrix: OUT_SEL = U0TXD_OUT, function 1.
+        g.write(reg::FUNC_OUT_SEL + 12, U0TXD_OUT as u32).unwrap();
+        assert_eq!(g.pin_out(3).level, Some(false));
+        g.set_output_signal(U0TXD_OUT, true);
+        assert_eq!(g.pin_out(3).level, Some(true));
+        g.reset();
+        assert_eq!(g.pin_out(U0TXD_PIN).level, Some(true));
+    }
+
+    #[test]
     fn peripheral_signals_drive_routed_pins() {
         let mut g = Gpio::new();
         // esp-hal's LEDC hookup: OUT_SEL 45 (LEDC channel 0), OEN_SEL so
@@ -553,7 +582,7 @@ mod tests {
         g.write(reg::ENABLE_W1TS, 1 << 3).unwrap();
         g.write(reg::FUNC_OUT_SEL + 12, SIG_GPIO_OUT | (1 << 8)).unwrap();
         assert_eq!(g.pin_out(3).level, Some(true), "inverted low");
-        g.write(reg::FUNC_OUT_SEL + 12, 6).unwrap(); // a peripheral signal
+        g.write(reg::FUNC_OUT_SEL + 12, 9).unwrap(); // an unmodelled peripheral signal
         assert_eq!(g.pin_out(3).level, None);
         g.write(reg::FUNC_OUT_SEL + 12, SIG_GPIO_OUT).unwrap();
         g.io_mux_write(4 + 12, 3 << 10).unwrap(); // function 0, drive 3
@@ -566,9 +595,9 @@ mod tests {
         );
         g.io_mux_write(4 + 12, (1 << 12) | (3 << 10)).unwrap();
         assert_eq!(g.pin_out(3), PinOut::driven(false, 3));
-        // UART0 TX (GPIO21) starts on function 0.
+        // UART0 TX (GPIO21) starts on function 0: U0TXD, idle high, whatever GPIO_ENABLE says.
         g.write(reg::ENABLE_W1TS, 1 << 21).unwrap();
-        assert_eq!(g.pin_out(21).level, None);
+        assert_eq!(g.pin_out(21).level, Some(true));
     }
 
     #[test]

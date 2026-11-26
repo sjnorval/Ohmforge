@@ -43,7 +43,7 @@ pub fn amp_input(params: &std::collections::BTreeMap<String, ParamValue>) -> Amp
 /// A multimeter in `dc_v` puts its input resistance across the measured
 /// nets, in `dc_a` its burden in series with the measured pin; a scope puts
 /// its input from each probed net to ground (differential and current
-/// probes add nothing). Unknown signals are skipped (they are reported by
+/// probes add nothing); a logic analyser its input on each probed pin's net. Unknown signals are skipped (they are reported by
 /// `library::check_signals`).
 pub fn instrument_loads(file: &CircuitFile, lib: &PartsIndex) -> Vec<InstrumentLoad> {
     let ground = file.circuit.ground.get_ref().as_str();
@@ -67,6 +67,12 @@ pub fn instrument_loads(file: &CircuitFile, lib: &PartsIndex) -> Vec<InstrumentL
                     d.amps_load(amp_input(&i.params), refdes, &pin)
                 }
                 (Profile::Scope(s), Signal::NetVolts(n)) => s.load(n, ground),
+                (Profile::Logic(l), Signal::Digital { refdes, pin }) => {
+                    let Some(net) = pin_net(file, refdes, pin) else {
+                        continue;
+                    };
+                    l.load(&net, ground)
+                }
                 _ => continue,
             };
             out.push(InstrumentLoad {
@@ -86,6 +92,15 @@ fn signal(file: &CircuitFile, text: &str) -> Option<Signal> {
         file.probes.iter().find(|p| p.name() == text)?.signal()
     };
     text.parse().ok()
+}
+
+/// The net `refdes.pin` is on.
+fn pin_net(file: &CircuitFile, refdes: &str, pin: &str) -> Option<String> {
+    let terminal = format!("{refdes}.{pin}");
+    file.nets
+        .iter()
+        .find(|n| n.pins.iter().any(|p| p.get_ref() == &terminal))
+        .map(|n| n.name().to_owned())
 }
 
 /// The first pin of `refdes`'s part.

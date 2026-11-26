@@ -28,6 +28,10 @@ pub const BUILTIN_FILES: &[(&str, &str)] = &[
         "rigol.dp832",
         include_str!("../../../parts/instruments/rigol.dp832/instrument.toml"),
     ),
+    (
+        "saleae.logic8",
+        include_str!("../../../parts/instruments/saleae.logic8/instrument.toml"),
+    ),
 ];
 
 /// What a real-world instrument adds to the circuit.
@@ -474,6 +478,89 @@ impl PsuChannel {
     }
 }
 
+/// A logic analyser's input thresholds.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogicThresholds {
+    /// Highest voltage read as low.
+    pub vil: f64,
+    /// Lowest voltage read as high.
+    pub vih: f64,
+    /// Where they come from.
+    pub source: String,
+}
+
+/// The highest sample rate for up to `channels` active channels.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogicRateLimit {
+    /// Active channels.
+    pub channels: usize,
+    /// Highest rate (Hz).
+    pub max_rate: f64,
+    /// Where it comes from.
+    pub source: String,
+}
+
+/// A logic analyser's digital inputs.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogicProfile {
+    /// Profile id.
+    #[serde(skip)]
+    pub id: String,
+    /// Display name.
+    #[serde(skip)]
+    pub name: String,
+    /// Digital channels.
+    pub channels: usize,
+    /// Where the channel count comes from.
+    pub channels_source: String,
+    /// Selectable sample rates (Hz).
+    pub rates: Vec<f64>,
+    /// Where the rates come from.
+    pub rates_source: String,
+    /// Input (resistance and capacitance to ground).
+    pub input: ScopeInput,
+    /// Thresholds.
+    pub thresholds: LogicThresholds,
+    /// Rate limits by active channel count.
+    pub rate_limits: Vec<LogicRateLimit>,
+}
+
+impl LogicProfile {
+    /// The highest listed rate at or below `requested` that `channels`
+    /// active channels allow.
+    pub fn rate(&self, requested: f64, channels: usize) -> Option<f64> {
+        let cap = self
+            .rate_limits
+            .iter()
+            .filter(|l| channels <= l.channels)
+            .map(|l| l.max_rate)
+            .fold(None, |m: Option<f64>, r| Some(m.map_or(r, |m| m.max(r))))?;
+        self.rates
+            .iter()
+            .copied()
+            .filter(|&r| r <= requested && r <= cap)
+            .fold(None, |m: Option<f64>, r| Some(m.map_or(r, |m| m.max(r))))
+    }
+
+    /// A fresh input with these thresholds.
+    pub fn input(&self) -> crate::logic::LogicInput {
+        crate::logic::LogicInput::new(self.thresholds.vil, self.thresholds.vih)
+    }
+
+    /// The probe's input on `net` to ground.
+    pub fn load(&self, net: &str, ground: &str) -> LoadElement {
+        LoadElement::Shunt {
+            net: net.into(),
+            reference: ground.into(),
+            ohms: self.input.ohms,
+            farads: self.input.farads,
+        }
+    }
+}
+
 /// A profile by id.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Profile {
@@ -483,6 +570,8 @@ pub enum Profile {
     Scope(ScopeProfile),
     /// A bench-supply readback.
     Psu(PsuProfile),
+    /// A logic analyser.
+    Logic(LogicProfile),
 }
 
 impl Profile {
@@ -492,6 +581,7 @@ impl Profile {
             Profile::Dmm(p) => &p.id,
             Profile::Scope(p) => &p.id,
             Profile::Psu(p) => &p.id,
+            Profile::Logic(p) => &p.id,
         }
     }
 
@@ -501,6 +591,7 @@ impl Profile {
             Profile::Dmm(p) => &p.name,
             Profile::Scope(p) => &p.name,
             Profile::Psu(p) => &p.name,
+            Profile::Logic(p) => &p.name,
         }
     }
 
@@ -510,6 +601,7 @@ impl Profile {
             Profile::Dmm(_) => Some("multimeter"),
             Profile::Scope(_) => Some("scope"),
             Profile::Psu(_) => None,
+            Profile::Logic(_) => Some("logic"),
         }
     }
 }
@@ -542,24 +634,36 @@ struct File {
     multimeter: Option<DmmProfile>,
     scope: Option<ScopeProfile>,
     psu: Option<PsuProfile>,
+    logic: Option<LogicProfile>,
 }
 
 /// Parse an `instrument.toml` document.
 pub fn parse(text: &str) -> Result<Profile, ProfileError> {
     let f: File = toml::from_str(text).map_err(|e| ProfileError::Toml(e.to_string()))?;
     let Header { id, kind, name, .. } = f.instrument;
-    match (kind.as_str(), f.multimeter, f.scope, f.psu) {
-        ("multimeter", Some(mut p), None, None) => {
+    let tables = usize::from(f.multimeter.is_some())
+        + usize::from(f.scope.is_some())
+        + usize::from(f.psu.is_some())
+        + usize::from(f.logic.is_some());
+    if tables != 1 {
+        return Err(ProfileError::Kind(kind));
+    }
+    match (kind.as_str(), f.multimeter, f.scope, f.psu, f.logic) {
+        ("multimeter", Some(mut p), ..) => {
             (p.id, p.name) = (id, name);
             Ok(Profile::Dmm(p))
         }
-        ("scope", None, Some(mut p), None) => {
+        ("scope", _, Some(mut p), ..) => {
             (p.id, p.name) = (id, name);
             Ok(Profile::Scope(p))
         }
-        ("psu", None, None, Some(mut p)) => {
+        ("psu", _, _, Some(mut p), _) => {
             (p.id, p.name) = (id, name);
             Ok(Profile::Psu(p))
+        }
+        ("logic", _, _, _, Some(mut p)) => {
+            (p.id, p.name) = (id, name);
+            Ok(Profile::Logic(p))
         }
         _ => Err(ProfileError::Kind(kind)),
     }
@@ -597,6 +701,14 @@ pub fn multimeters() -> impl Iterator<Item = &'static DmmProfile> {
 pub fn scopes() -> impl Iterator<Item = &'static ScopeProfile> {
     builtins().iter().filter_map(|p| match p {
         Profile::Scope(s) => Some(s),
+        _ => None,
+    })
+}
+
+/// The built-in logic-analyser profiles.
+pub fn logics() -> impl Iterator<Item = &'static LogicProfile> {
+    builtins().iter().filter_map(|p| match p {
+        Profile::Logic(l) => Some(l),
         _ => None,
     })
 }
@@ -723,7 +835,8 @@ mod tests {
         assert_eq!(lookup("fluke.87v").and_then(|p| p.kind()), Some("multimeter"));
         assert_eq!(lookup("rigol.ds1054z").and_then(|p| p.kind()), Some("scope"));
         assert_eq!(lookup("rigol.dp832").map(|p| p.kind()), Some(None));
-        assert!(lookup("saleae.logic8").is_none());
+        assert_eq!(lookup("saleae.logic8").and_then(|p| p.kind()), Some("logic"));
+        assert!(lookup("acme.x1").is_none());
         assert_eq!(lookup("fluke.87v").unwrap().name(), "Fluke 87V");
     }
 

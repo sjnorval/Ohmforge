@@ -318,7 +318,9 @@ impl SocBus {
             return;
         }
         self.sha = Sha::new();
+        let tx_line = self.uart0.tx_line();
         self.uart0 = Uart::new();
+        self.uart0.set_tx_line(tx_line);
         self.gpio.reset();
         self.cache = Cache::new();
         self.spi = [SpiMem::new(), SpiMem::new()];

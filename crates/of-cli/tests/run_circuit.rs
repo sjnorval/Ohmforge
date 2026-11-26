@@ -226,3 +226,203 @@ probes = ["v(mid)"]
     let want = 3.3 * low / (10e3 + 0.1 + low);
     assert!((last[1] - want).abs() <= 1e-6 * want, "{last:?} vs {want}");
 }
+
+/// A Saleae Logic 8 on a 9 kOhm/11 kOhm divider pin logs `d(R2.1)` as a 1-bit wire (E5g).
+#[test]
+fn a_logic_analyser_logs_digital_wires() {
+    let dir = std::env::temp_dir().join(format!("ohmforge-run-e5g-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("logic.circuit.toml");
+    std::fs::write(
+        &file,
+        r#"format = 1
+
+[circuit]
+name = "Logic"
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+params = { volts = 3.3 }
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+params = { resistance = 9000 }
+
+[[component]]
+ref = "R2"
+part = "generic.resistor"
+params = { resistance = 11000 }
+
+[[net]]
+name = "vdd"
+kind = "power"
+pins = ["PSU.+", "R1.1"]
+
+[[net]]
+name = "mid"
+pins = ["R1.2", "R2.1"]
+
+[[net]]
+name = "gnd"
+kind = "ground"
+pins = ["R2.2", "PSU.-"]
+
+[[instrument]]
+ref = "XLA1"
+kind = "logic"
+profile = "saleae.logic8"
+probes = ["d(R2.1)", "d(PSU.-)"]
+"#,
+    )
+    .unwrap();
+    for (name, check) in [("logic.csv", false), ("logic.vcd", true)] {
+        let out = dir.join(name);
+        let o = run(&[
+            file.to_str().unwrap(),
+            "--until",
+            "1ms",
+            "--step",
+            "250us",
+            "--log",
+            out.to_str().unwrap(),
+        ]);
+        assert!(o.status.success(), "{}", stderr(&o));
+        let data = std::fs::read_to_string(&out).unwrap();
+        if check {
+            assert!(data.contains("$var wire 1 ! d_R2_1 $end"), "{data}");
+            assert!(data.contains("\n1!\n") && data.contains("\n0\"\n"), "{data}");
+        } else {
+            let mut lines = data.lines();
+            assert_eq!(lines.next(), Some("time,d(R2.1),d(PSU.-)"));
+            for l in lines {
+                let v: Vec<f64> = l.split(',').map(|x| x.parse().unwrap()).collect();
+                assert_eq!((v[1], v[2]), (1.0, 0.0), "{l}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_uart_console_decodes_its_tx_pin() {
+    // An idle-high line (the divider's mid point) decodes to no bytes and no
+    // framing errors; the console line is printed under --uart.
+    let dir = std::env::temp_dir().join(format!("ohmforge-run-uart-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("uart.circuit.toml");
+    std::fs::write(
+        &file,
+        r#"format = 1
+
+[circuit]
+name = "Uart"
+
+[[component]]
+ref = "PSU"
+part = "bench.psu"
+params = { volts = 3.3 }
+
+[[component]]
+ref = "R1"
+part = "generic.resistor"
+params = { resistance = 9000 }
+
+[[component]]
+ref = "R2"
+part = "generic.resistor"
+params = { resistance = 11000 }
+
+[[net]]
+name = "vdd"
+kind = "power"
+pins = ["PSU.+", "R1.1"]
+
+[[net]]
+name = "mid"
+pins = ["R1.2", "R2.1"]
+
+[[net]]
+name = "gnd"
+kind = "ground"
+pins = ["R2.2", "PSU.-"]
+
+[[instrument]]
+ref = "XU1"
+kind = "uart"
+probes = ["d(R2.1)"]
+params = { baud = 115200 }
+"#,
+    )
+    .unwrap();
+    let o = run(&[file.to_str().unwrap(), "--until", "200us", "--uart"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.lines().any(|l| l == "XU1 (d(R2.1) at 115200 baud, 8N1):"), "{out}");
+    assert!(!stderr(&o).contains("framing"), "{}", stderr(&o));
+}
+
+#[test]
+fn the_uart_console_on_u0txd_matches_the_chips_serial_output() {
+    // The blink demo with GPIO21 (U0TXD) wired to a 100 kΩ pull-down and
+    // a UART console on it at the reset baud: XTAL 40 MHz / (SCLK_DIV_NUM 1
+    // + 1) / CLKDIV 694 = 28 818 Bd (ESP32-C3 TRM v1.4, Registers 26.18 and
+    // 26.7); the bare-metal blinky leaves UART0 unconfigured.
+    // Firmware paths are relative to the circuit file, so the file goes
+    // under the workspace (cargo's per-test scratch directory).
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("u0txd");
+    std::fs::create_dir_all(&dir).unwrap();
+    let Ok(rel) = dir
+        .canonicalize()
+        .unwrap()
+        .strip_prefix(&root)
+        .map(|r| r.components().count())
+    else {
+        eprintln!("skipped: the target directory is outside the workspace");
+        return;
+    };
+    let elf = format!("{}firmware/esp32c3-blinky/blinky.elf", "../".repeat(rel));
+    let demo = std::fs::read_to_string(root.join("circuits/demos/blink.circuit.toml")).unwrap();
+    let text = demo
+        .replace("\"../../firmware/esp32c3-blinky/blinky.elf\"", &format!("\"{elf}\""))
+        .replace(
+            "pins = [\"U1.GND\", \"D1.K\", \"PSU.-\", \"GND.1\"]",
+            "pins = [\"U1.GND\", \"D1.K\", \"PSU.-\", \"GND.1\", \"RTX.2\"]",
+        )
+        + r#"
+[[component]]
+ref = "RTX"
+part = "generic.resistor"
+params = { resistance = 100000 }
+
+[[net]]
+name = "tx"
+pins = ["U1.GPIO21", "RTX.1"]
+
+[[instrument]]
+ref = "XU1"
+kind = "uart"
+probes = ["d(U1.GPIO21)"]
+params = { baud = 28818 }
+"#;
+    let file = dir.join("blink-tx.circuit.toml");
+    std::fs::write(&file, text).unwrap();
+    // 16 frames of 10 bits at 28.8 kBd: 5.6 ms.
+    let o = run(&[file.to_str().unwrap(), "--until", "7ms", "--step", "1ms", "--uart"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let out = String::from_utf8_lossy(&o.stdout);
+    let header = "XU1 (d(U1.GPIO21) at 28818 baud, 8N1):\n";
+    let rest = out
+        .split_once(header)
+        .map(|(_, r)| r)
+        .unwrap_or_else(|| panic!("{out}"));
+    // The console's text, then the chip's own UART0 log: the same bytes.
+    assert!(rest.contains("ohmforge blinky"), "{rest:?}");
+    let (decoded, chip) = rest.split_at(rest.len() / 2);
+    assert_eq!(decoded, chip, "{rest:?}");
+    assert!(!stderr(&o).contains("framing"), "{}", stderr(&o));
+}

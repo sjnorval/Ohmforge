@@ -66,7 +66,10 @@ fn gpio8_toggles_every_250_us_and_uart_prints_the_banner() {
     assert_eq!(soc.uart_text(), "ohmforge blinky\n");
 
     let edges: Vec<_> = soc.pin_edges().iter().filter(|e| e.pin == 8).copied().collect();
-    assert!(soc.pin_edges().iter().all(|e| e.pin == 8), "only GPIO8 changes");
+    assert!(
+        soc.pin_edges().iter().all(|e| e.pin == 8 || e.pin == 21),
+        "only GPIO8 and U0TXD (GPIO21) change"
+    );
     // Enable first drives the pin low, then the loop starts high.
     assert_eq!(edges[0].out, PinOut::driven(false, 2));
     let levels: Vec<_> = edges[1..].iter().map(|e| e.out.level.unwrap()).collect();
@@ -95,7 +98,7 @@ fn gpio8_toggles_every_250_us_and_uart_prints_the_banner() {
 fn deadlines_do_not_drift() {
     let (mut soc, _) = boot();
     soc.run_until(SimTime::from_ms(10));
-    let edges: Vec<_> = soc.pin_edges()[1..].to_vec();
+    let edges: Vec<_> = soc.pin_edges().iter().filter(|e| e.pin == 8).skip(1).copied().collect();
     // Absolute deadlines: edge n is within one poll of first + n * 250 µs.
     let first = edges[0].at.0;
     for (n, e) in edges.iter().enumerate() {
@@ -107,4 +110,34 @@ fn deadlines_do_not_drift() {
         );
     }
     assert_eq!(edges.len(), 40);
+}
+
+#[test]
+fn the_banner_leaves_on_u0txd_at_the_configured_baud() {
+    let (mut soc, _) = boot();
+    soc.bus.uart0.set_tx_line(true);
+    // 16 frames at the reset baud (XTAL / 2 / 694, about 28.8 kBd; the
+    // bare-metal blinky leaves UART0 unconfigured) take about 5.6 ms.
+    soc.run_until(SimTime::from_ms(7));
+    let baud = soc.bus.uart0.baud(of_soc_esp32c3::uart::APB_HZ).unwrap();
+    let tx: Vec<(f64, bool)> = soc
+        .pin_edges()
+        .iter()
+        .filter(|e| e.pin == 21)
+        .map(|e| (e.at.as_secs_f64(), e.out.level.unwrap()))
+        .collect();
+    let level_at = |t: f64| tx.iter().take_while(|e| e.0 <= t).map(|e| e.1).last().unwrap_or(true);
+    // Decode 8N1: each start bit's falling edge times the bit centres.
+    let mut text = Vec::new();
+    let mut i = 0;
+    while let Some(&(start, _)) = tx[i..].iter().find(|e| !e.1) {
+        let bit = |k: f64| level_at(start + (k + 0.5) / baud);
+        assert!(!bit(0.0), "start bit");
+        let byte = (0..8).fold(0u8, |b, k| b | (u8::from(bit(f64::from(k + 1))) << k));
+        assert!(bit(9.0), "stop bit");
+        text.push(byte);
+        let end = start + 9.5 / baud;
+        i = tx.iter().position(|e| e.0 > end).unwrap_or(tx.len());
+    }
+    assert_eq!(String::from_utf8(text).unwrap(), soc.uart_text());
 }

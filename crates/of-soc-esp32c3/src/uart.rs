@@ -78,6 +78,8 @@ pub const RXFIFO_TOUT: u32 = 1 << 8;
 
 const STATUS_IDLE: u32 = 0xe000_c000;
 
+/// `UART_PARITY`: 0 even, 1 odd.
+const CONF0_PARITY_ODD: u32 = 1 << 0;
 const CONF0_PARITY_EN: u32 = 1 << 1;
 const CONF0_RXFIFO_RST: u32 = 1 << 17;
 const CONF0_TXFIFO_RST: u32 = 1 << 18;
@@ -112,6 +114,26 @@ pub struct Uart {
     tout_from: Option<SimTime>,
     /// Last time [`Self::advance`] or [`Self::queue_rx`] was given.
     now: SimTime,
+    /// TX line (U0TXD) level changes not yet due, in time order.
+    tx_line: VecDeque<TxEdge>,
+    /// TX line changes that are due, for the GPIO matrix.
+    tx_due: Vec<TxEdge>,
+    /// When the TX shifter is free for the next frame.
+    tx_free_at: SimTime,
+    /// The TX line level after the last scheduled change (idle high).
+    tx_level: bool,
+    /// Whether frames are shifted out on the TX line at all (see
+    /// [`Self::set_tx_line`]).
+    tx_line_on: bool,
+}
+
+/// A change of the UART0 TX line (`U0TXD`) at an exact time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TxEdge {
+    /// When the bit that sets this level starts.
+    pub at: SimTime,
+    /// New line level (`true` = high, the idle and stop level).
+    pub level: bool,
 }
 
 impl Default for Uart {
@@ -135,7 +157,24 @@ impl Uart {
             last_rx_at: None,
             tout_from: None,
             now: SimTime::ZERO,
+            tx_line: VecDeque::new(),
+            tx_due: Vec::new(),
+            tx_free_at: SimTime::ZERO,
+            tx_level: true,
+            tx_line_on: false,
         }
+    }
+
+    /// Shift TX frames out on the line (`U0TXD`) from now on. Off by
+    /// default: the line is only timed when a circuit watches the pin, so
+    /// a run that does not costs no extra events.
+    pub fn set_tx_line(&mut self, on: bool) {
+        self.tx_line_on = on;
+    }
+
+    /// Whether TX frames are shifted out on the line.
+    pub fn tx_line(&self) -> bool {
+        self.tx_line_on
     }
 
     fn slot(off: u32) -> Option<usize> {
@@ -266,9 +305,55 @@ impl Uart {
         }
     }
 
+    /// Shift `byte` out on the TX line as one frame (start bit, the
+    /// configured data bits LSB first, optional parity, stop bits) at the
+    /// configured baud, starting at `now` or when the previous frame ends.
+    /// The FIFO is not throttled: writes are never refused, so a burst of
+    /// writes leaves the line later than it was written. Nothing is sent
+    /// while the baud divider is invalid.
+    pub fn queue_tx(&mut self, now: SimTime, byte: u8, apb_hz: u64) {
+        let Some(baud) = self.baud(apb_hz).filter(|&b| b > 0.0 && self.tx_line_on) else {
+            return;
+        };
+        let conf0 = self.cfg(reg::CONF0);
+        let data = 5 + ((conf0 >> 2) & 3);
+        let mut levels = vec![false];
+        levels.extend((0..data).map(|i| byte >> i & 1 != 0));
+        if conf0 & CONF0_PARITY_EN != 0 {
+            let ones = (u32::from(byte) & ((1 << data) - 1)).count_ones();
+            levels.push((ones % 2 == 1) != (conf0 & CONF0_PARITY_ODD != 0));
+        }
+        levels.push(true);
+        let start = now.max(self.tx_free_at);
+        let at = |bits: f64| start.saturating_add(SimTime::from_secs_f64(bits / baud));
+        for (k, &level) in levels.iter().enumerate() {
+            if level != self.tx_level {
+                self.tx_line.push_back(TxEdge {
+                    at: at(k as f64),
+                    level,
+                });
+                self.tx_level = level;
+            }
+        }
+        self.tx_free_at = at(self.bits_per_frame());
+        self.release_tx(now);
+    }
+
+    fn release_tx(&mut self, now: SimTime) {
+        while self.tx_line.front().is_some_and(|e| e.at <= now) {
+            self.tx_due.extend(self.tx_line.pop_front());
+        }
+    }
+
+    /// TX line changes due so far, in time order.
+    pub fn take_tx_edges(&mut self) -> Vec<TxEdge> {
+        std::mem::take(&mut self.tx_due)
+    }
+
     /// Deliver due RX bytes and raise a timeout that has elapsed by `now`.
     pub fn advance(&mut self, now: SimTime, apb_hz: u64) {
         self.now = now.max(self.now);
+        self.release_tx(self.now);
         while let Some(at) = self.next_byte_at
             && at <= self.now
         {
@@ -295,7 +380,8 @@ impl Uart {
         let tout = self
             .tout_at(apb_hz)
             .filter(|&at| at > self.now && self.int_raw & RXFIFO_TOUT == 0);
-        [self.next_byte_at, tout].into_iter().flatten().min()
+        let tx = self.tx_line.front().map(|e| e.at);
+        [self.next_byte_at, tout, tx].into_iter().flatten().min()
     }
 
     /// Pop one RX byte, or `0` if the FIFO is empty.
@@ -406,6 +492,55 @@ mod tests {
         u.write(reg::ID, 0xc000_0500).unwrap();
         assert_eq!(u.read(reg::ID), Some(0x4000_0500), "UPDATE self-clears");
         assert_eq!(u.read(0x28), None);
+    }
+
+    #[test]
+    fn tx_shifts_frames_out_on_the_line() {
+        let mut u = uart_115200();
+        u.set_tx_line(true);
+        let baud = u.baud(APB_HZ).unwrap();
+        let t0 = SimTime::from_secs_f64(1e-3);
+        u.queue_tx(t0, b'A', APB_HZ); // 0x41: LSB first 1000_0010
+        u.queue_tx(t0, b'A', APB_HZ);
+        let bit = |k: f64| t0.saturating_add(SimTime::from_secs_f64(k / baud));
+        let mut all = u.take_tx_edges();
+        assert_eq!(
+            all,
+            vec![TxEdge { at: t0, level: false }],
+            "the start bit is due at once"
+        );
+        assert_eq!(u.next_event(APB_HZ), Some(bit(1.0)));
+        u.advance(bit(30.0), APB_HZ);
+        all.extend(u.take_tx_edges());
+        let want: Vec<(f64, bool)> = vec![
+            (0.0, false),
+            (1.0, true),
+            (2.0, false),
+            (7.0, true),
+            (8.0, false),
+            (9.0, true),
+            (10.0, false),
+            (11.0, true),
+            (12.0, false),
+            (17.0, true),
+            (18.0, false),
+            (19.0, true),
+        ];
+        let got: Vec<(SimTime, bool)> = all.iter().map(|e| (e.at, e.level)).collect();
+        let want: Vec<(SimTime, bool)> = want.into_iter().map(|(k, l)| (bit(k), l)).collect();
+        assert_eq!(got, want);
+        assert_eq!(u.next_event(APB_HZ), None);
+    }
+
+    #[test]
+    fn tx_waits_for_a_valid_baud() {
+        let mut u = Uart::new();
+        u.queue_tx(SimTime::ZERO, b'x', APB_HZ);
+        assert!(u.take_tx_edges().is_empty(), "the line is off by default");
+        u.set_tx_line(true);
+        u.write(reg::CLKDIV, 0).unwrap();
+        u.queue_tx(SimTime::ZERO, b'x', APB_HZ);
+        assert!(u.take_tx_edges().is_empty());
     }
 
     #[test]

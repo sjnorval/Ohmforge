@@ -5,6 +5,9 @@
 # v2.5, Table 5-8, Modem-sleep at 160 MHz, CPU running, peripheral clocks
 # disabled (16 mA with the CPU idle in `wfi`). Idle GPIO pads are 1 GΩ to
 # ground, within the 50 nA I_IH / I_IL limit of Table 5-4.
+# UART0: GPIO20 is U0RXD and GPIO21 is U0TXD (IO MUX function 0 after reset;
+# datasheet v2.5 Table 2-4 IO MUX Pin Functions, QFN32 pins 27 and 28). The
+# model drives GPIO21 with UART0's TX frames at the configured baud.
 [part]
 id = "espressif.esp32-c3"
 name = "ESP32-C3"

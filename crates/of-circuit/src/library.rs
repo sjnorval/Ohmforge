@@ -259,6 +259,7 @@ fn kind_mismatch(kind: &str, mode: Option<&str>, sig: &Signal) -> Option<String>
         ("multimeter", Some("dc_a")) if !amps => Some(format!("a dc_a multimeter reads i(..), not {sig}")),
         ("scope", _) if digital => Some(format!("a scope channel is analog; {sig} belongs on a logic analyser")),
         ("logic", _) if !digital => Some(format!("a logic analyser reads d(..), not {sig}")),
+        ("uart", _) if !digital => Some(format!("a UART console reads d(..) (TX, then RX), not {sig}")),
         _ => None,
     }
 }
