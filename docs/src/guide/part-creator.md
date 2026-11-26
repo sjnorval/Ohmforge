@@ -3,7 +3,8 @@
 This page previews the planned part creator: a tool that writes a complete
 part pack (`part.toml`, pins, symbol, model binding, cited ratings, MPNs and
 licence records). It does not work yet. The design is in
-[`docs/design/part-creator.md`](https://github.com/sjnorval/Ohmforge/blob/main/docs/design/part-creator.md).
+[`docs/design/part-creator.md`](https://github.com/sjnorval/Ohmforge/blob/main/docs/design/part-creator.md)
+(index and detailed sub-notes, including pitfalls and open decisions).
 
 For what you can do **today**, add a folder under `parts/` by hand and check it
 with `ohmforge validate-parts parts/`. See [Contributing](../contributing.md)

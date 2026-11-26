@@ -24,6 +24,8 @@ Nothing has been released yet. Everything below is on `main` and will ship in 0.
 
 ### Added
 
+- **Part creator design expanded:** the part-authoring note is now an index plus detailed sub-notes under [`docs/design/part-creator/`](docs/design/part-creator/) (data model grounded in `of-parts`, units and SPICE suffix traps, import and ngspice verification, ratings/BOM/KiCad pitfalls, licensing, UX and tests per milestone, and a numbered pitfalls checklist with open decisions). Docs only.
+
 - **Plan updates for the part creator, model/waveform interop, and a docs audit:** design notes for a part-authoring tool ([`docs/design/part-creator.md`](docs/design/part-creator.md)) and for model and waveform interop ([`docs/design/model-and-waveform-interop.md`](docs/design/model-and-waveform-interop.md): always-on editor simulation, licence-recorded SPICE import, analog waveform files, a Verilog-A sidecar, an ideal-switch converter mode, IBIS pins, out-of-process HDL blocks, and parked radio-frequency analyses). The roadmap, design plan, README, components checklist, contributing guide, engine and export notes, and mdBook stubs are updated to match. Stale status lines after E4, E5 and the NE555 part are corrected. Docs only.
 
 - **NE555 timer part** (`ti.ne555`, `parts/timers/ne555`): an original Ohmforge macromodel from TI SLFS022K with the 5 kΩ divider (CONT moves both thresholds), threshold and trigger comparators, an SR latch with RESET priority (0.7 V), a saturating discharge transistor, the VOH/VOL output drops, supply current and pin bias currents. Datasheet checks through the parts bridge cover the astable frequency and duty cycle, the 1.1 RC monostable, RESET and CONT (`crates/of-components/tests/ne555_datasheet.rs`).
