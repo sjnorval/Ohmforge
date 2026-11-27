@@ -532,7 +532,12 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
             w.scope_visible = visible.max(trace::visible_window(trace::TIME_DIVS[0]));
             w.apply_scope_window();
         }
-        Command::SetPlaying(p) => w.playing = p && w.sim.is_ok(),
+        Command::SetPlaying(p) => {
+            w.playing = p && w.sim.is_ok();
+            // Publish now: a paused worker steps no more, so nothing else would
+            // tell the UI (its Play/Pause buttons read this snapshot).
+            publish(shared, w.snapshot());
+        }
         Command::SetPot(p) => {
             w.pot = p.clamp(0.0, 1.0);
             if !w.recover()
