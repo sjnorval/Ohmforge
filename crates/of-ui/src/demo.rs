@@ -22,9 +22,11 @@ use crate::bench::BenchProfiles;
 use crate::meters_ui::{MeterView, SchematicHit, reading_text};
 use of_components::BounceSettings;
 
+use crate::status::{Message, StatusLog};
 use crate::supply::{self, SupplySettings};
 use crate::theme::{LED_RED, TEAL, panel};
 use crate::trace::{self, DEFAULT_TIME_DIV, TIME_DIVS};
+use of_circuit::library::RailPart;
 
 /// Current that counts as a fully-on LED for the on-screen glow (display only).
 const LED_FULL_MA: f64 = 4.0;
@@ -55,6 +57,13 @@ pub struct OhmforgeDemo {
     show_startup_animation: bool,
     /// Real-world profiles of the meters, scope and PSU readout (ideal by default).
     bench: BenchProfiles,
+    /// The parts on the bench supply's + rail that state a supply range.
+    rail: Vec<RailPart>,
+    /// Latched warnings and errors for the status strip.
+    status: StatusLog,
+    status_open: bool,
+    /// The cached schematic fit is from another demo (reset next frame).
+    fits_stale: bool,
 }
 
 struct HeldScope {
@@ -97,6 +106,10 @@ impl OhmforgeDemo {
             scope_hold: false,
             held_scope: None,
             bench: BenchProfiles::default(),
+            rail: crate::session_sim::rail_parts(DemoKind::Blink),
+            status: StatusLog::default(),
+            status_open: false,
+            fits_stale: true,
             show_startup_animation: crate::prefs::load().show_startup_animation,
         }
     }
@@ -118,6 +131,9 @@ impl OhmforgeDemo {
             return;
         }
         self.kind = kind;
+        self.rail = crate::session_sim::rail_parts(kind);
+        self.status.clear();
+        self.fits_stale = true;
         if !kind.has_pot() {
             self.pot = 0.5;
         }
@@ -315,216 +331,243 @@ impl OhmforgeDemo {
         }
         self.sync_serial(&snap);
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.heading(RichText::new(self.kind.title()).size(30.0).strong());
-                ui.add_space(12.0);
-                let mut kind = self.kind;
-                ComboBox::from_id_salt("demo_kind")
-                    .selected_text(kind.label())
-                    .show_ui(ui, |ui| {
-                        for k in crate::kind::PICKER {
-                            ui.selectable_value(&mut kind, k, k.label());
-                        }
-                    });
-                if kind != self.kind {
-                    self.select(kind);
-                }
-                ui.add_space(12.0);
-                let mut show = self.show_startup_animation;
-                if ui.checkbox(&mut show, "Show startup animation").changed() {
-                    self.show_startup_animation = show;
-                    let prefs = crate::prefs::AppPrefs {
-                        show_startup_animation: show,
-                    };
-                    if let Err(err) = crate::prefs::save(&prefs) {
-                        eprintln!("Ohmforge preferences: {err}");
-                    }
-                }
-            });
-            ui.add_space(4.0);
-            ui.weak(self.kind.hint());
-            ui.add_space(12.0);
-
-            ui.horizontal(|ui| {
-                let action = if snap.booting {
-                    "Booting"
-                } else if snap.playing {
-                    "Pause"
-                } else {
-                    "Play"
-                };
-                let play = egui::Button::new(RichText::new(action).strong().color(Color32::from_rgb(12, 35, 31)))
-                    .fill(TEAL)
-                    .min_size(vec2(86.0, 32.0));
-                let can_play = snap.error.is_none() && !snap.booting;
-                if ui.add_enabled(can_play, play).clicked() {
-                    self.session.send(Command::SetPlaying(!snap.playing));
-                }
-                if ui.add(egui::Button::new("Reset").min_size(vec2(64.0, 32.0))).clicked() {
-                    self.restart();
-                }
-                ui.monospace(format!("{:.3} ms", snap.time * 1e3));
-                ui.weak(format!("{} requested", trace::format_multiplier(snap.speed)));
-                let rt = format!("{} realtime", trace::format_multiplier(snap.rt_factor));
-                if snap.lagging {
-                    ui.colored_label(LED_RED, format!("{rt} (catching up)"));
-                } else {
-                    ui.weak(rt);
-                }
-            });
-
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let mut speed = self.speed;
-                let slider = Slider::new(&mut speed, live::MIN_SPEED..=live::MAX_SPEED)
-                    .logarithmic(true)
-                    .text("Speed")
-                    .custom_formatter(|n, _| trace::format_multiplier(n));
-                if ui.add(slider).changed() {
-                    self.speed = speed;
-                    self.session.send(Command::SetSpeed(speed));
-                }
-            });
-
-            if self.kind.has_pot() {
+        // One page scroll per demo, so a switch starts at the top.
+        egui::ScrollArea::vertical()
+            .id_salt(("demo-page", self.kind.label()))
+            .show(ui, |ui| {
                 ui.add_space(8.0);
-                let mut pot = self.pot;
-                let slider = Slider::new(&mut pot, 0.0..=1.0)
-                    .text("Potentiometer")
-                    .custom_formatter(|n, _| format!("{:.0}%", n * 100.0))
-                    .custom_parser(|s| s.trim().trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0));
-                if ui.add(slider).changed() {
-                    self.pot = pot;
-                    self.session.send(Command::SetPot(pot));
-                }
-            }
+                ui.horizontal_wrapped(|ui| {
+                    ui.heading(RichText::new(self.kind.title()).size(30.0).strong());
+                    ui.add_space(12.0);
+                    let mut kind = self.kind;
+                    ComboBox::from_id_salt("demo_kind")
+                        .selected_text(kind.label())
+                        .show_ui(ui, |ui| {
+                            for k in crate::kind::PICKER {
+                                ui.selectable_value(&mut kind, k, k.label());
+                            }
+                        });
+                    if kind != self.kind {
+                        self.select(kind);
+                    }
+                    // A new demo measures its schematic afresh (nothing cached
+                    // from the one before), this frame.
+                    if std::mem::take(&mut self.fits_stale) {
+                        crate::schematic::reset_fits(ui.ctx());
+                    }
+                    ui.add_space(12.0);
+                    let mut show = self.show_startup_animation;
+                    if ui.checkbox(&mut show, "Show startup animation").changed() {
+                        self.show_startup_animation = show;
+                        let prefs = crate::prefs::AppPrefs {
+                            show_startup_animation: show,
+                        };
+                        if let Err(err) = crate::prefs::save(&prefs) {
+                            eprintln!("Ohmforge preferences: {err}");
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                ui.weak(self.kind.hint());
+                ui.add_space(12.0);
 
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                let mut on = self.supply.on;
-                if ui.checkbox(&mut on, "Supply on").changed() {
-                    self.supply.on = on;
-                    self.session.send(Command::SetSupply(self.supply));
-                }
-                let mut v = self.supply.volts;
-                if ui
-                    .add(Slider::new(&mut v, 0.0..=5.0).text("Vset").suffix(" V").min_decimals(2))
-                    .changed()
-                {
-                    self.supply.volts = v;
-                    self.session.send(Command::SetSupply(self.supply));
-                }
-                let mut rs = self.supply.series_r;
-                if ui
-                    .add(
-                        Slider::new(&mut rs, 0.01..=10.0)
-                            .logarithmic(true)
-                            .text("Rs")
-                            .suffix(" Ω"),
-                    )
-                    .changed()
-                {
-                    self.supply.series_r = rs;
-                    self.session.send(Command::SetSupply(self.supply));
-                }
-                let mut lim = self.supply.current_limit * 1e3;
-                if ui
-                    .add(
-                        Slider::new(&mut lim, 0.1..=1000.0)
-                            .logarithmic(true)
-                            .text("Ilim")
-                            .suffix(" mA"),
-                    )
-                    .changed()
-                {
-                    self.supply.current_limit = lim / 1e3;
-                    self.session.send(Command::SetSupply(self.supply));
-                }
-            });
+                ui.horizontal(|ui| {
+                    let action = if snap.booting {
+                        "Booting"
+                    } else if snap.playing {
+                        "Pause"
+                    } else {
+                        "Play"
+                    };
+                    let play = egui::Button::new(RichText::new(action).strong().color(Color32::from_rgb(12, 35, 31)))
+                        .fill(TEAL)
+                        .min_size(vec2(86.0, 32.0));
+                    let can_play = snap.error.is_none() && !snap.booting;
+                    if ui.add_enabled(can_play, play).clicked() {
+                        self.session.send(Command::SetPlaying(!snap.playing));
+                    }
+                    if ui.add(egui::Button::new("Reset").min_size(vec2(64.0, 32.0))).clicked() {
+                        self.restart();
+                    }
+                    ui.monospace(format!("{:.3} ms", snap.time * 1e3));
+                    ui.weak(format!("{} requested", trace::format_multiplier(snap.speed)));
+                    let rt = format!("{} realtime", trace::format_multiplier(snap.rt_factor));
+                    if snap.lagging {
+                        ui.colored_label(LED_RED, format!("{rt} (catching up)"));
+                    } else {
+                        ui.weak(rt);
+                    }
+                });
 
-            let status = snap.supply_status;
-            ui.horizontal(|ui| {
-                let band = psu_band
-                    .map(|b| format!("  (\u{b1} {:.3} V, \u{b1} {:.1} mA)", b.volts_band, b.amps_band * 1e3))
-                    .unwrap_or_default();
-                ui.monospace(format!(
-                    "PSU  {:.2} V  {:.2} mA  {}{band}",
-                    status.volts,
-                    status.display_amps() * 1e3,
-                    supply::mode_label(status.mode)
-                ));
-            });
-            if let Some(warn) = supply::rating_warning(&status) {
-                ui.colored_label(LED_RED, warn);
-            }
-
-            if self.kind.has_button() {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    let mut on = self.bounce.enabled;
-                    if ui.checkbox(&mut on, "SW1 bounce").changed() {
-                        self.bounce.enabled = on;
-                        self.session.send(Command::SetBounce(self.bounce));
+                    let mut speed = self.speed;
+                    let slider = Slider::new(&mut speed, live::MIN_SPEED..=live::MAX_SPEED)
+                        .logarithmic(true)
+                        .text("Speed")
+                        .custom_formatter(|n, _| trace::format_multiplier(n));
+                    if ui.add(slider).changed() {
+                        self.speed = speed;
+                        self.session.send(Command::SetSpeed(speed));
                     }
-                    let mut seed = self.bounce.seed;
+                });
+
+                if self.kind.has_pot() {
+                    ui.add_space(8.0);
+                    let mut pot = self.pot;
+                    let slider = Slider::new(&mut pot, 0.0..=1.0)
+                        .text("Potentiometer")
+                        .custom_formatter(|n, _| format!("{:.0}%", n * 100.0))
+                        .custom_parser(|s| s.trim().trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0));
+                    if ui.add(slider).changed() {
+                        self.pot = pot;
+                        self.session.send(Command::SetPot(pot));
+                    }
+                }
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let mut on = self.supply.on;
+                    if ui.checkbox(&mut on, "Supply on").changed() {
+                        self.supply.on = on;
+                        self.session.send(Command::SetSupply(self.supply));
+                    }
+                    let mut v = self.supply.volts;
                     if ui
-                        .add(egui::DragValue::new(&mut seed).prefix("seed ").speed(1.0))
+                        .add(Slider::new(&mut v, 0.0..=5.0).text("Vset").suffix(" V").min_decimals(2))
                         .changed()
                     {
-                        self.bounce.seed = seed;
-                        self.session.send(Command::SetBounce(self.bounce));
+                        self.supply.volts = v;
+                        self.session.send(Command::SetSupply(self.supply));
                     }
-                    ui.weak("seed 0 is the firmware bounce test train");
+                    let mut rs = self.supply.series_r;
+                    if ui
+                        .add(
+                            Slider::new(&mut rs, 0.01..=10.0)
+                                .logarithmic(true)
+                                .text("Rs")
+                                .suffix(" Ω"),
+                        )
+                        .changed()
+                    {
+                        self.supply.series_r = rs;
+                        self.session.send(Command::SetSupply(self.supply));
+                    }
+                    let mut lim = self.supply.current_limit * 1e3;
+                    if ui
+                        .add(
+                            Slider::new(&mut lim, 0.1..=1000.0)
+                                .logarithmic(true)
+                                .text("Ilim")
+                                .suffix(" mA"),
+                        )
+                        .changed()
+                    {
+                        self.supply.current_limit = lim / 1e3;
+                        self.session.send(Command::SetSupply(self.supply));
+                    }
                 });
-            }
 
-            ui.add_space(8.0);
-            self.profile_bar(ui);
-            self.meter_bar(ui, &snap);
+                let status = snap.supply_status;
+                ui.horizontal(|ui| {
+                    let band = psu_band
+                        .map(|b| format!("  (\u{b1} {:.3} V, \u{b1} {:.1} mA)", b.volts_band, b.amps_band * 1e3))
+                        .unwrap_or_default();
+                    ui.monospace(format!(
+                        "PSU  {:.2} V  {:.2} mA  {}{band}",
+                        status.volts,
+                        status.display_amps() * 1e3,
+                        supply::mode_label(status.mode)
+                    ));
+                });
+                // Warnings and errors from the loaded circuit, in a strip of fixed
+                // height (latched, so nothing pops in and out per frame).
+                let mut current = Vec::new();
+                if let Some(warn) = supply::rating_warning(&status, &self.supply, &self.rail) {
+                    current.push(Message::warning(warn));
+                }
+                if let Some(error) = snap.error.as_ref().filter(|_| !snap.booting) {
+                    current.push(Message::error(format!(
+                        "Simulation paused: {error}. Change a setting or press Reset to rebuild."
+                    )));
+                }
+                // Only the selected demo's own snapshots speak: the first ones
+                // after a switch still carry the previous demo's supply.
+                if snap.kind == self.kind && !snap.booting {
+                    self.status.update(ui.input(|i| i.time), &current);
+                }
+                ui.add_space(4.0);
+                crate::status::strip(ui, &self.status, &mut self.status_open);
 
-            ui.add_space(8.0);
-            readouts(ui, &snap);
+                if self.kind.has_button() {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let mut on = self.bounce.enabled;
+                        if ui.checkbox(&mut on, "SW1 bounce").changed() {
+                            self.bounce.enabled = on;
+                            self.session.send(Command::SetBounce(self.bounce));
+                        }
+                        let mut seed = self.bounce.seed;
+                        if ui
+                            .add(egui::DragValue::new(&mut seed).prefix("seed ").speed(1.0))
+                            .changed()
+                        {
+                            self.bounce.seed = seed;
+                            self.session.send(Command::SetBounce(self.bounce));
+                        }
+                        if self.kind.has_mcu() {
+                            ui.weak("seed 0 is the firmware bounce test train");
+                        }
+                    });
+                }
 
-            ui.add_space(14.0);
-            if snap.booting {
-                ui.label("Booting the ESP32-C3 from the fetched ROM and bootloader…");
-            } else if let Some(error) = &snap.error {
-                ui.colored_label(LED_RED, error);
-            } else {
-                let hit = {
-                    let view = MeterView {
-                        arm: self.arm,
-                        pending_a: self.pending_a.as_ref().map(|p| p.id.as_str()),
-                        meters: &self.meters,
-                        readings: &snap.meter_readings,
-                        bench: self.bench,
+                ui.add_space(8.0);
+                self.profile_bar(ui);
+                self.meter_bar(ui, &snap);
+
+                ui.add_space(8.0);
+                readouts(ui, &snap);
+
+                ui.add_space(14.0);
+                if snap.booting {
+                    ui.label("Booting the ESP32-C3 from the fetched ROM and bootloader…");
+                }
+                // The panels draw whether or not the simulation runs: an error
+                // pauses it and shows in the status strip; the instruments keep
+                // the last good readings.
+                {
+                    let hit = {
+                        let view = MeterView {
+                            arm: self.arm,
+                            pending_a: self.pending_a.as_ref().map(|p| p.id.as_str()),
+                            meters: &self.meters,
+                            readings: &snap.meter_readings,
+                            bench: self.bench,
+                        };
+                        instruments(
+                            ui,
+                            &snap,
+                            self.kind,
+                            &view,
+                            &mut self.time_div,
+                            &mut self.scope_hold,
+                            &mut self.held_scope,
+                            &self.session,
+                        )
                     };
-                    instruments(
-                        ui,
-                        &snap,
-                        self.kind,
-                        &view,
-                        &mut self.time_div,
-                        &mut self.scope_hold,
-                        &mut self.held_scope,
-                        &self.session,
-                    )
-                };
-                if self.kind.has_button() && hit.button != self.button {
-                    self.button = hit.button;
-                    self.session.send(Command::SetButton(hit.button));
+                    if self.kind.has_button() && hit.button != self.button {
+                        self.button = hit.button;
+                        self.session.send(Command::SetButton(hit.button));
+                    }
+                    if let Some(probe) = hit.probe {
+                        self.on_probe(probe, &snap.layout);
+                    }
+                    ui.add_space(12.0);
+                    let now = SimTime::from_secs_f64(snap.time);
+                    self.serial_panel.show(ui, &mut self.monitor, "UART0", now);
+                    crate::digital_ui::show(ui, &snap.consoles, &snap.logic, snap.time);
                 }
-                if let Some(probe) = hit.probe {
-                    self.on_probe(probe, &snap.layout);
-                }
-                ui.add_space(12.0);
-                let now = SimTime::from_secs_f64(snap.time);
-                self.serial_panel.show(ui, &mut self.monitor, "UART0", now);
-                crate::digital_ui::show(ui, &snap.consoles, &snap.logic, snap.time);
-            }
-        });
+            });
 
         if snap.playing || snap.booting {
             ui.ctx().request_repaint_after(Duration::from_millis(16));
@@ -580,7 +623,21 @@ fn schematic(
         DemoKind::Ne555Astable | DemoKind::Ne555Monostable | DemoKind::Ne555Pwm | DemoKind::Clock555 => {
             match crate::session_sim::parsed(kind) {
                 Ok(file) => {
-                    crate::ne555::show(ui, file, &board, current, glow, snap.button, snap.supply_status, meters)
+                    let led = crate::ne555::LedState {
+                        duty: snap.pwm_duty,
+                        instant_ma: snap.led_instant,
+                    };
+                    crate::ne555::show(
+                        ui,
+                        file,
+                        &board,
+                        current,
+                        glow,
+                        led,
+                        snap.button,
+                        snap.supply_status,
+                        meters,
+                    )
                 }
                 Err(e) => {
                     ui.label(format!("{}: {e}", kind.label()));
@@ -934,6 +991,134 @@ fn scope(ui: &mut Ui, cfg: ScopePlot, trace: impl Iterator<Item = (f64, f64)>) -
         });
     }
     zoom
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use egui::Context;
+
+    /// The drawing's whole painted extent, top-left corner included, lies
+    /// inside its frame and inside the clip its shapes carry, and that clip
+    /// starts no lower and no further right than the frame.
+    fn assert_fits(what: &str, fit: &crate::schematic::FitRecord) {
+        assert!(
+            fit.drawn.min.x >= fit.frame.min.x - 0.5 && fit.drawn.min.y >= fit.frame.min.y - 0.5,
+            "{what}: drawn {:?} starts outside its frame {:?}",
+            fit.drawn,
+            fit.frame
+        );
+        assert!(
+            fit.clip.expand(0.5).contains_rect(fit.drawn),
+            "{what}: drawn {:?} outside its clip {:?}",
+            fit.drawn,
+            fit.clip
+        );
+        assert!(
+            fit.clip.min.y <= fit.frame.min.y + 0.5 && fit.clip.min.x <= fit.frame.min.x + 0.5,
+            "{what}: clip {:?} cuts into frame {:?}",
+            fit.clip,
+            fit.frame
+        );
+    }
+
+    /// Opening a demo after another (the app starts on blink; the clock's
+    /// drawing is the widest and the PWM dimmer's reaches above its own
+    /// origin) never reuses the previous drawing's fit: every demo's painted
+    /// extent lies inside its frame, top included, on the full app page at a
+    /// maximised window size.
+    #[test]
+    fn every_demo_fits_after_switching_from_another() {
+        let (w, h) = (2184.0f32, 1261.0f32);
+        for first in [DemoKind::Blink, DemoKind::Clock555] {
+            let mut app = OhmforgeDemo::new();
+            let ctx = Context::default();
+            let run = |app: &mut OhmforgeDemo, n: usize| {
+                let mut shapes = Vec::new();
+                for _ in 0..n {
+                    let raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(w, h))),
+                        ..Default::default()
+                    };
+                    let mut out = ctx.run_ui(raw, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| app.ui(ui));
+                    });
+                    out.textures_delta.clear();
+                    shapes = out.shapes;
+                }
+                shapes
+            };
+            app.select(first);
+            run(&mut app, 4);
+            for &kind in crate::kind::PICKER.iter().filter(|k| **k != first) {
+                app.select(kind);
+                let shapes = run(&mut app, 4);
+                let what = format!("{first:?} then {kind:?}");
+                let fit = crate::schematic::last_fit(&ctx).expect("a fitted schematic");
+                assert_fits(&what, &fit);
+                assert!(
+                    shapes.iter().any(|c| c.clip_rect == fit.clip),
+                    "{what}: no shape carries the schematic's clip"
+                );
+                assert!(
+                    fit.content.is_positive() && fit.drawn.width() > 100.0,
+                    "{what}: {fit:?}"
+                );
+            }
+        }
+    }
+
+    /// The schematic draws from any snapshot, a failed run's included (the
+    /// panels never depend on the simulation succeeding), and on every demo
+    /// its whole painted extent fits inside its frame, at a typical panel
+    /// width, a two-column one and a small one.
+    #[test]
+    fn schematics_draw_unclipped_when_the_simulation_failed() {
+        for &kind in crate::kind::PICKER.iter() {
+            let mut snap = Snapshot::empty(kind, crate::session_sim::file_supply(kind));
+            snap.error = Some("invariant: kernel: analog: time step too small (Newton did not converge)".into());
+            let view = MeterView {
+                arm: None,
+                pending_a: None,
+                meters: &[],
+                readings: &[],
+                bench: BenchProfiles::default(),
+            };
+            for width in [980.0, 470.0, 320.0] {
+                let ctx = Context::default();
+                let mut height = 0.0;
+                // The first frame measures the drawing; the next ones fit it.
+                for _ in 0..3 {
+                    let raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 1200.0))),
+                        ..Default::default()
+                    };
+                    let mut output = ctx.run_ui(raw, |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            let top = ui.cursor().top();
+                            let _ = schematic(ui, kind, 0.0, 1.0, kind.has_pot().then_some(0.5), &snap, &view);
+                            height = ui.cursor().top() - top;
+                        });
+                    });
+                    output.textures_delta.clear();
+                    assert!(!output.shapes.is_empty(), "{kind:?}: nothing painted");
+                }
+                assert!(
+                    height > 100.0,
+                    "{kind:?} at {width}: the schematic took {height} points"
+                );
+                let fit = crate::schematic::last_fit(&ctx).expect("a fitted schematic");
+                assert_fits(&format!("{kind:?} at {width}"), &fit);
+                assert!(
+                    fit.frame.expand(0.5).contains_rect(fit.drawn),
+                    "{kind:?} at {width}: drawn {:?} outside its frame {:?}",
+                    fit.drawn,
+                    fit.frame
+                );
+                assert!(fit.drawn.right() <= width + 0.5, "{kind:?} at {width}: {:?}", fit.drawn);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

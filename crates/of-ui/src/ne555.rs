@@ -9,8 +9,9 @@ use of_circuit::CircuitFile;
 use crate::meters::ProbeRef;
 use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
 use crate::schematic::draw_psu;
+use crate::schematic::{draw_led, fit_canvas};
 use crate::supply::{self, SupplyStatus};
-use crate::theme::{LED_RED, TEAL, panel};
+use crate::theme::{TEAL, panel};
 use crate::wiring::{self, Component, Direction, Point};
 
 /// What a body draws as, from its file part.
@@ -72,30 +73,64 @@ pub(crate) fn show(
     board: &wiring::Schematic,
     current_ma: f64,
     brightness: f32,
+    led: LedState,
     closed: bool,
     supply: SupplyStatus,
     meters: &MeterView<'_>,
 ) -> SchematicHit {
     let mut hit = SchematicHit::default();
+    let switch = board
+        .components
+        .iter()
+        .find(|c| symbol_of(file, c) == Symbol::Switch)
+        .map(|c| c.reference.clone());
     panel().show(ui, |ui| {
         ui.label(RichText::new("Schematic").strong());
-        hit.probe = draw(ui, file, board, brightness, closed, supply, meters);
+        let (probe, pressed) = draw(ui, file, board, brightness, closed, supply, meters);
+        hit.probe = probe;
+        hit.button = pressed;
         ui.horizontal(|ui| {
-            let pct = (brightness * 100.0).round() as i32;
-            ui.label(
-                RichText::new(if pct == 0 {
-                    "LED off".into()
-                } else {
-                    format!("LED {pct}%")
-                })
-                .strong(),
-            );
+            ui.label(RichText::new(led_label(led)).strong());
             ui.separator();
             let current = if current_ma.abs() < 0.005 { 0.0 } else { current_ma };
-            ui.monospace(format!("{current:.2} mA"));
+            ui.monospace(format!("{current:.2} mA avg"));
+            if let Some(sw) = &switch {
+                ui.separator();
+                ui.label(if closed {
+                    format!("{sw} held")
+                } else {
+                    format!("Hold {sw} to trigger")
+                });
+            }
         });
     });
     hit
+}
+
+/// What the LED is doing, from the simulation: its measured on-time for a
+/// switching output, otherwise whether it conducts now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LedState {
+    /// Measured PWM duty (%), when the output switches.
+    pub duty: Option<f64>,
+    /// Instantaneous LED current (mA).
+    pub instant_ma: f64,
+}
+
+/// The footer's LED label: the duty when the output switches (the same
+/// number as the PWM readout), else on/off. Never the averaged current
+/// scaled to a fake brightness.
+pub(crate) fn led_label(led: LedState) -> String {
+    match led.duty {
+        Some(d) => format!("LED on {d:.1}% of the time"),
+        None if led.instant_ma > 0.05 => "LED on".into(),
+        None => "LED off".into(),
+    }
+}
+
+/// The hit target of switch `reference` on a 555 board.
+pub(crate) fn switch_id(reference: &str) -> egui::Id {
+    egui::Id::NULL.with(("ne555-switch", reference))
 }
 
 /// A meter probe point: one per routed pin, on its net's solver node (the
@@ -144,17 +179,17 @@ fn draw(
     closed: bool,
     supply: SupplyStatus,
     meters: &MeterView<'_>,
-) -> Option<ProbeRef> {
+) -> (Option<ProbeRef>, bool) {
     let extent = board
         .components
         .iter()
         .fold((0.0f32, 0.0f32), |(w, h), c| (w.max(c.body.max.x), h.max(c.body.max.y)));
-    let (response, painter) = ui.allocate_painter(vec2(ui.available_width(), extent.1 + 40.0), Sense::hover());
+    let (response, painter, fit) = fit_canvas(ui, file.circuit.name.as_str(), vec2(extent.0 + 20.0, extent.1 + 40.0));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, file.circuit.name.as_str()));
-    let left = (response.rect.center().x - (extent.0 + 20.0) * 0.5).max(response.rect.left());
-    let top = response.rect.top() + 4.0;
-    let pt = |p: Point| pos2(left + p.x, top + p.y);
-    let xy = |x: f32, y: f32| pos2(left + x, top + y);
+    // Drawn at design size, then scaled to fit the panel (`fit_canvas`).
+    let pt = |p: Point| fit.raw(p.x, p.y + 4.0);
+    let xy = |x: f32, y: f32| fit.raw(x, y + 4.0);
+    let mut switches: Vec<(&str, egui::Rect)> = Vec::new();
     let text = ui.visuals().text_color();
     let muted = ui.visuals().weak_text_color();
     let wire = Stroke::new(1.7, muted);
@@ -277,14 +312,7 @@ fn draw(
             }
             Symbol::Led | Symbol::Diode => {
                 let led = Symbol::Led == symbol_of(file, comp);
-                let stroke = if led && on {
-                    Stroke::new(2.4, LED_RED.gamma_multiply(0.45 + 0.55 * brightness))
-                } else {
-                    wire
-                };
-                if led && on {
-                    painter.circle_filled(centre, 22.0, LED_RED.gamma_multiply(0.10 + 0.28 * brightness));
-                }
+                let stroke = wire;
                 // Anode to cathode, from the pins.
                 let pin = |name: &str| {
                     comp.pins
@@ -296,24 +324,26 @@ fn draw(
                     continue;
                 };
                 let dir = (ka - an).normalized();
-                let side = vec2(-dir.y, dir.x);
-                let (base, tip) = (centre - dir * 7.0, centre + dir * 7.0);
-                painter.line_segment([an, base], wire);
-                painter.line_segment([tip, ka], wire);
-                painter.add(Shape::convex_polygon(
-                    vec![base + side * 8.0, tip, base - side * 8.0],
-                    Color32::TRANSPARENT,
-                    stroke,
-                ));
-                painter.line_segment([tip + side * 8.0, tip - side * 8.0], stroke);
                 if led {
-                    for o in [0.0, 6.0] {
-                        let s = centre + side * (12.0 + o) + dir * (o - 3.0);
-                        painter.add(Shape::line(vec![s, s + side * 8.0 + dir * 4.0], stroke));
-                    }
+                    // The same LED symbol and glow as the ESP32-C3 demos.
+                    painter.line_segment([an, centre - dir * 12.0], wire);
+                    painter.line_segment([centre + dir * 12.0, ka], wire);
+                    draw_led(&painter, centre, dir, brightness, wire);
+                } else {
+                    let side = vec2(-dir.y, dir.x);
+                    let (base, tip) = (centre - dir * 7.0, centre + dir * 7.0);
+                    painter.line_segment([an, base], wire);
+                    painter.line_segment([tip, ka], wire);
+                    painter.add(Shape::convex_polygon(
+                        vec![base + side * 8.0, tip, base - side * 8.0],
+                        Color32::TRANSPARENT,
+                        stroke,
+                    ));
+                    painter.line_segment([tip + side * 8.0, tip - side * 8.0], stroke);
                 }
             }
             Symbol::Switch => {
+                switches.push((comp.reference.as_str(), egui::Rect::from_min_max(min, max)));
                 let (a, z) = (pos2(centre.x, min.y), pos2(centre.x, max.y));
                 painter.line_segment([a, a + vec2(0.0, 10.0)], wire);
                 painter.line_segment([z - vec2(0.0, 10.0), z], wire);
@@ -370,8 +400,24 @@ fn draw(
             xy: (p.at.x, p.at.y),
         })
         .collect();
+    // Scale the drawing into place; the switch targets and meters use screen points.
+    fit.finish(&painter);
+    let painter = fit.painter();
+    let xy = |x: f32, y: f32| fit.screen(x, y + 4.0);
+    let mut pressed = false;
+    for (reference, body) in switches {
+        let r = ui
+            .interact(
+                fit.screen_rect(body).expand(6.0),
+                switch_id(reference),
+                Sense::click_and_drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!("{reference} \u{00b7} hold to press"));
+        pressed |= r.is_pointer_button_down_on();
+    }
     let _: Pos2 = xy(0.0, 0.0);
-    meter_layer(ui, xy, &painter, &points, meters, muted)
+    (meter_layer(ui, xy, &painter, &points, meters, muted), pressed)
 }
 
 #[cfg(test)]
@@ -380,6 +426,84 @@ mod tests {
     use crate::kind::DemoKind;
     use crate::session_sim::{SessionSim, StartOptions};
     use of_instruments::{Multimeter, Reading};
+
+    /// SW1 on the monostable board is a hold-to-press target: a press on it
+    /// reports the button down (the worker then closes the switch), a
+    /// release lets it go.
+    #[test]
+    fn the_monostable_switch_takes_a_press() {
+        use crate::meters_ui::{MeterView, SchematicHit};
+        use crate::supply::SupplyStatus;
+        use egui::{Context, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+
+        let kind = DemoKind::Ne555Monostable;
+        let file = crate::session_sim::parsed(kind).unwrap();
+        let board = crate::boards::board(kind, None);
+        let switch = board
+            .components
+            .iter()
+            .find(|c| super::symbol_of(file, c) == super::Symbol::Switch)
+            .expect("the monostable has a switch");
+        let ctx = Context::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 900.0));
+        let view = MeterView {
+            arm: None,
+            pending_a: None,
+            meters: &[],
+            readings: &[],
+            bench: Default::default(),
+        };
+        let led = super::LedState {
+            duty: None,
+            instant_ma: 0.0,
+        };
+        let frame = |events: Vec<Event>| {
+            let mut hit = SchematicHit::default();
+            let raw = RawInput {
+                screen_rect: Some(screen),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    hit = super::show(ui, file, &board, 0.0, 0.0, led, false, SupplyStatus::default(), &view);
+                });
+            });
+            output.textures_delta.clear();
+            hit
+        };
+        // The first frame measures the drawing; later ones fit it in place.
+        for _ in 0..3 {
+            assert!(!frame(vec![]).button);
+        }
+        let target = ctx
+            .read_response(super::switch_id(&switch.reference))
+            .expect("the switch has a hit target")
+            .rect;
+        let at = target.center();
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::default(),
+        };
+        frame(vec![Event::PointerMoved(at)]);
+        let down = frame(vec![press(true)]).button;
+        let held = frame(vec![]).button;
+        assert!(down || held, "a press on {} holds the button", switch.reference);
+        frame(vec![press(false)]);
+        assert!(!frame(vec![]).button, "released");
+    }
+
+    /// The footer's LED label agrees with the PWM readout (the duty), and is
+    /// plain on/off without one.
+    #[test]
+    fn the_led_label_follows_the_duty() {
+        let l = |duty, instant_ma| super::led_label(super::LedState { duty, instant_ma });
+        assert_eq!(l(Some(52.8), 9.4), "LED on 52.8% of the time");
+        assert_eq!(l(None, 9.4), "LED on");
+        assert_eq!(l(None, 0.0), "LED off");
+    }
 
     /// The picker lists every demo once, the 555 ones included, and the
     /// painter has a symbol for every part of the 555 boards.

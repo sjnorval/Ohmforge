@@ -45,6 +45,8 @@ pub mod splash;
 #[cfg(all(feature = "gui", test))]
 mod stats;
 #[cfg(feature = "gui")]
+mod status;
+#[cfg(feature = "gui")]
 mod supply;
 #[cfg(feature = "gui")]
 mod theme;

@@ -77,7 +77,8 @@ pub struct SupplyStatus {
     pub amps_avg: Option<f64>,
     /// Regulation mode.
     pub mode: SupplyMode,
-    /// Set point or rail is outside 3.0–3.6 V.
+    /// Set point or rail is outside the supply range of the parts on the
+    /// + rail (`rated_min`/`rated_max`, set from the circuit's parts).
     pub outside_rated: bool,
 }
 
