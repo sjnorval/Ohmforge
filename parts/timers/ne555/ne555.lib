@@ -38,6 +38,22 @@
 * February 1992, page 5, "operating characteristics" (dropped in rev K).
 * VCC 4.5 to 16 V (5.3) is the recommended range; the model runs outside
 * it but the figures above are only claimed inside.
+* - Undervoltage lockout (an assumption: SLFS022K gives no UVLO or minimum
+*   operating figure, only the 4.5 V minimum of 5.3). Below about 2.3 V a
+*   bipolar 555's comparator and output stages have no headroom, so the
+*   model holds the latch reset there (output low, discharge on) and lets it
+*   go above 2.5 V rising (2.3 V falling): a Schmitt comparator whose
+*   output (node en) lowers its own threshold by 0.2 V once released, so
+*   a release holds even when the load it switches on pulls VCC down
+*   within the same step, and no comparator decides anything while locked.
+*   It senses VCC through a 10 us low-pass (buffered, so it draws nothing),
+*   as a real comparator takes time to respond; on a current-limited
+*   supply too weak for the load the chip hiccups in and out of lockout as
+*   a real one does. Above 2.5 V
+*   nothing changes (two 10 mOhm switches in the latch's set and reset
+*   paths). Without it the comparators chatter at VCC near 0 during a cold
+*   start (all their inputs within the 1 mV band) and the latch flips on
+*   every Newton iteration.
 .subckt ne555 gnd trig out reset cont thres disch vcc
 * Divider (6.2).
 R1 vcc cont 5k
@@ -48,9 +64,24 @@ Vqh qh gnd 1
 Vhalf half gnd 0.5
 Vrst rstref gnd 0.7
 * Latch: set by TRIG < CONT/2, reset by THRES > CONT, RESET pin first.
-Sset q qh lo trig nesw
-Sthr q gnd thres cont nesthr
+* The comparators reach q only while the lockout is released (en high).
+Sset qs qh lo trig nesw
+Suvs q qs en half neuven
+Sthr qt gnd thres cont nesthr
+Suvt q qt en half neuven
 Srst q gnd rstref reset nesrst
+* Undervoltage lockout: en goes high above 2.5 V and low below 2.3 V (its
+* threshold is 2.5 V - 0.2 x en); while en is low the latch is held reset.
+Euv uvbuf gnd vcc gnd 1
+Ruv uvbuf uvs 10k
+Cuv uvs gnd 1n
+Vuvx uvx gnd 2.5
+Euvth uvth uvx en gnd -0.2
+Suven en qh uvs uvth neuvc
+Ren en gnd 100k
+Suvlo q gnd half en neuvlo on
+Rqs qs gnd 1g
+Rqt qt gnd 1g
 Shi q qh q half nehold
 Slo q gnd half q nehold on
 * qn = 1 - q.
@@ -79,5 +110,8 @@ Gq vcc gnd qn gnd 1m
 .model nehold sw(vt=0 vh=0.1 ron=10k roff=1e12)
 .model neout sw(vt=0 vh=0.1 ron=8 roff=1e9)
 .model nedis sw(vt=0 vh=0.1 ron=19 roff=250meg)
+.model neuven sw(vt=0 vh=0.1 ron=10m roff=1e12)
+.model neuvlo sw(vt=0 vh=0.1 ron=0.1 roff=1e12)
+.model neuvc sw(vt=0 vh=1m ron=1k roff=1e12)
 .model nediode d is=1e-14 n=1
 .ends ne555

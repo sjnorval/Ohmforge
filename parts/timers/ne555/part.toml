@@ -67,13 +67,14 @@ voh = { min = 12.75, typ = 13.3, unit = "V", note = "VCC = 15 V, IOH = -100 mA (
 icc_low = { typ = 10e-3, max = 15e-3, unit = "A", note = "output low, no load, VCC = 15 V (3 mA typ at 5 V); 5.5" }
 icc_high = { typ = 9e-3, max = 13e-3, unit = "A", note = "output high, no load, VCC = 15 V (2 mA typ at 5 V); 5.5" }
 rise_time = { typ = 100e-9, max = 300e-9, unit = "s", note = "CL = 15 pF, 20 % to 80 %; 5.6" }
+uvlo = { min = 2.3, max = 2.5, unit = "V", note = "model assumption (SLFS022K gives no UVLO or minimum operating figure): latch held reset (output low, DISCH on) below 2.3 V falling, released above 2.5 V rising, sensed through 10 us" }
 
 [analog]
 kind = "subckt"
 pins = ["GND", "TRIG", "OUT", "RESET", "CONT", "THRES", "DISCH", "VCC"]
 file = "ne555.lib"
 subckt = "ne555"
-note = "Behavioural macromodel: ideal comparators on the 5k/5k/5k divider, an SR latch with RESET priority, an 8 ohm output stage fitted to the VOH/VOL table and a 19 ohm discharge switch. See ne555.lib for each figure's source."
+note = "Behavioural macromodel: ideal comparators on the 5k/5k/5k divider, an SR latch with RESET priority, an 8 ohm output stage fitted to the VOH/VOL table and a 19 ohm discharge switch, and an assumed undervoltage lockout (2.3 V falling, 2.5 V rising). See ne555.lib for each figure's source."
 
 [[variant]]
 label = "DIP-8"
