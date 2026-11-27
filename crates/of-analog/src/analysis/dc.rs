@@ -19,6 +19,7 @@ fn params(max_iter: usize, init: bool, src: f64, diag: f64, tran: Option<TranSpe
         tran: tran.unwrap_or_default(),
         tran_op: tran.is_some(),
         small_signal: false,
+        freeze_switches: false,
     };
     NrParams {
         load,

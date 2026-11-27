@@ -41,6 +41,7 @@ pub fn ac_analysis(ckt: &mut Circuit, opts: &Options, freqs: &[f64]) -> Result<A
         tran: TranSpec::default(),
         tran_op: false,
         small_signal: true,
+        freeze_switches: false,
     };
     ckt.load(&x, &mut rhs, &lp, &Integrator::default(), &mut states);
     states.seed();

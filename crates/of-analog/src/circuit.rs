@@ -153,6 +153,9 @@ pub struct LoadCtx<'a> {
     /// Linearising about a converged operating point for `.ac`: devices
     /// must not limit voltages or advance internal state.
     pub small_signal: bool,
+    /// Transient rescue: switches keep their state from the start of the
+    /// step instead of re-deciding it each iteration.
+    pub freeze_switches: bool,
 }
 
 impl LoadCtx<'_> {
@@ -215,6 +218,9 @@ pub(crate) struct LoadParams {
     pub tran: TranSpec,
     pub tran_op: bool,
     pub small_signal: bool,
+    /// Hold every switch at its state at the start of the step (the
+    /// transient rescue, when switch flips keep Newton from settling).
+    pub freeze_switches: bool,
 }
 
 /// A circuit element that stamps into the MNA system.
@@ -477,6 +483,7 @@ impl Circuit {
             states,
             limited: false,
             small_signal: p.small_signal,
+            freeze_switches: p.freeze_switches,
         };
         for d in self.devices.iter_mut() {
             d.load(&mut cx);

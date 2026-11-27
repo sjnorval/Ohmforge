@@ -27,6 +27,9 @@ pub struct TranRequest {
     pub ic: BTreeMap<String, f64>,
 }
 
+/// Most steps in a row [`Stepper::rescue`] may take before the run fails.
+const MAX_RESCUES: u32 = 32;
+
 fn load_params(mode: Mode, time: f64, tran: TranSpec) -> LoadParams {
     LoadParams {
         mode,
@@ -38,6 +41,7 @@ fn load_params(mode: Mode, time: f64, tran: TranSpec) -> LoadParams {
         tran,
         tran_op: false,
         small_signal: false,
+        freeze_switches: false,
     }
 }
 
@@ -173,6 +177,8 @@ pub(crate) struct Stepper {
     /// Last accepted step left the solution flat enough that the engine can
     /// jump time without re-solving until a parameter or breakpoint changes.
     pub quiescent: bool,
+    /// Steps in a row that only [`Self::rescue`] could take.
+    rescues: u32,
 }
 
 impl std::fmt::Debug for Point {
@@ -243,6 +249,7 @@ impl Stepper {
             // The operating point is a DC solution; `uic` initial
             // conditions usually are not, so the first steps must run.
             quiescent: !req.uic,
+            rescues: 0,
         };
         st.bp = st.next_bp(ckt);
         Ok(st)
@@ -303,6 +310,85 @@ impl Stepper {
     /// Take one accepted step, never beyond `target` (which must be after
     /// `t`). With `watches`, a step that crosses a threshold is redone so
     /// that it ends within `resolution` seconds after the crossing.
+    /// Last resort before giving up on a step the solver could not shrink
+    /// further: damped Newton with more iterations, then a diagonal-gmin
+    /// ramp from 1e-2 S down to nothing, each from the predicted point. It
+    /// only runs where the step would otherwise fail, so converging runs
+    /// are untouched. Leaves the solution in `x_new` on success.
+    fn rescue(&mut self, ckt: &mut Circuit, opts: &Options, integ: &Integrator, t_new: f64, x_pred: &[f64]) -> bool {
+        let params = |diag_gmin: f64| {
+            let mut load = load_params(Mode::Tran, t_new, self.tran);
+            load.diag_gmin = diag_gmin;
+            // After the plain damped try, hold the switches where the step
+            // started: a latch built from switches (a 555's, inside its
+            // hysteresis band near VCC = 0) can flip every iteration.
+            load.freeze_switches = true;
+            NrParams {
+                load,
+                max_iter: 4 * opts.itl4,
+                damping: Some(opts.damping_step),
+            }
+        };
+        self.x_new.copy_from_slice(x_pred);
+        self.x_new[0] = 0.0;
+        let mut p = params(0.0);
+        p.load.freeze_switches = false;
+        if let NrOutcome::Converged(k) = newton(ckt, &mut self.x_new, &mut self.states, integ, opts, p) {
+            self.stats.newton_iterations += k;
+            return true;
+        }
+        let p = params(0.0);
+        self.x_new.copy_from_slice(x_pred);
+        self.x_new[0] = 0.0;
+        if let NrOutcome::Converged(k) = newton(ckt, &mut self.x_new, &mut self.states, integ, opts, p) {
+            self.stats.newton_iterations += k;
+            return true;
+        }
+        self.x_new.copy_from_slice(x_pred);
+        self.x_new[0] = 0.0;
+        let mut g = 1e-2;
+        loop {
+            let p = params(g);
+            match newton(ckt, &mut self.x_new, &mut self.states, integ, opts, p) {
+                NrOutcome::Converged(k) => self.stats.newton_iterations += k,
+                _ => break,
+            }
+            if g == 0.0 {
+                return true;
+            }
+            g = if g / 10.0 < opts.gmin.max(1e-15) { 0.0 } else { g / 10.0 };
+        }
+        // Source stepping at this time point: the independent sources ramp
+        // from zero to their value in adaptive steps, each solve starting
+        // from the last; the final solve is the step's own equations.
+        self.x_new.fill(0.0);
+        let mut good = self.x_new.clone();
+        let (mut src, mut ds, mut first) = (0.0f64, 0.1f64, true);
+        while first || src < 1.0 {
+            let next = if first { 0.0 } else { (src + ds).min(1.0) };
+            let mut p = params(0.0);
+            p.load.src_factor = next;
+            match newton(ckt, &mut self.x_new, &mut self.states, integ, opts, p) {
+                NrOutcome::Converged(k) => {
+                    self.stats.newton_iterations += k;
+                    good.copy_from_slice(&self.x_new);
+                    src = next;
+                    first = false;
+                    ds = (ds * 2.0).min(0.25);
+                }
+                _ if first => return false,
+                _ => {
+                    self.x_new.copy_from_slice(&good);
+                    ds *= 0.25;
+                    if ds < 1e-4 {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
     pub fn step(
         &mut self,
         ckt: &mut Circuit,
@@ -354,7 +440,10 @@ impl Stepper {
                 damping: None,
             };
             match newton(ckt, &mut self.x_new, &mut self.states, &integ, opts, p) {
-                NrOutcome::Converged(k) => self.stats.newton_iterations += k,
+                NrOutcome::Converged(k) => {
+                    self.stats.newton_iterations += k;
+                    self.rescues = 0;
+                }
                 NrOutcome::Singular(v) => return Err(singular_error(ckt, Some(v))),
                 NrOutcome::NoConvergence if sw_redo > 0 && sw_redo < 60 => {
                     // Chasing a switch crossing made Newton fail: take the
@@ -369,15 +458,23 @@ impl Stepper {
                 NrOutcome::NoConvergence => {
                     self.stats.newton_iterations += opts.itl4;
                     self.stats.rejected_newton += 1;
-                    self.h = h / 8.0;
-                    self.order = 1;
-                    if self.h < h_min {
-                        return Err(AnalysisError::TimestepTooSmall {
-                            time: t,
-                            reason: "Newton did not converge".into(),
-                        });
+                    // Bounded: a run of rescued steps at the minimum step
+                    // is a crawl, not progress, so it ends in the error.
+                    if h / 8.0 < h_min && self.rescues < MAX_RESCUES && self.rescue(ckt, opts, &integ, t_new, &x_pred) {
+                        // Damped Newton, a gmin ramp or source stepping
+                        // converged where shrinking the step could not.
+                        self.rescues += 1;
+                    } else {
+                        self.h = h / 8.0;
+                        self.order = 1;
+                        if self.h < h_min {
+                            return Err(AnalysisError::TimestepTooSmall {
+                                time: t,
+                                reason: "Newton did not converge".into(),
+                            });
+                        }
+                        continue;
                     }
-                    continue;
                 }
             }
 
