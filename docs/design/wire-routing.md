@@ -1,7 +1,7 @@
 # Schematic wire routing
 
-Status: implemented through phase 4 in `crates/of-ui/src/wiring` (model, orthogonal router, demo ports, hops and rip-up). Later phases (45° mode, waypoints, re-edit) are still open. Under the engine plan ([`engine-components.md`](engine-components.md)) the router's input (components, pins, nets, keepouts) will come from circuit files (phase E4) instead of the hand-written boards in `wiring/*.rs`; the router itself does not change.
-Date: 2026-11-21.
+Status: implemented through phase 4 in `crates/of-ui/src/wiring` (model, orthogonal router, demo ports, hops and rip-up). Later phases (45° mode, waypoints, re-edit) are still open. Since E4d the router's input (components, pins, nets, keepouts) comes from circuit files (`wiring::from_circuit`); the hand-written boards in `wiring/*.rs` were deleted. The router itself did not change.
+Date: 2026-11-21 (status updated 2026-11-26).
 Related: decision d1 ([`docs/UX-Research/decisions/schematic-canvas.md`](../UX-Research/decisions/schematic-canvas.md)), canvas interaction spec ([`docs/UX-Research/Screens/schematic-editor-canvas.md`](../UX-Research/Screens/schematic-editor-canvas.md)), roadmap P2 item “egui schematic editor (place, wire, probe)”; the P3 breadboard view is specified in [`breadboard.md`](breadboard.md).
 
 This note specifies how schematic net paths should be generated so they follow ordinary schematic and PCB trace conventions, while keeping the existing Ohmforge schematic look and feel exactly. It is the implementation design under d1 (grid-disciplined, first-class nets, orthogonal snap-to-grid routing). Live voltage colouring and Falstad-style current animation ([`DESIGN_AND_PLAN.md`](../DESIGN_AND_PLAN.md) §9) can ride on the same polylines later; they are not part of the first PRs.

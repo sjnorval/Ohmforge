@@ -45,6 +45,10 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 
 **Planned: KiCad export and wireless fidelity docs.** Schematic, netlist and XLSX BOM export in P3 ([`docs/design/kicad-export.md`](docs/design/kicad-export.md)). The P4 virtual Wi-Fi radio ships with a page that states what it can and cannot do ([`docs/design/wireless.md`](docs/design/wireless.md)).
 
+**Planned: part creator, and model and waveform interop.** A tool to author a complete part pack (pins, symbol, cited ratings, SPICE binding, MPNs and licence records), later usable standalone ([`docs/design/part-creator.md`](docs/design/part-creator.md)). Related: licence-recorded SPICE import, standard analog waveform files, a Verilog-A sidecar, and later IBIS and HDL sidecars ([`docs/design/model-and-waveform-interop.md`](docs/design/model-and-waveform-interop.md)).
+
+**Planned: ecosystem integrations.** Official KiCad libraries, datasheet-assisted fill helpers, a buyable parts backlog, an interactive HTML BOM and rebuild-and-buy packs, WaveDrom captures, availability and inventory hooks, and related tools are planned in [`docs/design/ecosystem-integrations.md`](docs/design/ecosystem-integrations.md).
+
 ## Workspace layout
 
 | Crate | Purpose |
@@ -124,9 +128,9 @@ The planned path from the work already on `main` through to 1.0 is below.
 | RISC-V core (phase one) | ✅ Done | RV32IMC, 75 of 77 riscv-tests | n/a |
 | P1 Analog core | ✅ Done | DC, AC and transient analyses within 1 % of ngspice | n/a |
 | P2 ESP32-C3 MVP | 🚧 In progress | Boot, GPIO, ADC, PWM, UART, live demo, BOM | 0.1 |
-| P3 Breadth | 📋 Planned | Classic ESP32, I2C/SPI, breadboard, examples and sharing, engine E4–E6 | 0.2 |
-| P4 Own Xtensa core and web | 📋 Planned | Own Xtensa core, web app, Wi-Fi, MicroPython on the C3 | 0.3 |
-| P5 Realism | 📋 Planned | Monte Carlo, thermal model, fault injection | 0.4 |
-| P6 1.0 | 📋 Planned | Stable API, ESP32-S3 and ESP32-C6 | 1.0 |
+| P3 Breadth | 📋 Planned | Classic ESP32, I2C/SPI, breadboard, examples and sharing, engine E4–E6, part creator | 0.2 |
+| P4 Own Xtensa core and web | 📋 Planned | Own Xtensa core, web app, Wi-Fi, MicroPython on the C3, Verilog-A sidecar | 0.3 |
+| P5 Realism | 📋 Planned | Monte Carlo, thermal model, fault injection, IBIS, converter switch mode | 0.4 |
+| P6 1.0 | 📋 Planned | Stable API, ESP32-S3 and ESP32-C6, standalone part creator | 1.0 |
 
 The full checklist is in [`docs/ROADMAP.md`](docs/ROADMAP.md).

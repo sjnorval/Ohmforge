@@ -16,6 +16,7 @@ Do not commit:
   checksum in `part.toml` instead);
 - KiCad library symbols or footprints (CC-BY-SA 4.0 with KiCad's own exception); reference footprints by
   name only;
-- datasheets (link to them).
+- datasheets (link to them);
+- symbol, footprint or model content from SnapEDA, Component Search Engine, or any similar service whose terms forbid redistribution.
 
 Every `part.toml` must include a `[license]` block; CI rejects parts without one.
