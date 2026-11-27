@@ -53,6 +53,10 @@ pub(crate) enum Command {
     SetScopeWindow(f64),
     /// The placed meters (id, meter); replaces the previous set (E5c).
     SetMeters(Vec<(u64, Multimeter)>),
+    /// Fail the running simulation with this error, as a failed step in
+    /// the play loop does (tests: no supply setting fails any more).
+    #[cfg(test)]
+    Fail(String),
     Shutdown,
 }
 
@@ -98,7 +102,7 @@ pub(crate) struct Snapshot {
 }
 
 impl Snapshot {
-    fn empty(kind: DemoKind, supply: SupplySettings) -> Self {
+    pub(crate) fn empty(kind: DemoKind, supply: SupplySettings) -> Self {
         Self {
             kind,
             booting: false,
@@ -188,10 +192,18 @@ struct Worker {
     generation: u64,
     scope_visible: f64,
     meters: Vec<(u64, Multimeter)>,
+    /// The last snapshot of a running simulation: the instruments keep
+    /// showing it while an error has paused the run.
+    last_good: Option<Snapshot>,
 }
 
 impl Worker {
     fn boot(&mut self, kind: DemoKind) {
+        if kind != self.kind {
+            // Another circuit: its own file's supply, nothing carried over.
+            self.supply = crate::session_sim::file_supply(kind);
+            self.last_good = None;
+        }
         self.kind = kind;
         self.booting = kind.needs_rom();
         self.playing = false;
@@ -205,7 +217,7 @@ impl Worker {
     /// Build `kind` from its embedded circuit file (E4d: the only path).
     fn finish_boot(&mut self) {
         let opts = StartOptions {
-            supply: self.supply,
+            supply: Some(self.supply),
             position: self.pot,
             ..StartOptions::default()
         };
@@ -225,6 +237,23 @@ impl Worker {
         self.lagging = false;
     }
 
+    /// Rebuild after a simulation error, keeping the user's settings (supply,
+    /// pot, button, bounce). Returns whether it rebuilt.
+    fn recover(&mut self) -> bool {
+        if self.sim.is_ok() || self.booting {
+            return false;
+        }
+        let button = self.button;
+        self.boot(self.kind);
+        self.finish_boot();
+        self.button = button;
+        if button && let Err(e) = self.apply_button() {
+            self.sim = Err(e);
+            self.playing = false;
+        }
+        true
+    }
+
     fn time(&self) -> f64 {
         self.sim.as_ref().map_or(0.0, SessionSim::time)
     }
@@ -238,7 +267,8 @@ impl Worker {
 
     fn apply_pot(&mut self) -> Result<(), String> {
         match &mut self.sim {
-            Ok(s) if s.kind() == DemoKind::Dimmer => s.set_position(self.pot),
+            // Every demo with a pot (the ESP32-C3 dimmer and the 555 PWM dimmer).
+            Ok(s) if s.kind().has_pot() => s.set_position(self.pot),
             _ => Ok(()),
         }
     }
@@ -289,7 +319,11 @@ impl Worker {
     }
 
     fn snapshot(&mut self) -> Snapshot {
-        let mut snap = Snapshot::empty(self.kind, self.supply);
+        // A paused (errored) run keeps its last readings on the instruments.
+        let mut snap = match (&self.sim, &self.last_good) {
+            (Err(_), Some(last)) if !self.booting => last.clone(),
+            _ => Snapshot::empty(self.kind, self.supply),
+        };
         snap.booting = self.booting;
         snap.playing = self.playing;
         snap.speed = self.speed;
@@ -306,6 +340,7 @@ impl Worker {
             Ok(s) => {
                 file_snapshot(s, &mut snap);
                 snap.meter_readings = self.meters.iter().map(|(id, m)| (*id, s.read_meter(m))).collect();
+                self.last_good = Some(snap.clone());
             }
         }
         snap
@@ -383,13 +418,14 @@ fn worker(rx: Receiver<Command>, shared: Arc<Mutex<Snapshot>>, start: DemoKind) 
         pot: 0.5,
         button: false,
         bounce: BounceSettings::default(),
-        supply: SupplySettings::default(),
+        supply: crate::session_sim::file_supply(start),
         rt_factor: 0.0,
         lagging: false,
         booting: true,
         generation: 0,
         scope_visible: DEFAULT_VISIBLE_WINDOW,
         meters: Vec::new(),
+        last_good: None,
     };
     // Publish a booting/starting snapshot, then build the first sim.
     publish(&shared, w.snapshot());
@@ -479,6 +515,12 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
                 publish(shared, w.snapshot());
             }
         }
+        #[cfg(test)]
+        Command::Fail(e) => {
+            w.sim = Err(e);
+            w.playing = false;
+            publish(shared, w.snapshot());
+        }
         Command::Reset => {
             w.boot(w.kind);
             publish(shared, w.snapshot());
@@ -493,7 +535,9 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
         Command::SetPlaying(p) => w.playing = p && w.sim.is_ok(),
         Command::SetPot(p) => {
             w.pot = p.clamp(0.0, 1.0);
-            if let Err(e) = w.apply_pot() {
+            if !w.recover()
+                && let Err(e) = w.apply_pot()
+            {
                 w.sim = Err(e);
                 w.playing = false;
             }
@@ -501,7 +545,9 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
         }
         Command::SetButton(c) => {
             w.button = c;
-            if let Err(e) = w.apply_button() {
+            if !w.recover()
+                && let Err(e) = w.apply_button()
+            {
                 w.sim = Err(e);
                 w.playing = false;
             }
@@ -509,7 +555,9 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
         }
         Command::SetBounce(b) => {
             w.bounce = b;
-            if let Err(e) = w.apply_bounce() {
+            if !w.recover()
+                && let Err(e) = w.apply_bounce()
+            {
                 w.sim = Err(e);
                 w.playing = false;
             }
@@ -517,7 +565,9 @@ fn handle(w: &mut Worker, cmd: Command, shared: &Arc<Mutex<Snapshot>>) -> bool {
         }
         Command::SetSupply(s) => {
             w.supply = s.sanitized();
-            if let Err(e) = w.apply_supply() {
+            if !w.recover()
+                && let Err(e) = w.apply_supply()
+            {
                 w.sim = Err(e);
                 w.playing = false;
             }
@@ -735,6 +785,125 @@ mod tests {
         assert!(snap.button_v.is_some());
         assert!(snap.layout.iter().any(|p| p.refdes == "SW1"));
         assert!(snap.meter_readings.is_empty(), "meters are cleared with the circuit");
+    }
+
+    /// Each demo starts on its own file's supply through the live worker and
+    /// a demo switch takes the new file's (the 555 boards' 5 V, the ESP32-C3
+    /// boards' 3.3 V): no 3.3 V left over on a 555 board.
+    #[test]
+    fn the_worker_starts_each_demo_on_its_file_supply() {
+        use super::Command;
+        use crate::kind::DemoKind;
+
+        let live = super::LiveSession::start(DemoKind::Ne555Monostable);
+        for kind in [
+            DemoKind::Ne555Monostable,
+            DemoKind::Ne555Pwm,
+            DemoKind::Clock555,
+            DemoKind::Ne555Astable,
+            DemoKind::Blink,
+        ] {
+            live.send(Command::SetKind(kind));
+            let snap = wait_for(&live, |s| s.kind == kind && !s.booting && s.time > 1e-3);
+            assert_eq!(snap.error, None, "{kind:?}");
+            let file = crate::session_sim::file_supply(kind);
+            assert_eq!(snap.supply, file, "{kind:?}");
+            assert!(
+                (snap.supply_status.volts - file.volts).abs() < 0.1,
+                "{kind:?}: {:?} vs {file:?}",
+                snap.supply_status
+            );
+        }
+    }
+
+    /// The pot slider reaches the 555 PWM dimmer's RV1 through the worker:
+    /// moving it moves the measured duty (52.99 % at 0.5, 18.00 % at 0.1).
+    #[test]
+    fn the_worker_moves_the_555_pwm_pot() {
+        use super::Command;
+        use crate::kind::DemoKind;
+
+        let live = super::LiveSession::start(DemoKind::Ne555Pwm);
+        live.send(Command::SetSpeed(MAX_SPEED));
+        let s0 = wait_for(&live, |s| !s.booting && s.time > 40e-3 && s.pwm_duty.is_some());
+        assert_eq!(s0.error, None);
+        let d0 = s0.pwm_duty.expect("a duty at 0.5");
+        assert!((d0 - 52.99).abs() < 1.0, "duty {d0} % at 0.5");
+        live.send(Command::SetPot(0.1));
+        let t = s0.time;
+        let s1 = wait_for(&live, |s| s.time > t + 40e-3);
+        assert_eq!(s1.error, None);
+        assert!((s1.pot - 0.1).abs() < 1e-9, "pot {}", s1.pot);
+        let d1 = s1.pwm_duty.expect("a duty at 0.1");
+        assert!((d1 - 18.0).abs() < 1.5, "duty {d1} % at 0.1 (was {d0} % at 0.5)");
+    }
+
+    /// SW1 on the 555 monostable through the worker: a press starts one
+    /// 1.1 RC (about 110 ms) pulse on the LED.
+    #[test]
+    fn the_worker_presses_the_monostable_button() {
+        use super::Command;
+        use crate::kind::DemoKind;
+
+        let live = super::LiveSession::start(DemoKind::Ne555Monostable);
+        live.send(Command::SetSpeed(MAX_SPEED));
+        let idle = wait_for(&live, |s| !s.booting && s.time > 20e-3);
+        assert_eq!(idle.error, None);
+        assert!(idle.led_instant < 0.01, "idle {} mA", idle.led_instant);
+        live.send(Command::SetButton(true));
+        let t = idle.time;
+        let held = wait_for(&live, |s| s.time > t + 20e-3);
+        assert!(held.button, "the switch is closed");
+        live.send(Command::SetButton(false));
+        let lit = wait_for(&live, |s| s.time > t + 60e-3);
+        assert!(
+            lit.led_instant > 5.0,
+            "lit {} mA 60 ms after the press",
+            lit.led_instant
+        );
+        let after = wait_for(&live, |s| s.time > t + 200e-3);
+        assert!(after.led_instant < 0.01, "after {} mA", after.led_instant);
+    }
+
+    /// A run that fails pauses with the error and keeps the last good
+    /// readings and circuit for the panels; changing a setting rebuilds it.
+    /// The failure is injected as the play loop's failed step: since the
+    /// NE555 undervoltage lockout, the supply settings this used (the clock
+    /// at 5 V, 10 milliohms and 60 mA) start and run (`session_sim`'s
+    /// out-of-range test).
+    #[test]
+    fn a_failed_run_keeps_its_last_readings_and_recovers() {
+        use super::Command;
+        use crate::kind::DemoKind;
+
+        let kind = DemoKind::Clock555;
+        let file = crate::session_sim::file_supply(kind);
+        let live = super::LiveSession::start(kind);
+        let good = wait_for(&live, |s| !s.booting && s.time > 2e-3);
+        assert_eq!(good.error, None);
+        let error = "invariant: kernel: analog at 1 ms: time step too small (injected)";
+        live.send(Command::Fail(error.into()));
+        let failed = wait_for(&live, |s| s.error.as_deref().is_some_and(|e| e != "booting"));
+        assert_eq!(failed.error.as_deref(), Some(error));
+        assert!(!failed.playing);
+        assert!(!failed.layout.is_empty(), "the panels keep the last good circuit");
+        assert!(failed.time > 2e-3, "the last good readings stay: {}", failed.time);
+        assert_eq!(failed.supply, file);
+        live.send(Command::SetSupply(file));
+        // `wait_for` stops at an error, so poll for the rebuilt run here.
+        let t0 = Instant::now();
+        let back = loop {
+            let s = live.snapshot();
+            if (s.generation > failed.generation && s.error.is_none() && s.time > 1e-3)
+                || t0.elapsed() > Duration::from_secs(60)
+            {
+                break s;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(back.error, None);
+        assert!(back.generation > failed.generation, "rebuilt");
+        assert!(back.playing);
     }
 
     #[test]

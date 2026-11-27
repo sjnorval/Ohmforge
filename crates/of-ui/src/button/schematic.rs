@@ -1,10 +1,10 @@
-use egui::{Align2, FontId, Rect, RichText, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, FontId, Rect, RichText, Shape, Stroke, StrokeKind, Ui, vec2};
 
 use super::{GPIO_BTN, GPIO_LED, LED_REF, RESISTOR_REF, SWITCH_REF};
 use crate::meters_ui::{MeterView, ProbePoint, SchematicHit, meter_layer};
-use crate::schematic::{draw_psu, draw_switch, hold_press, hover_tooltip};
+use crate::schematic::{draw_led, draw_psu, draw_switch, fit_canvas, hold_press, hover_tooltip};
 use crate::supply::{self, SupplyStatus};
-use crate::theme::{LED_RED, TEAL, panel};
+use crate::theme::{TEAL, panel};
 use crate::wiring::{self, Point};
 
 /// Draw the button board. Returns whether SW1 is being held down, plus any probe click.
@@ -51,24 +51,18 @@ fn draw(
     supply: SupplyStatus,
     meters: &MeterView<'_>,
 ) -> SchematicHit {
-    let (response, painter) = ui.allocate_painter(vec2(ui.available_width(), 268.0), Sense::hover());
+    let (response, painter, fit) = fit_canvas(ui, "button", vec2(400.0, 268.0));
     let description = format!(
         "ESP32-C3 GPIO{GPIO_LED} connects through {RESISTOR_REF} (330 ohms) to the {LED_REF} anode. {SWITCH_REF} pulls GPIO{GPIO_BTN} to ground when held."
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, &description));
 
-    let left = response.rect.center().x - 200.0;
-    let point = |x, y| pos2(left + x, response.rect.top() + y);
+    let point = |x, y| fit.raw(x, y);
     let text = ui.visuals().text_color();
     let muted = ui.visuals().weak_text_color();
     let wire = Stroke::new(1.7, muted);
     let on = brightness > 0.02;
     let signal = if on { Stroke::new(2.0, TEAL) } else { wire };
-    let led = if on {
-        Stroke::new(2.4, LED_RED.gamma_multiply(0.45 + 0.55 * brightness))
-    } else {
-        wire
-    };
     let line = |points: &[(f32, f32)], stroke| {
         painter.add(Shape::line(points.iter().map(|&(x, y)| point(x, y)).collect(), stroke));
     };
@@ -134,24 +128,8 @@ fn draw(
     label(182.0, 34.0, Align2::CENTER_CENTER, RESISTOR_REF, text);
     label(182.0, 53.0, Align2::CENTER_CENTER, "330 Ω", muted);
 
-    if on {
-        painter.circle_filled(
-            point(279.0, 82.0),
-            29.0,
-            LED_RED.gamma_multiply(0.08 + 0.22 * brightness),
-        );
-        painter.circle_filled(
-            point(279.0, 82.0),
-            22.0,
-            LED_RED.gamma_multiply(0.10 + 0.28 * brightness),
-        );
-    }
-    line(&[(267.0, 70.0), (291.0, 82.0), (267.0, 94.0), (267.0, 70.0)], led);
-    line(&[(291.0, 69.0), (291.0, 95.0)], led);
-    for (x, y) in [(280.0, 67.0), (291.0, 70.0)] {
-        line(&[(x, y), (x + 11.0, y - 11.0), (x + 5.0, y - 10.0)], led);
-        line(&[(x + 10.0, y - 5.0), (x + 11.0, y - 11.0)], led);
-    }
+    // The shared LED symbol and glow (`schematic::draw_led`).
+    draw_led(&painter, point(279.0, 82.0), vec2(1.0, 0.0), brightness, wire);
     label(276.0, 34.0, Align2::CENTER_CENTER, LED_REF, text);
     label(258.0, 106.0, Align2::CENTER_CENTER, "A", muted);
     label(301.0, 106.0, Align2::CENTER_CENTER, "K", muted);
@@ -216,6 +194,13 @@ fn draw(
     let _ = (plus, minus_pt);
     label(116.0, 262.0, Align2::CENTER_CENTER, "GND", muted);
 
+    // Scale the drawing into place; hit targets and meters use screen points.
+    fit.finish(&painter);
+    let painter = fit.painter();
+    let point = |x, y| fit.screen(x, y);
+    let chip = fit.screen_rect(chip);
+    let psu = fit.screen_rect(psu);
+    let body = fit.screen_rect(body);
     hover_tooltip(ui, chip, "u1", "U1 · ESP32-C3");
     hover_tooltip(
         ui,

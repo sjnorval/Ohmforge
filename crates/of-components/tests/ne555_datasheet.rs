@@ -239,6 +239,53 @@ fn reset_overrides_and_its_threshold() {
     assert!(after >= 2, "runs again");
 }
 
+/// The undervoltage lockout (a model assumption, see ne555.lib: SLFS022K
+/// gives no figure). With TRIG held low, so the latch would set, the output
+/// stays low and DISCH on below 2.3 V and the latch runs above 2.5 V; on a
+/// slow VCC ramp the release comes near 2.5 V rising and the lockout near
+/// 2.3 V falling (the 10 us sense filter lags 0.05 V at 5 V/ms).
+#[test]
+fn undervoltage_lockout_holds_the_latch_reset() {
+    let op = |vcc: f64| {
+        let mut c = timer(
+            ASTABLE,
+            &format!("VCC vcc 0 {vcc}\nVR rst vcc 0\nVT thr 0 0\nRA vcc dis 1k"),
+        );
+        let r = analysis::operating_point(&mut c, &Options::default()).unwrap();
+        (r.get("v(out)").unwrap(), r.get("v(dis)").unwrap())
+    };
+    for vcc in [0.5, 1.0, 2.0, 2.25] {
+        let (out, dis) = op(vcc);
+        assert!(out < 0.05, "{vcc} V: out {out}");
+        assert!(dis < 0.05 * vcc, "{vcc} V: DISCH on, {dis} V");
+    }
+    for vcc in [2.6, 3.0, 4.5] {
+        let (out, dis) = op(vcc);
+        assert!((out - (vcc - 0.9)).abs() < 0.05, "{vcc} V: out {out}");
+        assert!(dis > 0.99 * vcc, "{vcc} V: DISCH off, {dis} V");
+    }
+    // 0 to 5 V in 1 ms, held, then back to 0 in 1 ms.
+    let mut c = timer(
+        ASTABLE,
+        "VCC vcc 0 PWL(0 0 1m 5 2m 5 3m 0)\nVR rst vcc 0\nVT thr 0 0\nRA vcc dis 1k",
+    );
+    let req = analysis::TranRequest {
+        tstep: 1e-6,
+        tstop: 3e-3,
+        tmax: 1e-6,
+        ..Default::default()
+    };
+    let w = analysis::transient(&mut c, &Options::default(), &req).unwrap();
+    let (t, out, vcc) = (&w.x, w.signal("v(out)").unwrap(), w.signal("v(vcc)").unwrap());
+    let edges = crossings(t, out, 0.7);
+    assert_eq!(edges.len(), 2, "{edges:?}");
+    let at = |x: f64| vcc[t.iter().position(|&s| s >= x).unwrap()];
+    let (up, down) = (at(edges[0].0), at(edges[1].0));
+    println!("UVLO: released at VCC {up:.3} V rising, locked at {down:.3} V falling");
+    assert!(edges[0].1 && (2.5..2.6).contains(&up), "release at {up} V");
+    assert!(!edges[1].1 && (2.2..2.3).contains(&down), "lockout at {down} V");
+}
+
 #[test]
 fn control_voltage_moves_both_thresholds() {
     // CONT driven to 4 V at VCC = 5 V: THRES at 4 V, TRIG at 2 V (pin

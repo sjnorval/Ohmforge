@@ -131,6 +131,8 @@ impl Device for Switch {
             };
             let on = if cx.init_junctions {
                 self.dc_on
+            } else if cx.freeze_switches && cx.mode == Mode::Tran {
+                hold
             } else {
                 self.decide(v, hold)
             };

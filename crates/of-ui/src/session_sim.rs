@@ -144,8 +144,9 @@ pub(crate) fn booted(kind: DemoKind) -> Result<Option<Firmware>, String> {
 /// Overrides applied to the file before it is built.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct StartOptions {
-    /// Bench supply settings (`PSU` params).
-    pub supply: SupplySettings,
+    /// Bench supply settings (`PSU` params); `None` keeps the file's own
+    /// ([`file_supply`]), so every demo starts on the supply its circuit sets.
+    pub supply: Option<SupplySettings>,
     /// Pot wiper position (`RV1 position`, dimmer only).
     pub position: f64,
     /// Keep the file's ESP32-C3 supply current (`false` forces
@@ -156,7 +157,7 @@ pub(crate) struct StartOptions {
 impl Default for StartOptions {
     fn default() -> Self {
         Self {
-            supply: SupplySettings::default(),
+            supply: None,
             position: 0.5,
             idle_draw: true,
         }
@@ -194,6 +195,30 @@ pub(crate) fn file_supply(kind: DemoKind) -> SupplySettings {
     s.sanitized()
 }
 
+/// The parts on the + rail of `kind`'s bench supply that state a supply
+/// range (`library::rail_parts`): the parts a supply warning may name.
+pub(crate) fn rail_parts(kind: DemoKind) -> Vec<of_circuit::library::RailPart> {
+    let (Ok(file), Ok((index, _))) = (parsed(kind), parts()) else {
+        return Vec::new();
+    };
+    let Some(psu) = file
+        .components
+        .iter()
+        .find(|c| index.get(c.part_id()).is_some_and(|p| p.part.model == "rust:bench-psu"))
+    else {
+        return Vec::new();
+    };
+    let plus = format!("{}.+", psu.reference());
+    let Some(net) = file
+        .nets
+        .iter()
+        .find(|n| n.pins.iter().any(|p| p.get_ref().eq_ignore_ascii_case(&plus)))
+    else {
+        return Vec::new();
+    };
+    of_circuit::library::rail_parts(file, net.name(), psu.reference(), index)
+}
+
 fn set_param(file: &mut CircuitFile, reference: &str, name: &str, value: ParamValue) {
     if let Some(c) = file.components.iter_mut().find(|c| c.reference() == reference) {
         c.params.insert(name.into(), value);
@@ -204,7 +229,7 @@ fn set_param(file: &mut CircuitFile, reference: &str, name: &str, value: ParamVa
 pub(crate) fn build_session(kind: DemoKind, opts: StartOptions) -> Result<Session, String> {
     let d = demo_file(kind);
     let mut file = parsed(kind)?.clone();
-    let s = opts.supply.sanitized();
+    let s = opts.supply.unwrap_or_else(|| file_supply(kind)).sanitized();
     set_param(&mut file, "PSU", "volts", ParamValue::Number(s.volts));
     set_param(&mut file, "PSU", "series_r", ParamValue::Number(s.series_r));
     set_param(&mut file, "PSU", "current_limit", ParamValue::Number(s.current_limit));
@@ -413,20 +438,16 @@ fn reached(stop: Stop, at: f64) -> Result<(), String> {
 impl SessionSim {
     /// Build `kind` from its circuit file and start it.
     pub(crate) fn start(kind: DemoKind, opts: StartOptions) -> Result<Self, String> {
-        // The 555 demos and the clock counter start on their file's supply
-        // unless one is given.
-        let opts = if kind.file_bench() && opts.supply == SupplySettings::default() {
-            StartOptions {
-                supply: file_supply(kind),
-                ..opts
-            }
-        } else {
-            opts
+        // Every demo starts on its file's supply unless one is given (a set
+        // point that happens to equal the defaults is still the caller's).
+        let opts = StartOptions {
+            supply: Some(opts.supply.unwrap_or_else(|| file_supply(kind))),
+            ..opts
         };
         let s = build_session(kind, opts)?;
         let mut sim = Self::run(kind, s)?;
         sim.position = opts.position.clamp(0.0, 1.0);
-        sim.supply = opts.supply.sanitized();
+        sim.supply = opts.supply.unwrap_or_default().sanitized();
         Ok(sim)
     }
 
@@ -1282,10 +1303,10 @@ mod tests {
         assert!(s.supply_status().outside_rated);
 
         let limited = StartOptions {
-            supply: SupplySettings {
+            supply: Some(SupplySettings {
                 current_limit: 0.5e-3,
                 ..SupplySettings::default()
-            },
+            }),
             ..StartOptions::default()
         };
         let mut s = SessionSim::start(DemoKind::Blink, limited).unwrap();
@@ -1881,10 +1902,10 @@ mod tests {
     #[test]
     fn current_limit_clamps_dimmer_led_current() {
         let opts = StartOptions {
-            supply: SupplySettings {
+            supply: Some(SupplySettings {
                 current_limit: 0.5e-3,
                 ..SupplySettings::default()
-            },
+            }),
             position: 1.0,
             ..StartOptions::default()
         };
@@ -2075,6 +2096,76 @@ mod analog_tests {
         SessionSim::start(kind, StartOptions::default()).unwrap_or_else(|e| panic!("{kind:?}: {e}"))
     }
 
+    /// Edge times (s) and directions (`true` rising) of a watched signal.
+    type Edges = std::sync::Arc<std::sync::Mutex<Vec<(f64, bool)>>>;
+
+    /// Records the time of every event it receives: code 1 is a rising
+    /// crossing, anything else a falling one.
+    struct EdgeLog {
+        t: SimTime,
+        log: Edges,
+    }
+
+    impl of_core::Engine for EdgeLog {
+        fn name(&self) -> &str {
+            "edge log"
+        }
+        fn local_time(&self) -> SimTime {
+            self.t
+        }
+        fn advance_to(
+            &mut self,
+            limit: SimTime,
+            _: &mut of_core::SyncCtx<'_>,
+        ) -> Result<SimTime, of_core::EngineError> {
+            self.t = limit;
+            Ok(limit)
+        }
+        fn on_event(&mut self, ev: &of_core::Event, _: &mut of_core::SyncCtx<'_>) -> Result<(), of_core::EngineError> {
+            self.log.lock().unwrap().push((ev.at.as_secs_f64(), ev.code == 1));
+            Ok(())
+        }
+        fn is_quiescent(&self) -> bool {
+            true
+        }
+    }
+
+    /// Times every crossing of `signal` through `level` as the solver
+    /// locates it (within the analog engine's crossing resolution), not on
+    /// the 50 us sample grid.
+    fn watch_edges(s: &mut SessionSim, signal: &str, level: f64) -> Edges {
+        let log = Edges::default();
+        let t = s.s.kernel().now();
+        let id = s.s.kernel().add_engine(Box::new(EdgeLog {
+            t,
+            log: std::sync::Arc::clone(&log),
+        }));
+        for (edge, code) in [(of_analog::Edge::Rising, 1), (of_analog::Edge::Falling, 2)] {
+            s.s.analog().watch(signal, level, edge, id.0, code).unwrap();
+        }
+        log
+    }
+
+    /// Duty (%), frequency (Hz) and count of the whole periods (rising edge
+    /// to rising edge) in `edges` from `from` on.
+    fn edge_duty_freq(edges: &[(f64, bool)], from: f64) -> Option<(f64, f64, usize)> {
+        let e: Vec<(f64, bool)> = edges.iter().copied().filter(|&(t, _)| t >= from).collect();
+        let first = e.iter().position(|&(_, r)| r)?;
+        let last = e.iter().rposition(|&(_, r)| r)?;
+        let span = e[last].0 - e[first].0;
+        let (mut high, mut rise, mut rises) = (0.0, None, 0usize);
+        for &(t, r) in &e[first..=last] {
+            if r {
+                rise = Some(t);
+                rises += 1;
+            } else if let Some(t0) = rise.take() {
+                high += t - t0;
+            }
+        }
+        let periods = rises.checked_sub(1).filter(|&n| n > 0)?;
+        Some((100.0 * high / span, periods as f64 / span, periods))
+    }
+
     /// The face reads the file's 5 V supply in CV, inside the NE555's
     /// 4.5 to 16 V.
     fn check_supply(s: &SessionSim, kind: DemoKind) {
@@ -2185,6 +2276,8 @@ mod analog_tests {
         assert!(kind.has_pot() && !kind.has_mcu());
         let mut s = start555(kind);
         let mut t = 0.0;
+        // The output's edges at mid-swing, timed by the solver.
+        let edges = watch_edges(&mut s, "v(out)", 2.0);
         // The exact duty % and mean LED current (mA) of the of-circuit test.
         // Exact period (ms) too. Edges are timed off the capacitor ramps.
         let wall = std::time::Instant::now();
@@ -2196,19 +2289,23 @@ mod analog_tests {
             (0.7, 70.94, 6.708, 1.0204),
         ] {
             s.set_position(pos).unwrap();
+            // Skip start-up and the pot's settling (about 5 periods), then
+            // measure over the whole periods left in the 30 ms.
+            let from = t + 5e-3;
             t += 30e-3;
             s.advance(t).unwrap();
-            let (duty, freq) = s.pwm_duty_freq();
+            let shown = s.pwm_duty_freq();
+            let measured = edge_duty_freq(&edges.lock().unwrap(), from);
             println!(
-                "{kind:?} at {pos}: duty {duty:?}, freq {freq:?} Hz, average {:.3} mA",
+                "{kind:?} at {pos}: edge-timed (duty %, Hz, periods) {measured:?}, face {shown:?}, average {:.3} mA",
                 s.average_ma()
             );
-            // Whole periods with interpolated edges: within `tol` points and
-            // 1 % of the exact duty and frequency.
-            let d = duty.expect("a duty");
+            // Whole periods between solver-timed edges: within 0.5 points
+            // and 1 % of the exact duty and frequency.
+            let (d, f, periods) = measured.expect("whole periods");
+            assert!(periods >= 20, "pot {pos}: {periods} periods");
             assert!((d - want).abs() < 0.5, "pot {pos}: duty {d} % vs {want} %");
             let f_exact = 1.0 / period_ms * 1e3;
-            let f = freq.expect("a frequency");
             assert!((f / f_exact - 1.0).abs() < 0.01, "pot {pos}: {f} Hz vs {f_exact} Hz");
             let avg = s.average_ma();
             // Whole periods on the 50 us grid: at most one sample of the
@@ -2325,6 +2422,138 @@ mod analog_tests {
         );
         let logic = s.logic();
         assert_eq!(logic.len(), 1, "one logic analyser (clock and TX)");
+    }
+
+    /// Supply warnings may only name parts on each demo's PSU + rail: the
+    /// 555 boards (the clock board too, its C3 is behind the LDO) name the
+    /// NE555, the other ESP32-C3 boards name U1. Every part named is on the
+    /// board.
+    #[test]
+    fn supply_warnings_name_only_parts_on_the_rail() {
+        for &kind in KINDS.iter() {
+            let rail = rail_parts(kind);
+            let file = parsed(kind).unwrap();
+            for p in &rail {
+                assert!(
+                    file.components
+                        .iter()
+                        .any(|c| c.reference() == p.reference && c.part_id() == p.part),
+                    "{kind:?}: {p:?} is not on the board"
+                );
+            }
+            let ids: Vec<&str> = rail.iter().map(|p| p.part.as_str()).collect();
+            if kind.has_mcu() && kind != DemoKind::Clock555 {
+                assert_eq!(ids, ["espressif.esp32-c3"], "{kind:?}");
+            } else {
+                assert_eq!(ids, ["ti.ne555"], "{kind:?}");
+            }
+        }
+    }
+
+    /// Out of range, the warning names the rail's parts at their ratings: a
+    /// 555 board at 3.3 V names the NE555 (no ESP32-C3), the ESP32-C3 blink
+    /// board at 4 V names U1; each board on its own file supply is quiet.
+    #[test]
+    fn out_of_range_supplies_warn_with_the_parts_present() {
+        use crate::supply::rating_warning;
+        let warning = |kind: DemoKind, set: SupplySettings| {
+            let mut s = SessionSim::start(
+                kind,
+                StartOptions {
+                    supply: Some(set),
+                    ..StartOptions::default()
+                },
+            )
+            .unwrap();
+            s.advance(2e-3).unwrap();
+            rating_warning(&s.supply_status(), &set, &rail_parts(kind))
+        };
+        for kind in [
+            DemoKind::Ne555Astable,
+            DemoKind::Ne555Monostable,
+            DemoKind::Ne555Pwm,
+            DemoKind::Clock555,
+        ] {
+            let file = file_supply(kind);
+            assert_eq!(warning(kind, file), None, "{kind:?} on its file supply");
+            let w = warning(kind, SupplySettings { volts: 3.3, ..file }).expect("3.3 V is below the NE555's 4.5 V");
+            assert!(w.contains("ti.ne555 4.5\u{2013}16 V"), "{kind:?}: {w}");
+            assert!(!w.to_lowercase().contains("esp32"), "{kind:?}: {w}");
+        }
+        let blink = file_supply(DemoKind::Blink);
+        assert_eq!(warning(DemoKind::Blink, blink), None);
+        let w = warning(DemoKind::Blink, SupplySettings { volts: 4.0, ..blink }).expect("4 V is above 3.6 V");
+        assert!(w.contains("U1 espressif.esp32-c3 3\u{2013}3.6 V"), "{w}");
+    }
+
+    /// Out-of-range bench settings on the four 555 boards simulate (and
+    /// warn), promptly: never a panic, a hang or a solver error. The cold
+    /// starts that used to stop in "time step too small" (the clock at 5 V,
+    /// 10 milliohms and 60 mA and at 2 V, the PWM board at 30 V: the NE555
+    /// latch chattering with every input inside its comparators' 1 mV band
+    /// near VCC = 0) run since the model's undervoltage lockout holds the
+    /// latch reset there. Any error still goes to the status strip with the
+    /// panels drawn. The case from the field, the clock changed to 3.3 V,
+    /// 10 milliohms and 60 mA while running, runs.
+    #[test]
+    fn out_of_range_supplies_simulate_or_report_on_every_555_board() {
+        let combos = [
+            (3.3, 0.01, 0.06),
+            (3.3, 0.1, 0.5),
+            (5.0, 0.01, 0.06),
+            (2.0, 0.1, 0.5),
+            (0.0, 0.1, 0.5),
+            (5.0, 0.1, 0.005),
+            (30.0, 0.1, 0.5),
+        ];
+        let known: Vec<(DemoKind, f64, f64, f64)> = Vec::new();
+        let mut failed = Vec::new();
+        for kind in [
+            DemoKind::Ne555Astable,
+            DemoKind::Ne555Monostable,
+            DemoKind::Ne555Pwm,
+            DemoKind::Clock555,
+        ] {
+            for (v, r, i) in combos {
+                let supply = SupplySettings {
+                    volts: v,
+                    series_r: r,
+                    current_limit: i,
+                    ..file_supply(kind)
+                };
+                let t0 = std::time::Instant::now();
+                let res = SessionSim::start(
+                    kind,
+                    StartOptions {
+                        supply: Some(supply),
+                        ..StartOptions::default()
+                    },
+                )
+                .and_then(|mut s| s.advance(5e-3).map(|()| s));
+                let wall = t0.elapsed().as_secs_f64();
+                assert!(wall < 60.0, "{kind:?} {v} V {r} ohm {i} A took {wall:.1} s");
+                match res {
+                    Ok(s) => assert!(s.time() >= 5e-3 - 1e-9, "{kind:?}"),
+                    Err(e) => {
+                        println!("{kind:?} {v} V {r} ohm {i} A: {e}");
+                        assert!(e.contains("time step too small"), "{kind:?} {v} V {r} ohm {i} A: {e}");
+                        failed.push((kind, v, r, i));
+                    }
+                }
+            }
+        }
+        println!("cold starts that end in a reported error: {failed:?}");
+        assert_eq!(failed, known, "the reported errors changed");
+        let mut s = SessionSim::start(DemoKind::Clock555, StartOptions::default()).unwrap();
+        s.advance(5e-3).unwrap();
+        s.set_supply(SupplySettings {
+            volts: 3.3,
+            series_r: 0.01,
+            current_limit: 0.06,
+            ..file_supply(DemoKind::Clock555)
+        })
+        .unwrap();
+        s.advance(15e-3).unwrap();
     }
 
     #[test]
