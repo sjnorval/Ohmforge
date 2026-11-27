@@ -22,6 +22,8 @@ use crate::bench::BenchProfiles;
 use crate::meters_ui::{MeterView, SchematicHit, reading_text};
 use of_components::BounceSettings;
 
+use crate::console::Console;
+use crate::console::log::{Level, Source};
 use crate::status::{Message, StatusLog};
 use crate::supply::{self, SupplySettings};
 use crate::theme::{LED_RED, TEAL, panel};
@@ -30,6 +32,10 @@ use of_circuit::library::RailPart;
 
 /// Current that counts as a fully-on LED for the on-screen glow (display only).
 const LED_FULL_MA: f64 = 4.0;
+
+/// How long a change in the real-time lag must hold before the log reports it
+/// (s); busy demos hover at the threshold and would log every few frames.
+const LAG_LOG_HOLD_S: f64 = 2.0;
 
 /// Playback controls and live instruments for the bundled firmware demos.
 pub struct OhmforgeDemo {
@@ -61,7 +67,17 @@ pub struct OhmforgeDemo {
     rail: Vec<RailPart>,
     /// Latched warnings and errors for the status strip.
     status: StatusLog,
-    status_open: bool,
+    /// The `~` log console.
+    console: Console,
+    /// UART bytes since the last newline (the log takes whole lines).
+    uart_line: Vec<u8>,
+    /// App time of this frame (s), for log entries.
+    now: f64,
+    was_booting: bool,
+    /// The real-time lag state the log last reported, and since when the
+    /// snapshots have said otherwise (it must hold [`LAG_LOG_HOLD_S`]).
+    was_lagging: bool,
+    lag_changed_at: Option<f64>,
     /// The cached schematic fit is from another demo (reset next frame).
     fits_stale: bool,
 }
@@ -84,7 +100,8 @@ impl OhmforgeDemo {
     pub fn new() -> Self {
         let mut monitor = SerialMonitor::new();
         monitor.set_delivery(Delivery::Attached);
-        Self {
+        let prefs = crate::prefs::load();
+        let mut demo = Self {
             kind: DemoKind::Blink,
             session: LiveSession::start(DemoKind::Blink),
             monitor,
@@ -108,9 +125,58 @@ impl OhmforgeDemo {
             bench: BenchProfiles::default(),
             rail: crate::session_sim::rail_parts(DemoKind::Blink),
             status: StatusLog::default(),
-            status_open: false,
+            console: Console::new(prefs.console.settings(), prefs.console.width()),
+            uart_line: Vec::new(),
+            now: 0.0,
+            was_booting: false,
+            was_lagging: false,
+            lag_changed_at: None,
             fits_stale: true,
-            show_startup_animation: crate::prefs::load().show_startup_animation,
+            show_startup_animation: prefs.show_startup_animation,
+        };
+        demo.log_loaded();
+        demo
+    }
+
+    /// Log a message at this frame's time (and the simulated time when given).
+    fn log(&mut self, level: Level, source: Source, text: impl Into<String>, sim: Option<f64>) {
+        self.console.push(level, source, text, self.now, sim);
+    }
+
+    /// The demo that was just loaded, and its circuit file if it fails to parse.
+    fn log_loaded(&mut self) {
+        let path = crate::session_sim::demo_file(self.kind).path;
+        self.log(
+            Level::Info,
+            Source::Ui,
+            format!("Loaded {} ({path})", self.kind.title()),
+            None,
+        );
+        if let Err(e) = crate::session_sim::parsed(self.kind) {
+            self.log(Level::Error, Source::Parts, format!("{path}: {e}"), None);
+        }
+    }
+
+    /// Play or pause the simulation: the main Play/Pause and the console's
+    /// Pause sim / Resume sim both come here, and both read the state from
+    /// the same snapshot, so they stay in sync.
+    fn toggle_play(&mut self, snap: &Snapshot) {
+        self.session.send(Command::SetPlaying(!snap.playing));
+        let text = if snap.playing { "Paused" } else { "Playing" };
+        self.log(Level::Info, Source::Ui, text, Some(snap.time));
+    }
+
+    /// Save the console's settings without touching the other preferences.
+    fn save_console_prefs(&mut self) {
+        let mut prefs = crate::prefs::load();
+        prefs.console = crate::prefs::ConsolePrefs::from_settings(self.console.log.settings(), self.console.width());
+        if let Err(err) = crate::prefs::save(&prefs) {
+            self.log(
+                Level::Error,
+                Source::Ui,
+                format!("Could not save preferences: {err}"),
+                None,
+            );
         }
     }
 
@@ -118,6 +184,7 @@ impl OhmforgeDemo {
         self.monitor.clear();
         self.monitor.set_delivery(Delivery::Attached);
         self.uart_cursor = 0;
+        self.uart_line.clear();
         self.serial_panel = SerialMonitorPanel::default();
     }
 
@@ -133,6 +200,7 @@ impl OhmforgeDemo {
         self.kind = kind;
         self.rail = crate::session_sim::rail_parts(kind);
         self.status.clear();
+        self.log_loaded();
         self.fits_stale = true;
         if !kind.has_pot() {
             self.pot = 0.5;
@@ -158,6 +226,17 @@ impl OhmforgeDemo {
             let b = snap.uart[self.uart_cursor];
             self.monitor.push_rx(b.at, &[b.byte]);
             self.uart_cursor += 1;
+            // Whole lines go to the log (a runaway line is cut at 256 bytes).
+            if b.byte == b'\n' || self.uart_line.len() >= 256 {
+                let line = String::from_utf8_lossy(&self.uart_line).trim_end().to_owned();
+                self.uart_line.clear();
+                if !line.is_empty() {
+                    self.log(Level::Info, Source::Firmware, line, Some(b.at.as_secs_f64()));
+                }
+            }
+            if b.byte != b'\n' && b.byte != b'\r' {
+                self.uart_line.push(b.byte);
+            }
         }
     }
 
@@ -180,6 +259,11 @@ impl OhmforgeDemo {
         self.choosing = None;
         self.meter_message = None;
         self.sync_meters();
+        if let Some(m) = self.meters.last() {
+            let through = m.meter.part.as_deref().map(|p| format!(" via {p}")).unwrap_or_default();
+            let text = format!("Placed {} {} to {}{through}", m.kind.label(), m.a.label, m.b.label);
+            self.log(Level::Info, Source::Meters, text, None);
+        }
     }
 
     fn on_probe(&mut self, probe: ProbeRef, layout: &[PartPins]) {
@@ -198,7 +282,10 @@ impl OhmforgeDemo {
                     self.place(kind, a, probe, meter);
                 }
                 MeterKind::Amp => match candidates(layout, &a.node, &probe.node) {
-                    Err(e) => self.meter_message = Some(e.message().to_owned()),
+                    Err(e) => {
+                        self.log(Level::Warn, Source::Meters, e.message().to_owned(), None);
+                        self.meter_message = Some(e.message().to_owned());
+                    }
                     Ok(mut c) if c.len() == 1 => {
                         let meter = Multimeter::ammeter(&c.remove(0));
                         self.place(kind, a, probe, meter);
@@ -309,6 +396,10 @@ impl OhmforgeDemo {
             });
         }
         if let Some(id) = remove {
+            if let Some(m) = self.meters.iter().find(|m| m.id == id) {
+                let text = format!("Removed {} {} to {}", m.kind.label(), m.a.label, m.b.label);
+                self.log(Level::Info, Source::Meters, text, None);
+            }
             self.meters.retain(|m| m.id != id);
             self.sync_meters();
         }
@@ -316,6 +407,7 @@ impl OhmforgeDemo {
 
     /// Draw the demo. The kernel runs on the worker thread.
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.now = ui.input(|i| i.time);
         let mut snap = self.session.snapshot();
         // Real-world profiles: the scope's 8-bit trace and the PSU's readback.
         self.bench.scope_trace(&mut snap.led_trace, scope_scale(self.kind).2);
@@ -330,6 +422,33 @@ impl OhmforgeDemo {
             self.bounce = snap.bounce;
         }
         self.sync_serial(&snap);
+        if snap.kind == self.kind {
+            // Engine state changes, once each.
+            if snap.booting != self.was_booting {
+                self.was_booting = snap.booting;
+                let text = if snap.booting {
+                    "Booting the ESP32-C3 from the fetched ROM and bootloader"
+                } else {
+                    "Boot finished"
+                };
+                self.log(Level::Info, Source::Engine, text, Some(snap.time));
+            }
+            if snap.lagging == self.was_lagging {
+                self.lag_changed_at = None;
+            } else if self.now - *self.lag_changed_at.get_or_insert(self.now) >= LAG_LOG_HOLD_S {
+                self.lag_changed_at = None;
+                self.was_lagging = snap.lagging;
+                let text = if snap.lagging {
+                    format!(
+                        "Running behind real time ({}); catching up",
+                        trace::format_multiplier(snap.rt_factor)
+                    )
+                } else {
+                    "Back at the requested speed".to_owned()
+                };
+                self.log(Level::Debug, Source::Engine, text, Some(snap.time));
+            }
+        }
 
         // One page scroll per demo, so a switch starts at the top.
         egui::ScrollArea::vertical()
@@ -359,11 +478,16 @@ impl OhmforgeDemo {
                     let mut show = self.show_startup_animation;
                     if ui.checkbox(&mut show, "Show startup animation").changed() {
                         self.show_startup_animation = show;
-                        let prefs = crate::prefs::AppPrefs {
-                            show_startup_animation: show,
-                        };
+                        let mut prefs = crate::prefs::load();
+                        prefs.show_startup_animation = show;
                         if let Err(err) = crate::prefs::save(&prefs) {
                             eprintln!("Ohmforge preferences: {err}");
+                            self.log(
+                                Level::Error,
+                                Source::Ui,
+                                format!("Could not save preferences: {err}"),
+                                None,
+                            );
                         }
                     }
                 });
@@ -384,10 +508,11 @@ impl OhmforgeDemo {
                         .min_size(vec2(86.0, 32.0));
                     let can_play = snap.error.is_none() && !snap.booting;
                     if ui.add_enabled(can_play, play).clicked() {
-                        self.session.send(Command::SetPlaying(!snap.playing));
+                        self.toggle_play(&snap);
                     }
                     if ui.add(egui::Button::new("Reset").min_size(vec2(64.0, 32.0))).clicked() {
                         self.restart();
+                        self.log(Level::Info, Source::Ui, "Reset", Some(snap.time));
                     }
                     ui.monospace(format!("{:.3} ms", snap.time * 1e3));
                     ui.weak(format!("{} requested", trace::format_multiplier(snap.speed)));
@@ -419,9 +544,14 @@ impl OhmforgeDemo {
                         .text("Potentiometer")
                         .custom_formatter(|n, _| format!("{:.0}%", n * 100.0))
                         .custom_parser(|s| s.trim().trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0));
-                    if ui.add(slider).changed() {
+                    let resp = ui.add(slider);
+                    if resp.changed() {
                         self.pot = pot;
                         self.session.send(Command::SetPot(pot));
+                    }
+                    if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                        let text = format!("Potentiometer set to {:.0}%", self.pot * 100.0);
+                        self.log(Level::Debug, Source::Ui, text, Some(snap.time));
                     }
                 }
 
@@ -431,14 +561,18 @@ impl OhmforgeDemo {
                     if ui.checkbox(&mut on, "Supply on").changed() {
                         self.supply.on = on;
                         self.session.send(Command::SetSupply(self.supply));
+                        let text = if on { "Supply on" } else { "Supply off" };
+                        self.log(Level::Info, Source::Psu, text, Some(snap.time));
                     }
                     let mut v = self.supply.volts;
-                    if ui
-                        .add(Slider::new(&mut v, 0.0..=5.0).text("Vset").suffix(" V").min_decimals(2))
-                        .changed()
-                    {
+                    let resp = ui.add(Slider::new(&mut v, 0.0..=5.0).text("Vset").suffix(" V").min_decimals(2));
+                    if resp.changed() {
                         self.supply.volts = v;
                         self.session.send(Command::SetSupply(self.supply));
+                    }
+                    if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                        let text = format!("PSU set to {:.2} V", self.supply.volts);
+                        self.log(Level::Debug, Source::Psu, text, Some(snap.time));
                     }
                     let mut rs = self.supply.series_r;
                     if ui
@@ -484,20 +618,34 @@ impl OhmforgeDemo {
                 // height (latched, so nothing pops in and out per frame).
                 let mut current = Vec::new();
                 if let Some(warn) = supply::rating_warning(&status, &self.supply, &self.rail) {
-                    current.push(Message::warning(warn));
+                    current.push(Message::warning(Source::Psu, warn));
                 }
-                if let Some(error) = snap.error.as_ref().filter(|_| !snap.booting) {
-                    current.push(Message::error(format!(
-                        "Simulation paused: {error}. Change a setting or press Reset to rebuild."
-                    )));
+                // `booting` is the worker's placeholder while it builds the first sim, not an error.
+                if let Some(error) = snap.error.as_ref().filter(|e| !snap.booting && e.as_str() != "booting") {
+                    current.push(Message::error(
+                        Source::Engine,
+                        format!("Simulation paused: {error}. Change a setting or press Reset to rebuild."),
+                    ));
                 }
                 // Only the selected demo's own snapshots speak: the first ones
                 // after a switch still carry the previous demo's supply.
                 if snap.kind == self.kind && !snap.booting {
-                    self.status.update(ui.input(|i| i.time), &current);
+                    let changes = self.status.update(self.now, &current);
+                    for m in changes.appeared {
+                        let level = match m.level {
+                            crate::status::Level::Error => Level::Error,
+                            crate::status::Level::Warning => Level::Warn,
+                        };
+                        self.log(level, m.source, m.text, Some(snap.time));
+                    }
+                    for m in changes.cleared {
+                        self.log(Level::Debug, m.source, format!("Cleared: {}", m.text), Some(snap.time));
+                    }
                 }
                 ui.add_space(4.0);
-                crate::status::strip(ui, &self.status, &mut self.status_open);
+                if crate::status::strip(ui, &self.status) {
+                    self.console.open();
+                }
 
                 if self.kind.has_button() {
                     ui.add_space(6.0);
@@ -568,6 +716,19 @@ impl OhmforgeDemo {
                     crate::digital_ui::show(ui, &snap.consoles, &snap.logic, snap.time);
                 }
             });
+
+        // The console draws over the page (nothing underneath moves).
+        let sim = crate::console::SimState {
+            playing: snap.playing,
+            can_play: snap.error.is_none() && !snap.booting,
+        };
+        let shown = self.console.show(ui.ctx(), sim);
+        if shown.toggle_sim && sim.can_play {
+            self.toggle_play(&snap);
+        }
+        if shown.save_prefs {
+            self.save_console_prefs();
+        }
 
         if snap.playing || snap.booting {
             ui.ctx().request_repaint_after(Duration::from_millis(16));
@@ -998,6 +1159,44 @@ mod render_tests {
     use super::*;
     use egui::Context;
 
+    /// The console's Pause sim and the main Play/Pause share one path: it
+    /// flips the worker's play state (seen in the next snapshots, which both
+    /// buttons read) and logs Paused / Playing.
+    #[test]
+    fn toggling_play_pauses_and_resumes_the_simulation_and_logs_it() {
+        let mut app = OhmforgeDemo::new();
+        let wait = |app: &OhmforgeDemo, want: &dyn Fn(&Snapshot) -> bool| {
+            let t0 = std::time::Instant::now();
+            loop {
+                let s = app.session.snapshot();
+                if want(&s) {
+                    return s;
+                }
+                assert!(
+                    t0.elapsed().as_secs() < 20,
+                    "timed out: kind {:?} booting {} playing {} error {:?}",
+                    s.kind,
+                    s.booting,
+                    s.playing,
+                    s.error
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let s = wait(&app, &|s| s.kind == DemoKind::Blink && !s.booting && s.playing);
+        app.toggle_play(&s);
+        let s = wait(&app, &|s| !s.playing);
+        assert_eq!(
+            app.console.log.entries().last().map(|e| e.text.as_str()),
+            Some("Paused")
+        );
+        app.toggle_play(&s);
+        wait(&app, &|s| s.playing);
+        assert_eq!(
+            app.console.log.entries().last().map(|e| e.text.as_str()),
+            Some("Playing")
+        );
+    }
     /// The drawing's whole painted extent, top-left corner included, lies
     /// inside its frame and inside the clip its shapes carry, and that clip
     /// starts no lower and no further right than the frame.

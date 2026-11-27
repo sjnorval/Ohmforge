@@ -3,6 +3,8 @@
 //! latched for [`LATCH_S`] after its condition clears so that nothing pops
 //! in and out per frame. The strip itself always takes the same height.
 
+use crate::console::log::Source;
+
 /// How long a message stays listed after its condition last held (s).
 pub const LATCH_S: f64 = 1.5;
 
@@ -17,20 +19,32 @@ pub enum Level {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {
     pub level: Level,
+    /// Where it comes from, for the log console.
+    pub source: Source,
     pub text: String,
 }
 
+/// What [`StatusLog::update`] changed: messages that appeared, and ones
+/// that dropped off after their latch time.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    pub appeared: Vec<Message>,
+    pub cleared: Vec<Message>,
+}
+
 impl Message {
-    pub fn warning(text: impl Into<String>) -> Self {
+    pub fn warning(source: Source, text: impl Into<String>) -> Self {
         Self {
             level: Level::Warning,
+            source,
             text: text.into(),
         }
     }
 
-    pub fn error(text: impl Into<String>) -> Self {
+    pub fn error(source: Source, text: impl Into<String>) -> Self {
         Self {
             level: Level::Error,
+            source,
             text: text.into(),
         }
     }
@@ -52,18 +66,30 @@ pub struct StatusLog {
 impl StatusLog {
     /// `current` holds at time `now` (s); a message not in it stays until
     /// [`LATCH_S`] after it was last seen.
-    pub fn update(&mut self, now: f64, current: &[Message]) {
+    /// The changes go to the log console, once each (not per frame).
+    pub fn update(&mut self, now: f64, current: &[Message]) -> Changes {
+        let mut changes = Changes::default();
         for m in current {
             match self.entries.iter_mut().find(|e| e.msg == *m) {
                 Some(e) => e.seen = now,
-                None => self.entries.push(Entry {
-                    msg: m.clone(),
-                    first: now,
-                    seen: now,
-                }),
+                None => {
+                    changes.appeared.push(m.clone());
+                    self.entries.push(Entry {
+                        msg: m.clone(),
+                        first: now,
+                        seen: now,
+                    });
+                }
             }
         }
-        self.entries.retain(|e| now - e.seen <= LATCH_S);
+        self.entries.retain(|e| {
+            let keep = now - e.seen <= LATCH_S;
+            if !keep {
+                changes.cleared.push(e.msg.clone());
+            }
+            keep
+        });
+        changes
     }
 
     /// Forget everything (another circuit was loaded).
@@ -98,10 +124,10 @@ impl StatusLog {
 pub const STRIP_HEIGHT: f32 = 24.0;
 
 /// Draw the strip: a count badge and the headline on one truncated line,
-/// every message in the tooltip, and the full list below while `open`
-/// (a click toggles it).
+/// every message in the tooltip. Returns `true` when clicked (the caller
+/// opens the log console, so nothing below the strip moves).
 #[cfg(feature = "gui")]
-pub fn strip(ui: &mut egui::Ui, log: &StatusLog, open: &mut bool) {
+pub fn strip(ui: &mut egui::Ui, log: &StatusLog) -> bool {
     use egui::text::{LayoutJob, TextWrapping};
     use egui::{Color32, FontId, Sense, TextFormat, vec2};
 
@@ -160,41 +186,29 @@ pub fn strip(ui: &mut egui::Ui, log: &StatusLog, open: &mut bool) {
         painter.galley(egui::pos2(x, y - g.size().y * 0.5), g, colour(m.level));
     }
     let all = log.messages();
-    let response = if all.is_empty() {
-        response
-    } else {
-        response
-            .on_hover_ui(|ui| {
-                for m in &all {
-                    ui.colored_label(colour(m.level), &m.text);
-                }
-                ui.weak("Click to list them below");
-            })
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-    };
-    if response.clicked() {
-        *open = !*open;
-    }
-    if *open && !all.is_empty() {
-        crate::theme::panel().show(ui, |ui| {
+    response
+        .on_hover_ui(|ui| {
             for m in &all {
                 ui.colored_label(colour(m.level), &m.text);
             }
-        });
-    }
+            ui.weak("Click to open the log (~)");
+        })
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{LATCH_S, Level, Message, StatusLog};
+    use crate::console::log::Source;
 
     /// A message stays for the latch time after its condition clears, a
     /// repeat does not add a second entry, and errors lead.
     #[test]
     fn messages_latch_and_do_not_toggle_per_frame() {
         let mut log = StatusLog::default();
-        let w = Message::warning("PSU low");
-        let e = Message::error("Simulation paused");
+        let w = Message::warning(Source::Psu, "PSU low");
+        let e = Message::error(Source::Engine, "Simulation paused");
         log.update(0.0, std::slice::from_ref(&w));
         // The condition flickers off and on every frame: still one entry.
         for k in 1..60 {
@@ -213,5 +227,22 @@ mod tests {
         log.update(1.0 + LATCH_S + 0.01, &[]);
         assert_eq!(log.counts(), (0, 0));
         assert!(log.headline().is_none());
+    }
+
+    /// Each message reaches the log once when it appears and once when it
+    /// drops off, however often its condition flickers in between.
+    #[test]
+    fn changes_report_each_message_once() {
+        let mut log = StatusLog::default();
+        let w = Message::warning(Source::Psu, "PSU set to 3.30 V is outside the rated supply of U2");
+        let c = log.update(0.0, std::slice::from_ref(&w));
+        assert_eq!(c.appeared, vec![w.clone()]);
+        for k in 1..30 {
+            let cur = if k % 2 == 0 { vec![w.clone()] } else { vec![] };
+            let c = log.update(f64::from(k) / 60.0, &cur);
+            assert!(c.appeared.is_empty() && c.cleared.is_empty(), "frame {k}");
+        }
+        let c = log.update(10.0, &[]);
+        assert_eq!(c.cleared, vec![w]);
     }
 }
