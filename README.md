@@ -71,7 +71,7 @@ An open-source, true-to-life ESP32 circuit simulator written in Rust, with built
 | `of-bom` | Bill of materials, costing, CSV export |
 | `of-kicad` | KiCad netlist and schematic export |
 | `of-gdb` | GDB remote protocol |
-| `of-ui` | egui views (schematic, breadboard, panels) |
+| `of-ui` | egui views (schematic, breadboard, panels, the `~` log console) |
 | `of-app` | Desktop app (`--features gui` for the window) |
 | `of-web` | WASM entry point |
 | `of-cli` | `ohmforge` headless runner |
@@ -95,6 +95,7 @@ cargo test -p of-soc-esp32c3          # blinky, timer-interrupt, XIP and button 
 scripts/fetch-esp-rom-elfs.sh         # optional: Espressif's ESP32-C3 ROM and espflash's bootloader for the real-ROM boot tests and the pot dimmer / LED fade demos (never committed)
 cargo run -p of-app --features gui   # desktop app: load screen, then live blink, dimmer, fade, push-button, 555 timer and ESP32-C3 555 clock counter demos
 cargo run -p of-app --features gui -- --no-splash   # skip the EILIi load screen this run (`OF_NO_SPLASH=1` also works; uncheck Show startup animation to persist)
+# in the app, press ~ (or click the status strip) for the log console: filters, pause, export
 ```
 
 On Windows, build from a shell with the MSVC Build Tools environment loaded (see `AGENTS.md` section 9).
