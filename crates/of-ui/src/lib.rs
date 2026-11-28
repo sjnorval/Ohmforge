@@ -13,6 +13,8 @@ mod blink;
 mod boards;
 #[cfg(feature = "gui")]
 mod button;
+#[cfg_attr(not(feature = "gui"), allow(dead_code, unused_imports))]
+mod console;
 #[cfg(feature = "gui")]
 mod demo;
 #[cfg(feature = "gui")]
