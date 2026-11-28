@@ -17,6 +17,60 @@ pub struct AppPrefs {
     /// without changing this value.
     #[serde(default = "default_true")]
     pub show_startup_animation: bool,
+    /// The `~` log console.
+    #[serde(default)]
+    pub console: ConsolePrefs,
+}
+
+/// Log console settings (see [`crate::console::log::Settings`]).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConsolePrefs {
+    /// Ring buffer size (entries).
+    pub max_entries: usize,
+    /// Memory for state snapshots (MB), for time travel.
+    pub snapshot_budget_mb: u32,
+    /// Interval between state snapshots (ms).
+    pub snapshot_interval_ms: u32,
+    /// The least serious level recorded: trace, debug, info, warn or error.
+    pub capture_level: String,
+    /// Panel width (points).
+    pub width: u32,
+}
+
+impl Default for ConsolePrefs {
+    fn default() -> Self {
+        Self::from_settings(crate::console::log::Settings::default(), crate::console::DEFAULT_WIDTH)
+    }
+}
+
+impl ConsolePrefs {
+    /// Settings and panel width as stored.
+    pub fn from_settings(s: crate::console::log::Settings, width: f32) -> Self {
+        Self {
+            max_entries: s.max_entries,
+            snapshot_budget_mb: s.snapshot_budget_mb,
+            snapshot_interval_ms: s.snapshot_interval_ms,
+            capture_level: s.capture_level.name().to_owned(),
+            width: width.round().max(0.0) as u32,
+        }
+    }
+
+    /// The settings; an unknown level falls back to the default.
+    pub fn settings(&self) -> crate::console::log::Settings {
+        let d = crate::console::log::Settings::default();
+        crate::console::log::Settings {
+            max_entries: self.max_entries,
+            snapshot_budget_mb: self.snapshot_budget_mb,
+            snapshot_interval_ms: self.snapshot_interval_ms,
+            capture_level: crate::console::log::Level::from_name(&self.capture_level).unwrap_or(d.capture_level),
+        }
+    }
+
+    /// Panel width (points).
+    pub fn width(&self) -> f32 {
+        self.width as f32
+    }
 }
 
 fn default_true() -> bool {
@@ -27,6 +81,7 @@ impl Default for AppPrefs {
     fn default() -> Self {
         Self {
             show_startup_animation: true,
+            console: ConsolePrefs::default(),
         }
     }
 }
@@ -151,11 +206,44 @@ mod tests {
         let path = temp_prefs_path("roundtrip");
         let prefs = AppPrefs {
             show_startup_animation: false,
+            ..AppPrefs::default()
         };
         save_to(&path, &prefs).unwrap();
         assert_eq!(load_from(&path), prefs);
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("show_startup_animation"));
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(path.parent().unwrap());
+    }
+
+    #[test]
+    fn console_settings_round_trip_and_old_files_get_defaults() {
+        use crate::console::log::{Level, Settings};
+        let path = temp_prefs_path("console");
+        let s = Settings {
+            max_entries: 2_500,
+            snapshot_budget_mb: 128,
+            snapshot_interval_ms: 250,
+            capture_level: Level::Warn,
+        };
+        let prefs = AppPrefs {
+            console: ConsolePrefs::from_settings(s, 640.0),
+            ..AppPrefs::default()
+        };
+        save_to(&path, &prefs).unwrap();
+        let back = load_from(&path);
+        assert_eq!(back.console.settings(), s);
+        assert_eq!(back.console.width(), 640.0);
+        // A file from before the console has none of its keys.
+        fs::write(&path, "show_startup_animation = false\n").unwrap();
+        assert_eq!(load_from(&path).console.settings(), Settings::default());
+        // An unknown level keeps the rest.
+        fs::write(&path, "[console]\nmax_entries = 500\ncapture_level = \"loud\"\n").unwrap();
+        let c = load_from(&path).console.settings();
+        assert_eq!(
+            (c.max_entries, c.capture_level),
+            (500, Settings::default().capture_level)
+        );
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(path.parent().unwrap());
     }
@@ -186,7 +274,8 @@ mod tests {
         assert_eq!(
             load_from(&path),
             AppPrefs {
-                show_startup_animation: false
+                show_startup_animation: false,
+                ..AppPrefs::default()
             }
         );
         let _ = fs::remove_file(&path);
