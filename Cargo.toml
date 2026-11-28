@@ -43,7 +43,7 @@ faer = { version = "0.24", default-features = false, features = ["std", "sparse-
 egui = { version = "0.37", default-features = false }
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 # Native file dialogs for the log console's Save (MIT); gui-only, never on wasm.
-rfd = "0.18"
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 # Still-image decode for the load-screen frame pack (MIT OR Apache-2.0).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
